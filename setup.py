@@ -1,9 +1,13 @@
 """
-One-time setup: connects bank accounts via Plaid Link and saves access tokens to .env.
-Run this once per institution, and again whenever you want to add a new one.
+Manage Plaid bank connections: add, list, and remove institutions.
 
 Usage:
-    python setup.py
+    python setup.py              # add a new institution (default)
+    python setup.py list         # show all connected institutions
+    python setup.py remove SLUG  # cleanly disconnect an institution (e.g. american_express)
+
+Always use `remove` before losing your .env — otherwise the Item stays on Plaid's
+side and counts against your 100-item Development limit with no way to reclaim it.
 
 Prerequisites:
     1. Sign up at https://dashboard.plaid.com (free)
@@ -11,6 +15,7 @@ Prerequisites:
     3. Create a .env file with PLAID_CLIENT_ID and PLAID_SECRET (see .env.example)
 """
 
+import argparse
 import os
 import re
 import sys
@@ -20,7 +25,7 @@ import webbrowser
 from pathlib import Path
 
 from flask import Flask, jsonify, request, render_template_string
-from dotenv import load_dotenv, set_key
+from dotenv import load_dotenv, set_key, unset_key
 import plaid
 from plaid.api import plaid_api
 from plaid.model.link_token_create_request import LinkTokenCreateRequest
@@ -29,12 +34,11 @@ from plaid.model.products import Products
 from plaid.model.country_code import CountryCode
 from plaid.model.item_public_token_exchange_request import ItemPublicTokenExchangeRequest
 from plaid.model.item_get_request import ItemGetRequest
+from plaid.model.item_remove_request import ItemRemoveRequest
 from plaid.model.institutions_get_by_id_request import InstitutionsGetByIdRequest
 
 BASE_DIR = Path(__file__).parent
 ENV_FILE = BASE_DIR / '.env'
-
-load_dotenv(ENV_FILE)
 
 
 def get_client():
@@ -182,6 +186,7 @@ def exchange_token():
         env_key = f'PLAID_TOKEN_{slug.upper()}'
 
         set_key(str(ENV_FILE), env_key, access_token)
+        set_key(str(ENV_FILE), f'PLAID_ITEM_{slug.upper()}', item_resp.item.item_id)
         print(f'  Saved {env_key}')
 
         return jsonify({'name': institution_name, 'env_key': env_key, 'slug': slug})
@@ -196,15 +201,58 @@ def done():
     return jsonify({'status': 'ok'})
 
 
-def main():
-    global _plaid_client
+def cmd_list():
+    tokens = {k: v for k, v in os.environ.items() if k.startswith('PLAID_TOKEN_')}
+    if not tokens:
+        print('No institutions connected. Run: python setup.py')
+        return
+    print(f'{len(tokens)} institution(s) connected:\n')
+    for env_key in sorted(tokens):
+        slug = env_key.replace('PLAID_TOKEN_', '').lower()
+        item_id = os.getenv(f'PLAID_ITEM_{slug.upper()}', '(item_id not stored)')
+        print(f'  {slug}')
+        print(f'    env key : {env_key}')
+        print(f'    item_id : {item_id}')
+        print(f'    remove  : python setup.py remove {slug}')
+        print()
 
-    if not os.getenv('PLAID_CLIENT_ID') or not os.getenv('PLAID_SECRET'):
-        print('Error: PLAID_CLIENT_ID and PLAID_SECRET must be set in .env')
-        print('Get them at https://dashboard.plaid.com/developers/keys')
+
+def cmd_remove(slug, client):
+    env_key = f'PLAID_TOKEN_{slug.upper()}'
+    access_token = os.getenv(env_key)
+    if not access_token:
+        print(f'Error: {env_key} not found in .env')
+        print('Run `python setup.py list` to see connected institutions.')
         sys.exit(1)
 
-    _plaid_client = get_client()
+    try:
+        client.item_remove(ItemRemoveRequest(access_token=access_token))
+        print(f'  Plaid item removed successfully.')
+    except plaid.ApiException as e:
+        body = json.loads(e.body)
+        code = body.get('error_code', '')
+        if code in ('INVALID_ACCESS_TOKEN', 'ITEM_NOT_FOUND'):
+            print(f'  Item already removed on Plaid side (or token was invalid). Cleaning up .env anyway.')
+        else:
+            print(f'  Plaid error: {code} — {body.get("error_message", "")}')
+            sys.exit(1)
+
+    unset_key(str(ENV_FILE), env_key)
+    unset_key(str(ENV_FILE), f'PLAID_ITEM_{slug.upper()}')
+
+    cursors_path = BASE_DIR / 'cursors.json'
+    if cursors_path.exists():
+        cursors = json.loads(cursors_path.read_text())
+        cursors.pop(env_key, None)
+        cursors_path.write_text(json.dumps(cursors, indent=2))
+
+    print(f'  Removed {slug} from .env and cursors.json.')
+    print(f'  The institution will no longer sync.')
+
+
+def cmd_add(client):
+    global _plaid_client
+    _plaid_client = client
 
     url = 'http://localhost:8080'
     print(f'Starting setup server at {url}')
@@ -221,6 +269,41 @@ def main():
 
     _done.wait()
     print('\nSetup complete. Run: python sync.py')
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description='Manage Plaid bank connections.',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog='Examples:\n'
+               '  python setup.py              # add a new institution\n'
+               '  python setup.py list         # show connected institutions\n'
+               '  python setup.py remove american_express',
+    )
+    subparsers = parser.add_subparsers(dest='command')
+    subparsers.add_parser('add', help='Add a new institution (default)')
+    subparsers.add_parser('list', help='List connected institutions')
+    remove_parser = subparsers.add_parser('remove', help='Cleanly disconnect an institution')
+    remove_parser.add_argument('slug', help='Institution slug shown by `list` (e.g. american_express)')
+    args = parser.parse_args()
+
+    load_dotenv(ENV_FILE)
+
+    if args.command == 'list':
+        cmd_list()
+        return
+
+    if not os.getenv('PLAID_CLIENT_ID') or not os.getenv('PLAID_SECRET'):
+        print('Error: PLAID_CLIENT_ID and PLAID_SECRET must be set in .env')
+        print('Get them at https://dashboard.plaid.com/developers/keys')
+        sys.exit(1)
+
+    client = get_client()
+
+    if args.command == 'remove':
+        cmd_remove(args.slug, client)
+    else:
+        cmd_add(client)
 
 
 if __name__ == '__main__':

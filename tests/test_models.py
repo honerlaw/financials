@@ -73,13 +73,21 @@ def test_plaid_transaction_id_unique(app):
 
 
 def test_sync_log_creation(app):
-    from datetime import datetime
+    from datetime import datetime, timezone
     inst = make_inst()
     db.session.add(inst)
     db.session.flush()
-    log = SyncLog(institution_id=inst.id, started_at=datetime.utcnow(),
+    log = SyncLog(institution_id=inst.id, started_at=datetime.now(timezone.utc),
                   added_count=5, removed_count=1)
     db.session.add(log)
     db.session.commit()
     assert log.id is not None
     assert log.error is None
+
+
+def test_institution_slug_unique(app):
+    inst1 = Institution(name='Bank A', slug='same_slug', access_token='tok1', item_id='item1')
+    inst2 = Institution(name='Bank B', slug='same_slug', access_token='tok2', item_id='item2')
+    db.session.add_all([inst1, inst2])
+    with pytest.raises(IntegrityError):
+        db.session.commit()

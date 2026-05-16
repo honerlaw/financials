@@ -1,2 +1,22 @@
-{% if error %}<p>{{ error }}</p>{% endif %}
-<form method="post"><input type="password" name="password"><button>Sign in</button></form>
+{% extends 'base.html' %}
+{% block content %}
+<div class="row justify-content-center mt-5">
+  <div class="col-md-4 col-sm-6">
+    <div class="card shadow-sm">
+      <div class="card-body p-4">
+        <h5 class="card-title mb-4 fw-bold" style="color:#60a5fa">Financials</h5>
+        {% if error %}
+        <div class="alert alert-danger py-2 small">{{ error }}</div>
+        {% endif %}
+        <form method="post">
+          <div class="mb-3">
+            <input type="password" name="password" class="form-control"
+                   placeholder="Password" autofocus required>
+          </div>
+          <button type="submit" class="btn btn-primary w-100">Sign in</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

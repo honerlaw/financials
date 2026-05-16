@@ -1,6 +1,110 @@
-<!doctype html>
-<html><body><p>Settings</p>
-{% for inst in institutions %}
-<div>{{ inst.name }}</div>
-{% endfor %}
-</body></html>
+{% extends 'base.html' %}
+{% block content %}
+<div class="d-flex align-items-center gap-3 mb-4">
+  <a href="/" class="text-muted text-decoration-none small">← Transactions</a>
+  <h5 class="mb-0">Settings</h5>
+</div>
+
+<div class="card shadow-sm mb-4">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span class="fw-medium">Connected Institutions</span>
+    <button class="btn btn-primary btn-sm" onclick="connectInstitution()">+ Connect New</button>
+  </div>
+  <div class="list-group list-group-flush">
+    {% for inst in institutions %}
+    <div class="list-group-item d-flex align-items-center gap-3" id="inst-row-{{ inst.id }}">
+      <div class="flex-grow-1">
+        <div class="fw-medium">{{ inst.name }}</div>
+        <div class="text-muted small">
+          {% if inst.last_synced_at %}
+            Last synced {{ inst.last_synced_at.strftime('%b %d at %-I:%M %p') }}
+          {% else %}Never synced{% endif %}
+          · {{ inst.transactions | length }} transactions
+        </div>
+      </div>
+      {% if inst.status == 'login_required' %}
+        <span class="badge bg-warning text-dark">Login required</span>
+        <button class="btn btn-sm btn-outline-primary" onclick="connectInstitution()">Re-connect</button>
+      {% else %}
+        <span class="badge bg-success">Active</span>
+      {% endif %}
+      <button class="btn btn-sm btn-outline-danger"
+              onclick="removeInstitution({{ inst.id }}, '{{ inst.name | e }}')">
+        Disconnect
+      </button>
+    </div>
+    {% else %}
+    <div class="list-group-item text-muted text-center py-4">
+      No institutions connected. Click <strong>+ Connect New</strong> to get started.
+    </div>
+    {% endfor %}
+  </div>
+</div>
+
+<div class="card shadow-sm">
+  <div class="card-header fw-medium">Sync Log</div>
+  <div class="table-responsive">
+    <table class="table table-sm align-middle mb-0">
+      <thead class="table-light">
+        <tr><th>Time</th><th>Institution</th><th>Result</th><th class="text-end">New</th></tr>
+      </thead>
+      <tbody>
+      {% for log in sync_logs %}
+      <tr>
+        <td class="text-muted small text-nowrap">
+          {{ log.started_at.strftime('%b %d, %-I:%M %p') }}
+        </td>
+        <td>{{ log.institution.name if log.institution else 'All' }}</td>
+        <td>
+          {% if log.error %}
+            <span class="text-danger">✗ {{ log.error[:80] }}</span>
+          {% else %}
+            <span class="text-success">✓ OK</span>
+          {% endif %}
+        </td>
+        <td class="text-end">{{ log.added_count if not log.error else '—' }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="4" class="text-center text-muted py-3">No syncs yet.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.plaid.com/link/v2/stable/link-initialize.js"></script>
+<script>
+async function connectInstitution() {
+  const res = await fetch('/api/plaid/create_link_token', { method: 'POST' });
+  const { link_token, error } = await res.json();
+  if (error) { alert('Error: ' + error); return; }
+
+  Plaid.create({
+    token: link_token,
+    onSuccess: async (public_token) => {
+      const result = await fetch('/api/plaid/exchange_token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ public_token }),
+      });
+      const info = await result.json();
+      if (info.error) { alert('Error: ' + info.error); return; }
+      location.reload();
+    },
+    onExit: (err) => { if (err) alert(err.display_message || err.error_message || 'Cancelled'); },
+  }).open();
+}
+
+async function removeInstitution(id, name) {
+  if (!confirm(`Disconnect ${name}?\n\nThis will delete all its stored transactions.`)) return;
+  const res = await fetch(`/api/plaid/remove/${id}`, { method: 'POST' });
+  if (res.ok) {
+    document.getElementById(`inst-row-${id}`).remove();
+  } else {
+    alert('Failed to disconnect. Try again.');
+  }
+}
+</script>
+{% endblock %}

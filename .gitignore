@@ -1,0 +1,9 @@
+.env
+cursors.json
+data/
+__pycache__/
+*.pyc
+venv/
+.venv/
+*.egg-info/
+sync.log

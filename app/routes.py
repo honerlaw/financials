@@ -1,5 +1,5 @@
 from functools import wraps
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 import threading
 
 from flask import (
@@ -54,7 +54,6 @@ def index():
     if month:
         try:
             year, mon = int(month[:4]), int(month[5:7])
-            from datetime import date
             next_year = year + 1 if mon == 12 else year
             next_mon = 1 if mon == 12 else mon + 1
             query = query.filter(
@@ -115,7 +114,11 @@ def exchange_token():
             access_token=access_token, item_id=item_id,
         )
         db.session.add(inst)
-        db.session.commit()
+        try:
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+            return jsonify({'error': f'{name} is already connected'}), 400
         return jsonify({'name': name, 'id': inst.id})
     except Exception as e:
         return jsonify({'error': str(e)}), 400
@@ -125,7 +128,9 @@ def exchange_token():
 @login_required
 def remove_institution(institution_id):
     from app.plaid_client import PlaidClient
-    inst = Institution.query.get_or_404(institution_id)
+    inst = db.session.get(Institution, institution_id)
+    if inst is None:
+        return jsonify({'error': 'Institution not found'}), 404
     try:
         PlaidClient(current_app.config).remove_item(inst.access_token)
     except Exception:

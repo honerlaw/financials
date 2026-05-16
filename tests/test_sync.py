@@ -81,7 +81,7 @@ def test_sync_all_institutions_happy_path(MockPlaidClient, app):
 
         sync_all_institutions()
 
-        inst = Institution.query.get(inst_id)
+        inst = db.session.get(Institution, inst_id)
         assert inst.plaid_cursor == 'new-cursor'
         assert inst.last_synced_at is not None
         assert inst.status == 'active'
@@ -106,7 +106,7 @@ def test_sync_sets_login_required_on_error(MockPlaidClient, app):
 
         sync_all_institutions()
 
-        inst = Institution.query.get(inst_id)
+        inst = db.session.get(Institution, inst_id)
         assert inst.status == 'login_required'
         log = SyncLog.query.first()
         assert log.error is not None

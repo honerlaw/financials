@@ -47,6 +47,10 @@ class Transaction(db.Model):
         db.DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False
     )
 
+    __table_args__ = (
+        db.Index('ix_transactions_date', 'date'),
+    )
+
 
 class SyncLog(db.Model):
     __tablename__ = 'sync_logs'

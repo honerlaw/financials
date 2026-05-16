@@ -23,7 +23,11 @@ def slugify(name):
 class PlaidClient:
     def __init__(self, config):
         env = config.get('PLAID_ENV', 'development')
-        host = plaid.Environment.Development if env == 'development' else plaid.Environment.Sandbox
+        env_map = {
+            'development': plaid.Environment.Sandbox,
+            'production': plaid.Environment.Production,
+        }
+        host = env_map.get(env, plaid.Environment.Sandbox)
         configuration = plaid.Configuration(
             host=host,
             api_key={

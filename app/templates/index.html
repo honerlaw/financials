@@ -1,2 +1,6 @@
 <!doctype html>
-<html><body><p>Transactions</p></body></html>
+<html><body><p>Transactions</p>
+{% for txn in transactions.items %}
+<div>{{ txn.description }}</div>
+{% endfor %}
+</body></html>

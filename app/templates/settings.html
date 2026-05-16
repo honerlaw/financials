@@ -1,2 +1,6 @@
 <!doctype html>
-<html><body><p>Settings</p></body></html>
+<html><body><p>Settings</p>
+{% for inst in institutions %}
+<div>{{ inst.name }}</div>
+{% endfor %}
+</body></html>

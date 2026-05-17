@@ -30,3 +30,12 @@ def test_openai_schemas_includes_current_date():
     names = [s['function']['name'] for s in schemas]
     assert 'current_date' in names
     assert 'get_date_range' in names
+
+
+def test_list_institutions(app, seed_data):
+    with app.app_context():
+        result = tools.dispatch('list_institutions', {})
+    names = {i['name'] for i in result['institutions']}
+    assert names == {'Truist', 'Amex'}
+    for i in result['institutions']:
+        assert {'id', 'name', 'slug', 'status'} <= set(i.keys())

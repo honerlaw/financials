@@ -39,6 +39,17 @@ def get_date_range() -> dict:
     }
 
 
+def list_institutions() -> dict:
+    from app.models import Institution
+    rows = db.session.query(Institution).order_by(Institution.name).all()
+    return {
+        'institutions': [
+            {'id': r.id, 'name': r.name, 'slug': r.slug, 'status': r.status}
+            for r in rows
+        ]
+    }
+
+
 # ── Registry ─────────────────────────────────────────────────────────────────
 
 @dataclass(frozen=True)
@@ -61,6 +72,12 @@ TOOLS: dict[str, Tool] = {
         description='Earliest and latest transaction dates available in the database.',
         args_model=NoArgs,
         func=lambda: get_date_range(),
+    ),
+    'list_institutions': Tool(
+        name='list_institutions',
+        description='Connected bank institutions (id, name, slug, status).',
+        args_model=NoArgs,
+        func=lambda: list_institutions(),
     ),
 }
 

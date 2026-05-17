@@ -30,9 +30,9 @@ def create_app(config=None):
         CHAT_MODELS=[
             m.strip() for m in os.getenv(
                 'CHAT_MODELS',
-                'anthropic/claude-sonnet-4.5,anthropic/claude-opus-4.1,'
-                'openai/gpt-5,openai/gpt-4o,'
-                'google/gemini-2.5-pro,x-ai/grok-4',
+                'anthropic/claude-opus-4.7,anthropic/claude-sonnet-4.6,'
+                'openai/gpt-5.5-pro,openai/gpt-5.5,'
+                'google/gemini-2.5-pro,x-ai/grok-4.3',
             ).split(',') if m.strip()
         ],
     )

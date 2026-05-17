@@ -39,3 +39,42 @@ def test_list_institutions(app, seed_data):
     assert names == {'Truist', 'Amex'}
     for i in result['institutions']:
         assert {'id', 'name', 'slug', 'status'} <= set(i.keys())
+
+
+def test_query_transactions_date_range(app, seed_data):
+    with app.app_context():
+        result = tools.dispatch('query_transactions', {
+            'start_date': '2026-02-01', 'end_date': '2026-02-28',
+        })
+    assert result['count'] == 3
+    assert result['truncated'] is False
+    dates = sorted(r['date'] for r in result['rows'])
+    assert dates == ['2026-02-05', '2026-02-14', '2026-02-22']
+
+
+def test_query_transactions_merchant_filter(app, seed_data):
+    with app.app_context():
+        result = tools.dispatch('query_transactions', {
+            'start_date': '2026-01-01', 'end_date': '2026-12-31',
+            'merchant_contains': 'whole',
+        })
+    assert result['count'] == 3
+    assert all('whole' in r['description'].lower() for r in result['rows'])
+
+
+def test_query_transactions_truncates(app, seed_data):
+    with app.app_context():
+        result = tools.dispatch('query_transactions', {
+            'start_date': '2026-01-01', 'end_date': '2026-12-31',
+            'limit': 2,
+        })
+    assert result['count'] == 2
+    assert result['truncated'] is True
+
+
+def test_query_transactions_invalid_date(app, seed_data):
+    with app.app_context():
+        result = tools.dispatch('query_transactions', {
+            'start_date': 'not-a-date', 'end_date': '2026-03-31',
+        })
+    assert 'error' in result

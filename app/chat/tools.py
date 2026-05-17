@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Any, Callable
 
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, Field, ValidationError
 from sqlalchemy import func
 
 from app.models import db, Transaction
@@ -20,6 +20,20 @@ from app.models import db, Transaction
 
 class NoArgs(BaseModel):
     pass
+
+
+class QueryTransactionsArgs(BaseModel):
+    start_date: date = Field(description='Inclusive start date YYYY-MM-DD')
+    end_date: date = Field(description='Inclusive end date YYYY-MM-DD')
+    institution_id: int | None = Field(default=None)
+    category: str | None = Field(default=None)
+    merchant_contains: str | None = Field(
+        default=None,
+        description='Case-insensitive substring match against description or merchant_name',
+    )
+    min_amount: float | None = Field(default=None)
+    max_amount: float | None = Field(default=None)
+    limit: int = Field(default=200, ge=1, le=200)
 
 
 # ── Tool implementations ─────────────────────────────────────────────────────
@@ -47,6 +61,60 @@ def list_institutions() -> dict:
             {'id': r.id, 'name': r.name, 'slug': r.slug, 'status': r.status}
             for r in rows
         ]
+    }
+
+
+def query_transactions(
+    start_date: date, end_date: date,
+    institution_id: int | None = None,
+    category: str | None = None,
+    merchant_contains: str | None = None,
+    min_amount: float | None = None,
+    max_amount: float | None = None,
+    limit: int = 200,
+) -> dict:
+    from flask import current_app
+    cap = min(limit, current_app.config.get('CHAT_QUERY_ROW_LIMIT', 200))
+
+    q = db.session.query(Transaction).filter(
+        Transaction.removed.is_(False),
+        Transaction.date >= start_date,
+        Transaction.date <= end_date,
+    )
+    if institution_id is not None:
+        q = q.filter(Transaction.institution_id == institution_id)
+    if category is not None:
+        q = q.filter(Transaction.category == category)
+    if merchant_contains is not None:
+        like = f'%{merchant_contains.lower()}%'
+        q = q.filter(
+            func.lower(Transaction.description).like(like)
+            | func.lower(Transaction.merchant_name).like(like)
+        )
+    if min_amount is not None:
+        q = q.filter(Transaction.amount >= min_amount)
+    if max_amount is not None:
+        q = q.filter(Transaction.amount <= max_amount)
+
+    q = q.order_by(Transaction.date.desc(), Transaction.id.desc())
+    rows = q.limit(cap + 1).all()
+    truncated = len(rows) > cap
+    rows = rows[:cap]
+    return {
+        'rows': [
+            {
+                'id': r.id,
+                'date': r.date.isoformat(),
+                'description': r.description,
+                'merchant_name': r.merchant_name,
+                'amount': float(r.amount),
+                'category': r.category,
+                'institution_id': r.institution_id,
+            }
+            for r in rows
+        ],
+        'count': len(rows),
+        'truncated': truncated,
     }
 
 
@@ -78,6 +146,15 @@ TOOLS: dict[str, Tool] = {
         description='Connected bank institutions (id, name, slug, status).',
         args_model=NoArgs,
         func=lambda: list_institutions(),
+    ),
+    'query_transactions': Tool(
+        name='query_transactions',
+        description=(
+            'Filtered list of transactions. Returns up to limit rows '
+            '(hard cap enforced server-side) and a truncated flag.'
+        ),
+        args_model=QueryTransactionsArgs,
+        func=query_transactions,
     ),
 }
 

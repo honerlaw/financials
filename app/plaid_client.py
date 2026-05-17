@@ -10,6 +10,7 @@ from plaid.model.item_public_token_exchange_request import ItemPublicTokenExchan
 from plaid.model.item_get_request import ItemGetRequest
 from plaid.model.item_remove_request import ItemRemoveRequest
 from plaid.model.institutions_get_by_id_request import InstitutionsGetByIdRequest
+from plaid.model.link_token_transactions import LinkTokenTransactions
 from plaid.model.transactions_sync_request import TransactionsSyncRequest
 from plaid.model.transactions_sync_request_options import TransactionsSyncRequestOptions
 
@@ -45,6 +46,7 @@ class PlaidClient:
                 country_codes=[CountryCode('US')],
                 language='en',
                 user=LinkTokenCreateRequestUser(client_user_id='local-user'),
+                transactions=LinkTokenTransactions(days_requested=730),
             )
         )
         return response.link_token

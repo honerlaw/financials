@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
-from typing import Any, Callable
+from typing import Any, Callable, Literal
 
 from pydantic import BaseModel, Field, ValidationError
 from sqlalchemy import func
@@ -34,6 +34,19 @@ class QueryTransactionsArgs(BaseModel):
     min_amount: float | None = Field(default=None)
     max_amount: float | None = Field(default=None)
     limit: int = Field(default=200, ge=1, le=200)
+
+
+class AggregateTransactionsArgs(BaseModel):
+    start_date: date = Field(description='Inclusive start date YYYY-MM-DD')
+    end_date: date = Field(description='Inclusive end date YYYY-MM-DD')
+    group_by: Literal['month', 'category', 'merchant', 'institution']
+    metric: Literal['sum', 'abs_sum', 'count', 'avg', 'net']
+    institution_id: int | None = Field(default=None)
+    category: str | None = Field(default=None)
+    merchant_contains: str | None = Field(
+        default=None,
+        description='Case-insensitive substring match against description or merchant_name',
+    )
 
 
 # ── Tool implementations ─────────────────────────────────────────────────────
@@ -118,6 +131,65 @@ def query_transactions(
     }
 
 
+def aggregate_transactions(
+    start_date: date, end_date: date,
+    group_by: str, metric: str,
+    institution_id: int | None = None,
+    category: str | None = None,
+    merchant_contains: str | None = None,
+) -> dict:
+    from app.models import Institution
+
+    q = db.session.query(Transaction).filter(
+        Transaction.removed.is_(False),
+        Transaction.date >= start_date,
+        Transaction.date <= end_date,
+    )
+    if institution_id is not None:
+        q = q.filter(Transaction.institution_id == institution_id)
+    if category is not None:
+        q = q.filter(Transaction.category == category)
+    if merchant_contains is not None:
+        like = f'%{merchant_contains.lower()}%'
+        q = q.filter(
+            func.lower(Transaction.description).like(like)
+            | func.lower(Transaction.merchant_name).like(like)
+        )
+
+    inst_names = {i.id: i.name for i in db.session.query(Institution).all()}
+
+    buckets: dict[Any, list[float]] = {}
+    for tx in q.all():
+        amt = float(tx.amount)
+        if group_by == 'month':
+            key = tx.date.strftime('%Y-%m')
+        elif group_by == 'category':
+            key = tx.category or '(uncategorized)'
+        elif group_by == 'merchant':
+            key = tx.merchant_name or tx.description
+        elif group_by == 'institution':
+            key = inst_names.get(tx.institution_id, str(tx.institution_id))
+        # group_by already constrained by Pydantic Literal
+        buckets.setdefault(key, []).append(amt)
+
+    groups = []
+    for key, amounts in buckets.items():
+        if metric == 'sum':
+            value = sum(amounts)
+        elif metric == 'abs_sum':
+            value = sum(abs(a) for a in amounts if a < 0)
+        elif metric == 'count':
+            value = len(amounts)
+        elif metric == 'avg':
+            value = sum(amounts) / len(amounts) if amounts else 0
+        elif metric == 'net':
+            value = sum(amounts)
+        groups.append({'key': key, 'value': round(value, 2)})
+
+    groups.sort(key=lambda g: g['key'] if group_by == 'month' else -abs(g['value']))
+    return {'groups': groups}
+
+
 # ── Registry ─────────────────────────────────────────────────────────────────
 
 @dataclass(frozen=True)
@@ -155,6 +227,17 @@ TOOLS: dict[str, Tool] = {
         ),
         args_model=QueryTransactionsArgs,
         func=query_transactions,
+    ),
+    'aggregate_transactions': Tool(
+        name='aggregate_transactions',
+        description=(
+            'Aggregate transactions over a date range. '
+            'group_by: month|category|merchant|institution. '
+            'metric: sum (signed), abs_sum (total spend as positive), '
+            'count, avg, net (= sum).'
+        ),
+        args_model=AggregateTransactionsArgs,
+        func=aggregate_transactions,
     ),
 }
 

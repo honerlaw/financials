@@ -78,3 +78,50 @@ def test_query_transactions_invalid_date(app, seed_data):
             'start_date': 'not-a-date', 'end_date': '2026-03-31',
         })
     assert 'error' in result
+
+
+def test_aggregate_by_month_abs_sum(app, seed_data):
+    with app.app_context():
+        result = tools.dispatch('aggregate_transactions', {
+            'start_date': '2026-01-01', 'end_date': '2026-03-31',
+            'group_by': 'month', 'metric': 'abs_sum',
+        })
+    groups = {g['key']: g['value'] for g in result['groups']}
+    # Jan: 15.99 + 82.40 + 34.99 = 133.38
+    # Feb: 15.99 + 91.10 + 129.00 = 236.09
+    # Mar: 15.99 + 77.05 + 28.75 = 121.79 (excluding payroll +4200)
+    assert groups == {'2026-01': 133.38, '2026-02': 236.09, '2026-03': 121.79}
+
+
+def test_aggregate_by_merchant_count(app, seed_data):
+    with app.app_context():
+        result = tools.dispatch('aggregate_transactions', {
+            'start_date': '2026-01-01', 'end_date': '2026-03-31',
+            'group_by': 'merchant', 'metric': 'count',
+        })
+    groups = {g['key']: g['value'] for g in result['groups']}
+    assert groups['Netflix'] == 3
+    assert groups['Whole Foods'] == 3
+    assert groups['Amazon'] == 2
+
+
+def test_aggregate_by_institution_net(app, seed_data):
+    with app.app_context():
+        result = tools.dispatch('aggregate_transactions', {
+            'start_date': '2026-01-01', 'end_date': '2026-03-31',
+            'group_by': 'institution', 'metric': 'net',
+        })
+    groups = {g['key']: g['value'] for g in result['groups']}
+    # Truist: -(15.99*3) - (82.40+91.10+77.05) = -47.97 - 250.55 = -298.52
+    # Amex:  -34.99 - 129.00 + 4200.00 - 28.75 = 4007.26
+    assert groups['Truist'] == -298.52
+    assert groups['Amex'] == 4007.26
+
+
+def test_aggregate_invalid_group_by(app, seed_data):
+    with app.app_context():
+        result = tools.dispatch('aggregate_transactions', {
+            'start_date': '2026-01-01', 'end_date': '2026-03-31',
+            'group_by': 'galaxy', 'metric': 'sum',
+        })
+    assert 'error' in result

@@ -49,6 +49,12 @@ class AggregateTransactionsArgs(BaseModel):
     )
 
 
+class FindRecurringArgs(BaseModel):
+    lookback_months: int = Field(default=6, ge=1, le=24)
+    min_occurrences: int = Field(default=2, ge=2)
+    amount_tolerance: float = Field(default=0.10, ge=0.0, le=1.0)
+
+
 # ── Tool implementations ─────────────────────────────────────────────────────
 
 def current_date() -> dict:
@@ -190,6 +196,58 @@ def aggregate_transactions(
     return {'groups': groups}
 
 
+def find_recurring(
+    lookback_months: int = 6,
+    min_occurrences: int = 2,
+    amount_tolerance: float = 0.10,
+) -> dict:
+    from datetime import timedelta
+    from statistics import median, stdev
+
+    end = date.today()
+    start = end - timedelta(days=lookback_months * 31)
+
+    rows = db.session.query(Transaction).filter(
+        Transaction.removed.is_(False),
+        Transaction.date >= start,
+        Transaction.date <= end,
+    ).all()
+
+    by_merchant: dict[str, list[Transaction]] = {}
+    for tx in rows:
+        key = tx.merchant_name or tx.description
+        by_merchant.setdefault(key, []).append(tx)
+
+    candidates = []
+    for merchant, txs in by_merchant.items():
+        months = {(t.date.year, t.date.month) for t in txs}
+        if len(months) < min_occurrences:
+            continue
+        amounts = [float(t.amount) for t in txs]
+        abs_amounts = [abs(a) for a in amounts]
+        mean = sum(abs_amounts) / len(abs_amounts)
+        if mean == 0:
+            continue
+        # Coefficient of variation: stdev / mean
+        if len(abs_amounts) > 1:
+            cv = stdev(abs_amounts) / mean
+        else:
+            cv = 0.0
+        if cv > amount_tolerance:
+            continue
+        med = median(amounts)
+        candidates.append({
+            'merchant': merchant,
+            'typical_amount': round(med, 2),
+            'occurrences': len(months),
+            'months': sorted(f'{y:04d}-{m:02d}' for y, m in months),
+            'institution_ids': sorted({t.institution_id for t in txs}),
+        })
+
+    candidates.sort(key=lambda c: abs(c['typical_amount']), reverse=True)
+    return {'candidates': candidates}
+
+
 # ── Registry ─────────────────────────────────────────────────────────────────
 
 @dataclass(frozen=True)
@@ -238,6 +296,17 @@ TOOLS: dict[str, Tool] = {
         ),
         args_model=AggregateTransactionsArgs,
         func=aggregate_transactions,
+    ),
+    'find_recurring': Tool(
+        name='find_recurring',
+        description=(
+            'Find recurring transactions: same merchant appearing across N+ '
+            'distinct calendar months with amounts within the tolerance of '
+            'the median. Returns candidates for the LLM to classify into '
+            'bills/subscriptions/transfers.'
+        ),
+        args_model=FindRecurringArgs,
+        func=find_recurring,
     ),
 }
 

@@ -1,5 +1,7 @@
 from datetime import date
 
+from freezegun import freeze_time
+
 from app.chat import tools
 
 
@@ -125,3 +127,36 @@ def test_aggregate_invalid_group_by(app, seed_data):
             'group_by': 'galaxy', 'metric': 'sum',
         })
     assert 'error' in result
+
+
+@freeze_time('2026-05-17')
+def test_find_recurring(app, seed_data):
+    with app.app_context():
+        result = tools.dispatch('find_recurring', {
+            'lookback_months': 6,
+            'min_occurrences': 3,
+            'amount_tolerance': 0.10,
+        })
+    merchants = {c['merchant']: c for c in result['candidates']}
+    assert 'Netflix' in merchants
+    assert merchants['Netflix']['occurrences'] == 3
+    assert merchants['Netflix']['typical_amount'] == -15.99
+    assert 'Whole Foods' in merchants
+    assert merchants['Whole Foods']['occurrences'] == 3
+    # Amazon has 2 occurrences, below threshold of 3
+    assert 'Amazon' not in merchants
+
+
+@freeze_time('2026-05-17')
+def test_find_recurring_amount_tolerance(app, seed_data):
+    # Whole Foods amounts: 82.40, 91.10, 77.05. Spread is 91.10/77.05 = 1.182 > 1.10.
+    # With tight tolerance 0.05 these are too spread to count as recurring.
+    with app.app_context():
+        result = tools.dispatch('find_recurring', {
+            'lookback_months': 6,
+            'min_occurrences': 3,
+            'amount_tolerance': 0.05,
+        })
+    merchants = {c['merchant']: c for c in result['candidates']}
+    assert 'Netflix' in merchants
+    assert 'Whole Foods' not in merchants

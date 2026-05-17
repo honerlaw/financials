@@ -54,6 +54,8 @@
     busy = true;
     render();
 
+    const historyLengthBefore = history.length;
+
     const userBubble = bubble('user');
     userBubble.textContent = text;
     history.push({ role: 'user', content: text });
@@ -62,6 +64,7 @@
     let assistantText = '';
     const toolChips = new Map(); // id -> { el, name }
     const pendingToolCalls = []; // captured for history
+    const toolResults = [];     // captured for history
 
     try {
       const resp = await fetch('/api/chat/stream', {
@@ -84,7 +87,7 @@
           buf = buf.slice(idx + 2);
           const ev = parseFrame(frame);
           if (!ev) continue;
-          handleEvent(ev, assistantBubble, toolChips, pendingToolCalls, (t) => {
+          handleEvent(ev, assistantBubble, toolChips, pendingToolCalls, toolResults, (t) => {
             assistantText += t;
             renderMarkdown(assistantBubble, assistantText);
           });
@@ -96,14 +99,20 @@
       const retry = document.createElement('button');
       retry.className = 'btn btn-sm btn-outline-danger ms-2';
       retry.textContent = 'Retry';
-      retry.onclick = () => { history.pop(); send(text); };
+      retry.onclick = () => {
+        history.splice(historyLengthBefore);
+        send(text);
+      };
       errBubble.appendChild(retry);
     } finally {
       // Persist the assistant turn in history so subsequent turns include context.
       const assistantMsg = { role: 'assistant' };
       if (assistantText) assistantMsg.content = assistantText;
       if (pendingToolCalls.length) assistantMsg.tool_calls = pendingToolCalls;
-      if (assistantText || pendingToolCalls.length) history.push(assistantMsg);
+      if (assistantText || pendingToolCalls.length) {
+        history.push(assistantMsg);
+        for (const tr of toolResults) history.push(tr);
+      }
       busy = false;
       render();
     }
@@ -121,7 +130,7 @@
     catch { return { event, data: {} }; }
   }
 
-  function handleEvent(ev, assistantBubble, toolChips, pendingToolCalls, appendText) {
+  function handleEvent(ev, assistantBubble, toolChips, pendingToolCalls, toolResults, appendText) {
     if (ev.event === 'text') {
       appendText(ev.data.delta || '');
     } else if (ev.event === 'tool_start') {
@@ -135,6 +144,11 @@
         function: { name: ev.data.name, arguments: JSON.stringify(ev.data.args || {}) },
       });
     } else if (ev.event === 'tool_result') {
+      toolResults.push({
+        role: 'tool',
+        tool_call_id: ev.data.id,
+        content: JSON.stringify(ev.data.result),
+      });
       const entry = toolChips.get(ev.data.id);
       if (entry) {
         const summary = describeResult(ev.data.result);

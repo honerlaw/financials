@@ -75,6 +75,11 @@ def test_single_tool_call_then_answer(app):
     assert second_msgs[-1]['role'] == 'tool'
     assert second_msgs[-1]['tool_call_id'] == 'call_a'
 
+    # The assistant message with tool_calls must precede the tool result
+    assert second_msgs[-2]['role'] == 'assistant'
+    assert second_msgs[-2]['tool_calls'][0]['id'] == 'call_a'
+    assert second_msgs[-2]['tool_calls'][0]['function']['name'] == 'current_date'
+
 
 def test_iteration_cap(app):
     forever = [
@@ -113,3 +118,37 @@ def test_invalid_tool_args_surfaced_to_llm(app):
         ))
     tool_result = [e for n, e in events if n == 'tool_result'][0]
     assert 'error' in tool_result['result']
+
+
+def test_orchestrator_accepts_prior_tool_call_history(app):
+    """A second-turn conversation includes assistant tool_calls + tool result
+    from the prior turn, plus a new user follow-up. The orchestrator must
+    pass this through unchanged and run a normal new turn."""
+    fake = FakeClient([[
+        {'type': 'text_delta', 'text': 'understood'},
+        {'type': 'stop', 'reason': 'stop'},
+    ]])
+    prior_messages = [
+        {'role': 'user', 'content': 'what day is it'},
+        {'role': 'assistant', 'tool_calls': [{
+            'id': 'call_a', 'type': 'function',
+            'function': {'name': 'current_date', 'arguments': '{}'},
+        }]},
+        {'role': 'tool', 'tool_call_id': 'call_a',
+         'content': '{"date": "2026-05-17"}'},
+        {'role': 'user', 'content': 'what about tomorrow?'},
+    ]
+    with app.app_context():
+        events = list(run(
+            messages=prior_messages,
+            client=fake, max_iterations=5,
+        ))
+
+    # Orchestrator ran one turn, no tool calls this time
+    names = [name for name, _ in events]
+    assert names == ['text', 'done']
+
+    # The full prior history was forwarded to the LLM (after the system prompt)
+    sent_msgs = fake.calls[0]['messages']
+    assert sent_msgs[0]['role'] == 'system'
+    assert sent_msgs[1:] == prior_messages

@@ -1,4 +1,33 @@
 {% extends "base.html" %}
 {% block content %}
-<div>chat</div>
+<div class="row justify-content-center">
+  <div class="col-lg-9 col-xl-8">
+    {% if not api_key_set %}
+      <div class="alert alert-warning">
+        Set <code>OPENROUTER_API_KEY</code> in the environment to enable chat.
+      </div>
+    {% endif %}
+
+    <div class="card shadow-sm">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <span>Chat</span>
+        <small class="text-secondary">{{ model }}</small>
+      </div>
+      <div id="messages" class="card-body" style="min-height: 60vh; max-height: 70vh; overflow-y: auto;"></div>
+      <div class="card-footer">
+        <div id="chips" class="mb-2 d-flex flex-wrap gap-2"></div>
+        <form id="chat-form" class="d-flex gap-2">
+          <input id="chat-input" class="form-control" placeholder="Ask about your finances…" autocomplete="off" {% if not api_key_set %}disabled{% endif %}>
+          <button class="btn btn-primary" type="submit" {% if not api_key_set %}disabled{% endif %}>Send</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<link rel="stylesheet" href="{{ url_for('static', filename='chat.css') }}">
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<script src="{{ url_for('static', filename='chat.js') }}"></script>
 {% endblock %}

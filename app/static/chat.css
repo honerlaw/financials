@@ -1,0 +1,9 @@
+.msg { padding: 0.5rem 0.75rem; border-radius: 0.5rem; margin-bottom: 0.5rem; max-width: 90%; }
+.msg.user { background: #e0f2fe; margin-left: auto; }
+.msg.assistant { background: #f1f5f9; }
+.msg.error { background: #fee2e2; color: #991b1b; }
+.tool-chip { font-family: ui-monospace, monospace; font-size: 0.85rem;
+             background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 0.25rem;
+             padding: 0.25rem 0.5rem; margin: 0.25rem 0; display: inline-block; }
+.tool-chip pre { margin: 0.25rem 0 0 0; max-height: 14rem; overflow: auto; }
+.chip-btn { font-size: 0.85rem; }

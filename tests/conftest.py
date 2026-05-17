@@ -13,6 +13,10 @@ def app():
         'PLAID_CLIENT_ID': 'test-client-id',
         'PLAID_SECRET': 'test-secret',
         'PLAID_ENV': 'sandbox',
+        'OPENROUTER_API_KEY': 'test-key',
+        'OPENROUTER_MODEL': 'test-model',
+        'CHAT_MAX_ITERATIONS': 5,
+        'CHAT_QUERY_ROW_LIMIT': 200,
     }
     app = create_app(test_config)
     with app.app_context():

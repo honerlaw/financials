@@ -22,6 +22,11 @@ def create_app(config=None):
         PLAID_CLIENT_ID=os.getenv('PLAID_CLIENT_ID', ''),
         PLAID_SECRET=os.getenv('PLAID_SECRET', ''),
         PLAID_ENV=os.getenv('PLAID_ENV', 'development'),
+        OPENROUTER_API_KEY=os.getenv('OPENROUTER_API_KEY', ''),
+        OPENROUTER_MODEL=os.getenv('OPENROUTER_MODEL', 'anthropic/claude-sonnet-4'),
+        OPENROUTER_BASE_URL=os.getenv('OPENROUTER_BASE_URL', 'https://openrouter.ai/api/v1'),
+        CHAT_MAX_ITERATIONS=int(os.getenv('CHAT_MAX_ITERATIONS', '10')),
+        CHAT_QUERY_ROW_LIMIT=int(os.getenv('CHAT_QUERY_ROW_LIMIT', '200')),
     )
 
     if config:
@@ -33,5 +38,8 @@ def create_app(config=None):
     from . import models  # noqa: F401 — ensure models registered for migrations
     from .routes import bp
     app.register_blueprint(bp)
+
+    from app.chat.routes import bp as chat_bp
+    app.register_blueprint(chat_bp)
 
     return app

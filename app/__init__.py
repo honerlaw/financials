@@ -16,7 +16,7 @@ def create_app(config=None):
 
     app.config.update(
         SQLALCHEMY_DATABASE_URI=db_url,
-        SECRET_KEY=os.getenv('SECRET_KEY', 'dev-change-me'),
+        SECRET_KEY=os.getenv('SECRET_KEY', ''),
         APP_PASSWORD=os.getenv('APP_PASSWORD', ''),
         SQLALCHEMY_TRACK_MODIFICATIONS=False,
         PLAID_CLIENT_ID=os.getenv('PLAID_CLIENT_ID', ''),
@@ -31,6 +31,14 @@ def create_app(config=None):
 
     if config:
         app.config.update(config)
+
+    if not app.config['SECRET_KEY']:
+        raise RuntimeError(
+            'SECRET_KEY must be set. Generate one with: '
+            "python -c 'import secrets; print(secrets.token_hex(32))'"
+        )
+    if not app.config['APP_PASSWORD']:
+        raise RuntimeError('APP_PASSWORD must be set (cannot be empty).')
 
     db.init_app(app)
     migrate.init_app(app, db)

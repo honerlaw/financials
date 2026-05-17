@@ -39,4 +39,7 @@ def create_app(config=None):
     from .routes import bp
     app.register_blueprint(bp)
 
+    from app.chat.routes import bp as chat_bp
+    app.register_blueprint(chat_bp)
+
     return app

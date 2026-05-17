@@ -1,26 +1,28 @@
 {% extends "base.html" %}
+{% block body_class %}chat-page{% endblock %}
+{% block container_class %}chat-container{% endblock %}
 {% block content %}
-<div class="row justify-content-center">
-  <div class="col-lg-9 col-xl-8">
-    {% if not api_key_set %}
-      <div class="alert alert-warning">
-        Set <code>OPENROUTER_API_KEY</code> in the environment to enable chat.
-      </div>
-    {% endif %}
-
-    <div class="card shadow-sm">
-      <div class="card-header d-flex justify-content-between align-items-center">
-        <span>Chat</span>
-        <small class="text-secondary">{{ model }}</small>
-      </div>
-      <div id="messages" class="card-body" style="min-height: 60vh; max-height: 70vh; overflow-y: auto;"></div>
-      <div class="card-footer">
-        <div id="chips" class="mb-2 d-flex flex-wrap gap-2"></div>
-        <form id="chat-form" class="d-flex gap-2">
-          <input id="chat-input" class="form-control" placeholder="Ask about your finances…" autocomplete="off" {% if not api_key_set %}disabled{% endif %}>
-          <button class="btn btn-primary" type="submit" {% if not api_key_set %}disabled{% endif %}>Send</button>
-        </form>
-      </div>
+<div class="chat-shell">
+  {% if not api_key_set %}
+    <div class="alert alert-warning rounded-0 mb-0 border-0 border-bottom">
+      Set <code>OPENROUTER_API_KEY</code> in the environment to enable chat.
+    </div>
+  {% endif %}
+  <div class="chat-header">
+    <span class="fw-semibold">Chat</span>
+    <div class="d-flex align-items-center gap-3">
+      <small class="text-secondary">{{ model }}</small>
+      <button id="clear-chat" class="btn btn-sm btn-outline-secondary" type="button">Clear</button>
+    </div>
+  </div>
+  <div id="messages" class="chat-messages"></div>
+  <div class="chat-footer">
+    <div class="chat-inner">
+      <div id="chips" class="d-flex flex-wrap gap-2 mb-2"></div>
+      <form id="chat-form" class="d-flex gap-2">
+        <input id="chat-input" class="form-control" placeholder="Ask about your finances…" autocomplete="off" {% if not api_key_set %}disabled{% endif %}>
+        <button class="btn btn-primary" type="submit" {% if not api_key_set %}disabled{% endif %}>Send</button>
+      </form>
     </div>
   </div>
 </div>

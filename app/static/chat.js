@@ -22,6 +22,7 @@
   const chipsEl = document.getElementById('chips');
   const form = document.getElementById('chat-form');
   const input = document.getElementById('chat-input');
+  const clearBtn = document.getElementById('clear-chat');
   const history = []; // {role, content, tool_calls?, tool_call_id?}
   let busy = false;
 
@@ -185,6 +186,16 @@
     input.value = '';
     send(text);
   });
+
+  if (clearBtn) {
+    clearBtn.addEventListener('click', () => {
+      if (busy) return;
+      if (history.length && !confirm('Clear this conversation?')) return;
+      history.length = 0;
+      messagesEl.innerHTML = '';
+      input.focus();
+    });
+  }
 
   render();
 })();

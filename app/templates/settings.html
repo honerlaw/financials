@@ -8,7 +8,12 @@
 <div class="card shadow-sm mb-4">
   <div class="card-header d-flex justify-content-between align-items-center">
     <span class="fw-medium">Connected Institutions</span>
-    <button class="btn btn-primary btn-sm" onclick="connectInstitution()">+ Connect New</button>
+    <div class="d-flex gap-2">
+      {% if institutions %}
+        <button class="btn btn-danger btn-sm" onclick="forceFullResync(this)">Force full resync</button>
+      {% endif %}
+      <button class="btn btn-primary btn-sm" onclick="connectInstitution()">+ Connect New</button>
+    </div>
   </div>
   <div class="list-group list-group-flush">
     {% for inst in institutions %}
@@ -104,6 +109,28 @@ async function removeInstitution(id, name) {
     document.getElementById(`inst-row-${id}`).remove();
   } else {
     alert('Failed to disconnect. Try again.');
+  }
+}
+
+async function forceFullResync(btn) {
+  const msg = 'Force full resync of every connected institution?\n\n'
+    + 'This resets each cursor and re-pulls every transaction Plaid still has cached '
+    + '(bounded by the history window set at link time — 730 days for institutions '
+    + 'linked after that change, 90 days for older links).\n\n'
+    + 'Existing transactions stay; duplicates are prevented by transaction ID. '
+    + 'This may take a few minutes.';
+  if (!confirm(msg)) return;
+  if (!confirm('Are you sure? This will hit Plaid hard.')) return;
+  btn.disabled = true;
+  btn.textContent = 'Resyncing…';
+  try {
+    const res = await fetch('/api/sync/full', { method: 'POST' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    setTimeout(() => location.reload(), 15000);
+  } catch (e) {
+    alert('Failed to start full resync: ' + e.message);
+    btn.disabled = false;
+    btn.textContent = 'Force full resync';
   }
 }
 </script>

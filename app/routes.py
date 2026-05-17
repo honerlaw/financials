@@ -156,6 +156,32 @@ def trigger_sync():
     return jsonify({'status': 'started'})
 
 
+@bp.route('/api/sync/full', methods=['POST'])
+@login_required
+def trigger_full_resync():
+    """Reset every active institution's Plaid cursor and run a sync.
+
+    Pulls every transaction Plaid still has cached for each item (bounded by
+    the per-link days_requested window set at link time). Existing rows are
+    updated in place; the unique plaid_transaction_id prevents duplicates.
+    """
+    from app.sync import sync_all_institutions
+    app = current_app._get_current_object()
+
+    reset_count = 0
+    for inst in Institution.query.filter_by(status='active').all():
+        inst.plaid_cursor = ''
+        reset_count += 1
+    db.session.commit()
+
+    def run():
+        with app.app_context():
+            sync_all_institutions()
+
+    threading.Thread(target=run, daemon=True).start()
+    return jsonify({'status': 'started', 'reset_count': reset_count})
+
+
 @bp.route('/api/sync/status')
 @login_required
 def sync_status():

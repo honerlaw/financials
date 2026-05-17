@@ -27,6 +27,14 @@ def create_app(config=None):
         OPENROUTER_BASE_URL=os.getenv('OPENROUTER_BASE_URL', 'https://openrouter.ai/api/v1'),
         CHAT_MAX_ITERATIONS=int(os.getenv('CHAT_MAX_ITERATIONS', '10')),
         CHAT_QUERY_ROW_LIMIT=int(os.getenv('CHAT_QUERY_ROW_LIMIT', '200')),
+        CHAT_MODELS=[
+            m.strip() for m in os.getenv(
+                'CHAT_MODELS',
+                'anthropic/claude-sonnet-4.5,anthropic/claude-opus-4.1,'
+                'openai/gpt-5,openai/gpt-4o,'
+                'google/gemini-2.5-pro,x-ai/grok-4',
+            ).split(',') if m.strip()
+        ],
     )
 
     if config:

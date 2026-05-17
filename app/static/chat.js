@@ -23,8 +23,20 @@
   const form = document.getElementById('chat-form');
   const input = document.getElementById('chat-input');
   const clearBtn = document.getElementById('clear-chat');
+  const modelSelect = document.getElementById('model-select');
+  const MODEL_STORAGE_KEY = 'financials.chat.model';
   const history = []; // {role, content, tool_calls?, tool_call_id?}
   let busy = false;
+
+  if (modelSelect) {
+    const saved = localStorage.getItem(MODEL_STORAGE_KEY);
+    if (saved && Array.from(modelSelect.options).some(o => o.value === saved)) {
+      modelSelect.value = saved;
+    }
+    modelSelect.addEventListener('change', () => {
+      localStorage.setItem(MODEL_STORAGE_KEY, modelSelect.value);
+    });
+  }
 
   function render() {
     chipsEl.innerHTML = '';
@@ -68,10 +80,12 @@
     const toolResults = [];     // captured for history
 
     try {
+      const body = { messages: history };
+      if (modelSelect && modelSelect.value) body.model = modelSelect.value;
       const resp = await fetch('/api/chat/stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: history }),
+        body: JSON.stringify(body),
       });
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
 

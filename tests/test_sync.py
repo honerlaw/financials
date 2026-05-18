@@ -17,16 +17,33 @@ def _make_institution(app):
         return inst.id
 
 
-def _mock_txn(txn_id, amount=5.00, txn_date=None):
+def _mock_txn(txn_id, amount=5.00, txn_date=None, **overrides):
     txn = MagicMock()
     txn.transaction_id = txn_id
     txn.account_id = 'acc-001'
     txn.date = txn_date or date(2026, 5, 1)
+    txn.authorized_date = None
     txn.name = 'Test Merchant'
+    txn.original_description = None
     txn.merchant_name = 'Test Merchant'
+    txn.merchant_entity_id = None
+    txn.website = None
     txn.amount = amount
+    txn.iso_currency_code = 'USD'
+    txn.payment_channel = 'in store'
+    txn.transaction_code = None
+    txn.check_number = None
+    txn.account_owner = None
+    txn.pending = False
+    txn.pending_transaction_id = None
+    txn.location = None
+    txn.counterparties = None
     txn.personal_finance_category = MagicMock()
     txn.personal_finance_category.primary = 'FOOD_AND_DRINK'
+    txn.personal_finance_category.detailed = 'FOOD_AND_DRINK_RESTAURANT'
+    txn.personal_finance_category.confidence_level = 'VERY_HIGH'
+    for key, value in overrides.items():
+        setattr(txn, key, value)
     return txn
 
 
@@ -52,6 +69,37 @@ def test_upsert_updates_existing_transaction(app):
         assert count == 0  # no new rows
         stored = Transaction.query.filter_by(plaid_transaction_id='txn-001').first()
         assert stored.amount == Decimal('6.00')
+
+
+def test_upsert_populates_llm_analytical_fields(app):
+    inst_id = _make_institution(app)
+    with app.app_context():
+        counterparties = [{'name': 'Acme Corp', 'type': 'merchant'}]
+        location = {'city': 'Brooklyn', 'region': 'NY'}
+        txn = _mock_txn(
+            'txn-rich',
+            authorized_date=date(2026, 4, 30),
+            original_description='POS PURCHASE - ACME',
+            pending=True,
+            payment_channel='online',
+            iso_currency_code='USD',
+            counterparties=counterparties,
+            location=location,
+        )
+        _upsert_transactions(inst_id, [txn])
+        db.session.commit()
+
+        stored = Transaction.query.filter_by(plaid_transaction_id='txn-rich').first()
+        assert stored.authorized_date == date(2026, 4, 30)
+        assert stored.original_description == 'POS PURCHASE - ACME'
+        assert stored.pending is True
+        assert stored.payment_channel == 'online'
+        assert stored.iso_currency_code == 'USD'
+        assert stored.category == 'FOOD_AND_DRINK'
+        assert stored.category_detailed == 'FOOD_AND_DRINK_RESTAURANT'
+        assert stored.category_confidence == 'VERY_HIGH'
+        assert stored.counterparties == counterparties
+        assert stored.location == location
 
 
 def test_mark_removed_flags_transactions(app):

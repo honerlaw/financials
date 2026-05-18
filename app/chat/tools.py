@@ -26,27 +26,45 @@ class QueryTransactionsArgs(BaseModel):
     start_date: date = Field(description='Inclusive start date YYYY-MM-DD')
     end_date: date = Field(description='Inclusive end date YYYY-MM-DD')
     institution_id: int | None = Field(default=None)
-    category: str | None = Field(default=None)
+    category: str | None = Field(
+        default=None,
+        description="Plaid PFC primary category, e.g. 'FOOD_AND_DRINK', 'INCOME', 'TRANSFER_IN'.",
+    )
+    category_detailed: str | None = Field(
+        default=None,
+        description=(
+            'Plaid PFC detailed category for fine-grained type classification, '
+            "e.g. 'INCOME_WAGES', 'TRANSFER_IN_ACCOUNT_TRANSFER', "
+            "'FOOD_AND_DRINK_RESTAURANT'."
+        ),
+    )
+    payment_channel: Literal['online', 'in store', 'other'] | None = Field(default=None)
     merchant_contains: str | None = Field(
         default=None,
         description='Case-insensitive substring match against description or merchant_name',
     )
     min_amount: float | None = Field(default=None)
     max_amount: float | None = Field(default=None)
+    include_pending: bool = Field(
+        default=False,
+        description='Pending transactions are excluded by default — they can change or disappear.',
+    )
     limit: int = Field(default=200, ge=1, le=200)
 
 
 class AggregateTransactionsArgs(BaseModel):
     start_date: date = Field(description='Inclusive start date YYYY-MM-DD')
     end_date: date = Field(description='Inclusive end date YYYY-MM-DD')
-    group_by: Literal['month', 'category', 'merchant', 'institution']
+    group_by: Literal['month', 'category', 'category_detailed', 'merchant', 'institution']
     metric: Literal['sum', 'abs_sum', 'count', 'avg', 'net']
     institution_id: int | None = Field(default=None)
     category: str | None = Field(default=None)
+    category_detailed: str | None = Field(default=None)
     merchant_contains: str | None = Field(
         default=None,
         description='Case-insensitive substring match against description or merchant_name',
     )
+    include_pending: bool = Field(default=False)
 
 
 class FindRecurringArgs(BaseModel):
@@ -87,9 +105,12 @@ def query_transactions(
     start_date: date, end_date: date,
     institution_id: int | None = None,
     category: str | None = None,
+    category_detailed: str | None = None,
+    payment_channel: str | None = None,
     merchant_contains: str | None = None,
     min_amount: float | None = None,
     max_amount: float | None = None,
+    include_pending: bool = False,
     limit: int = 200,
 ) -> dict:
     from flask import current_app
@@ -100,10 +121,16 @@ def query_transactions(
         Transaction.date >= start_date,
         Transaction.date <= end_date,
     )
+    if not include_pending:
+        q = q.filter(Transaction.pending.is_(False))
     if institution_id is not None:
         q = q.filter(Transaction.institution_id == institution_id)
     if category is not None:
         q = q.filter(Transaction.category == category)
+    if category_detailed is not None:
+        q = q.filter(Transaction.category_detailed == category_detailed)
+    if payment_channel is not None:
+        q = q.filter(Transaction.payment_channel == payment_channel)
     if merchant_contains is not None:
         like = f'%{merchant_contains.lower()}%'
         q = q.filter(
@@ -124,10 +151,19 @@ def query_transactions(
             {
                 'id': r.id,
                 'date': r.date.isoformat(),
+                'authorized_date': r.authorized_date.isoformat() if r.authorized_date else None,
                 'description': r.description,
+                'original_description': r.original_description,
                 'merchant_name': r.merchant_name,
                 'amount': float(r.amount),
+                'iso_currency_code': r.iso_currency_code,
                 'category': r.category,
+                'category_detailed': r.category_detailed,
+                'category_confidence': r.category_confidence,
+                'payment_channel': r.payment_channel,
+                'transaction_code': r.transaction_code,
+                'pending': r.pending,
+                'counterparties': r.counterparties,
                 'institution_id': r.institution_id,
             }
             for r in rows
@@ -142,7 +178,9 @@ def aggregate_transactions(
     group_by: str, metric: str,
     institution_id: int | None = None,
     category: str | None = None,
+    category_detailed: str | None = None,
     merchant_contains: str | None = None,
+    include_pending: bool = False,
 ) -> dict:
     from app.models import Institution
 
@@ -151,10 +189,14 @@ def aggregate_transactions(
         Transaction.date >= start_date,
         Transaction.date <= end_date,
     )
+    if not include_pending:
+        q = q.filter(Transaction.pending.is_(False))
     if institution_id is not None:
         q = q.filter(Transaction.institution_id == institution_id)
     if category is not None:
         q = q.filter(Transaction.category == category)
+    if category_detailed is not None:
+        q = q.filter(Transaction.category_detailed == category_detailed)
     if merchant_contains is not None:
         like = f'%{merchant_contains.lower()}%'
         q = q.filter(
@@ -171,6 +213,8 @@ def aggregate_transactions(
             key = tx.date.strftime('%Y-%m')
         elif group_by == 'category':
             key = tx.category or '(uncategorized)'
+        elif group_by == 'category_detailed':
+            key = tx.category_detailed or '(uncategorized)'
         elif group_by == 'merchant':
             key = tx.merchant_name or tx.description
         elif group_by == 'institution':
@@ -281,7 +325,11 @@ TOOLS: dict[str, Tool] = {
         name='query_transactions',
         description=(
             'Filtered list of transactions. Returns up to limit rows '
-            '(hard cap enforced server-side) and a truncated flag.'
+            '(hard cap enforced server-side) and a truncated flag. '
+            'Each row includes Plaid PFC category (primary + detailed + confidence), '
+            'payment_channel, pending flag, authorized_date, original_description, '
+            'and counterparties (payer/payee entities) — use these to distinguish '
+            'spend vs transfer vs paycheck. Pending transactions excluded by default.'
         ),
         args_model=QueryTransactionsArgs,
         func=query_transactions,
@@ -290,9 +338,10 @@ TOOLS: dict[str, Tool] = {
         name='aggregate_transactions',
         description=(
             'Aggregate transactions over a date range. '
-            'group_by: month|category|merchant|institution. '
+            'group_by: month|category|category_detailed|merchant|institution. '
             'metric: sum (signed), abs_sum (total spend as positive), '
-            'count, avg, net (= sum).'
+            'count, avg, net (= sum). '
+            'Pending transactions excluded by default.'
         ),
         args_model=AggregateTransactionsArgs,
         func=aggregate_transactions,

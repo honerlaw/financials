@@ -1,5 +1,12 @@
 from datetime import datetime, timezone
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.types import JSON
+
 from app import db
+
+
+# JSONB on Postgres, JSON on SQLite (used by the test suite).
+JSONType = JSON().with_variant(JSONB(), 'postgresql')
 
 
 def _utcnow():
@@ -37,10 +44,25 @@ class Transaction(db.Model):
     )
     account_id = db.Column(db.String(255), nullable=False)
     date = db.Column(db.Date, nullable=False)
+    authorized_date = db.Column(db.Date, nullable=True)
     description = db.Column(db.String(512), nullable=False)
+    original_description = db.Column(db.String(512), nullable=True)
     merchant_name = db.Column(db.String(255), nullable=True)
+    merchant_entity_id = db.Column(db.String(255), nullable=True)
+    website = db.Column(db.String(512), nullable=True)
     amount = db.Column(db.Numeric(10, 2), nullable=False)
+    iso_currency_code = db.Column(db.String(10), nullable=True)
     category = db.Column(db.String(255), nullable=True)
+    category_detailed = db.Column(db.String(255), nullable=True)
+    category_confidence = db.Column(db.String(50), nullable=True)
+    payment_channel = db.Column(db.String(50), nullable=True)
+    transaction_code = db.Column(db.String(50), nullable=True)
+    check_number = db.Column(db.String(50), nullable=True)
+    account_owner = db.Column(db.String(255), nullable=True)
+    pending = db.Column(db.Boolean, default=False, nullable=False)
+    pending_transaction_id = db.Column(db.String(255), nullable=True)
+    location = db.Column(JSONType, nullable=True)
+    counterparties = db.Column(JSONType, nullable=True)
     removed = db.Column(db.Boolean, default=False, nullable=False)
     created_at = db.Column(db.DateTime(timezone=True), default=_utcnow, nullable=False)
     updated_at = db.Column(

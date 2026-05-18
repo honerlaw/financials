@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from decimal import Decimal
 import json
 import plaid
@@ -56,36 +56,82 @@ def _sync_institution(client, institution):
     db.session.commit()
 
 
+def _to_jsonable(value):
+    """Recursively convert Plaid SDK model objects to plain JSON-able dicts."""
+    if value is None:
+        return None
+    if hasattr(value, 'to_dict'):
+        return _to_jsonable(value.to_dict())
+    if isinstance(value, dict):
+        return {k: _to_jsonable(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_to_jsonable(v) for v in value]
+    if isinstance(value, (datetime, date)):
+        return value.isoformat()
+    return value
+
+
+def _extract_fields(txn):
+    """Pull every column we persist out of a Plaid Transaction object."""
+    pfc = getattr(txn, 'personal_finance_category', None)
+    category = ''
+    category_detailed = None
+    category_confidence = None
+    if pfc is not None:
+        category = getattr(pfc, 'primary', '') or ''
+        category_detailed = getattr(pfc, 'detailed', None)
+        category_confidence = getattr(pfc, 'confidence_level', None)
+    elif getattr(txn, 'category', None):
+        category = txn.category[0] if txn.category else ''
+
+    txn_code = getattr(txn, 'transaction_code', None)
+    if txn_code is not None and hasattr(txn_code, 'value'):
+        txn_code = txn_code.value
+
+    return {
+        'account_id': txn.account_id,
+        'date': txn.date,
+        'authorized_date': getattr(txn, 'authorized_date', None),
+        'description': txn.name or '',
+        'original_description': getattr(txn, 'original_description', None),
+        'merchant_name': txn.merchant_name or '',
+        'merchant_entity_id': getattr(txn, 'merchant_entity_id', None),
+        'website': getattr(txn, 'website', None),
+        'amount': Decimal(str(txn.amount)),
+        'iso_currency_code': getattr(txn, 'iso_currency_code', None),
+        'category': category,
+        'category_detailed': category_detailed,
+        'category_confidence': category_confidence,
+        'payment_channel': getattr(txn, 'payment_channel', None),
+        'transaction_code': txn_code,
+        'check_number': getattr(txn, 'check_number', None),
+        'account_owner': getattr(txn, 'account_owner', None),
+        'pending': bool(getattr(txn, 'pending', False)),
+        'pending_transaction_id': getattr(txn, 'pending_transaction_id', None),
+        'location': _to_jsonable(getattr(txn, 'location', None)),
+        'counterparties': _to_jsonable(getattr(txn, 'counterparties', None)),
+    }
+
+
 def _upsert_transactions(institution_id, transactions):
     new_count = 0
     for txn in transactions:
-        category = ''
-        if getattr(txn, 'personal_finance_category', None):
-            category = txn.personal_finance_category.primary
-        elif getattr(txn, 'category', None):
-            category = txn.category[0] if txn.category else ''
+        fields = _extract_fields(txn)
 
         existing = Transaction.query.filter_by(
             plaid_transaction_id=txn.transaction_id
         ).first()
 
         if existing:
-            existing.description = txn.name or ''
-            existing.merchant_name = txn.merchant_name or ''
-            existing.amount = Decimal(str(txn.amount))
-            existing.category = category
+            for key, value in fields.items():
+                setattr(existing, key, value)
             existing.removed = False
             existing.updated_at = _utcnow()
         else:
             db.session.add(Transaction(
                 plaid_transaction_id=txn.transaction_id,
                 institution_id=institution_id,
-                account_id=txn.account_id,
-                date=txn.date,
-                description=txn.name or '',
-                merchant_name=txn.merchant_name or '',
-                amount=Decimal(str(txn.amount)),
-                category=category,
+                **fields,
             ))
             new_count += 1
 

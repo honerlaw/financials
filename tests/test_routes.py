@@ -165,6 +165,19 @@ def test_index_account_totals_respect_month_filter(auth_client, app):
     assert b'$99.00' not in res.data
 
 
+def test_index_account_totals_include_zero_txn_accounts(auth_client, app):
+    # Approach §5: a freshly-linked account renders with $0.00 even when no
+    # transactions yet match the active filter.
+    inst_id = _make_institution(app, name='Truist', slug='truist')
+    _make_account(app, inst_id, plaid_account_id='acc-fresh', name='Fresh Checking', mask='0000')
+
+    res = auth_client.get('/')
+    assert res.status_code == 200
+    assert b'Fresh Checking' in res.data
+    assert b'$0.00' in res.data
+    assert b'0 txns' in res.data
+
+
 def test_index_account_totals_hide_other_institutions_when_filtered(auth_client, app):
     amex_id = _make_institution(app, name='AmEx', slug='amex')
     citi_id = _make_institution(app, name='Citi', slug='citi')

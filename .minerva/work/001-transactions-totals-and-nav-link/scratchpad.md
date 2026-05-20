@@ -6,6 +6,13 @@
 > `.minerva/knowledge/`, `proposal.md` gets updated to match reality, and
 > the raw scratchpad is archived.
 
+## Review triage 2026-05-20
+- [FIX]    #1 low  tests/test_routes.py — pin zero-txn account still rendering in strip (Approach §5)
+- [IGNORE] #2 low  app/sync.py::_to_decimal — bare except acceptable for single-user / Plaid SDK
+- [IGNORE] #3 low  app/templates/index.html — "0 txns" plural is conventional
+
+- Review fix: tests/test_routes.py — added test_index_account_totals_include_zero_txn_accounts
+
 ## Pre-existing test failure (not caused by this work)
 
 `tests/chat/test_routes.py::test_stream_returns_sse` fails on `main` (commit

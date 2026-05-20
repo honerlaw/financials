@@ -1,7 +1,7 @@
 # Proposal: fix-fake-llm-client-arity
 
 **Date**: 2026-05-20
-**Status**: Draft
+**Status**: Shipped (2026-05-20)
 
 ## Goal
 

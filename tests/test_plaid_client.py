@@ -57,22 +57,26 @@ def test_exchange_token(MockApi):
 def test_sync_transactions_handles_pagination(MockApi):
     page1 = MagicMock(
         added=[MagicMock(transaction_id='t1')], modified=[], removed=[],
-        next_cursor='cursor-2', has_more=True
+        accounts=[MagicMock(account_id='acc-1')],
+        next_cursor='cursor-2', has_more=True,
     )
     page2 = MagicMock(
         added=[MagicMock(transaction_id='t2')], modified=[], removed=[],
-        next_cursor='cursor-final', has_more=False
+        accounts=[MagicMock(account_id='acc-1'), MagicMock(account_id='acc-2')],
+        next_cursor='cursor-final', has_more=False,
     )
     api = MockApi.return_value
     api.transactions_sync.side_effect = [page1, page2]
 
     client = _make_client()
     client._client = api
-    added, modified, removed, cursor = client.sync_transactions('access-token', '')
+    added, modified, removed, cursor, accounts = client.sync_transactions('access-token', '')
 
     assert len(added) == 2
     assert cursor == 'cursor-final'
     assert api.transactions_sync.call_count == 2
+    # accounts from the final page win (freshest balances)
+    assert [a.account_id for a in accounts] == ['acc-1', 'acc-2']
 
 
 def test_get_error_code():

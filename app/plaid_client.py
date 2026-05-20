@@ -75,6 +75,7 @@ class PlaidClient:
 
     def sync_transactions(self, access_token, cursor=''):
         added, modified, removed = [], [], []
+        accounts = []
         while True:
             response = self._client.transactions_sync(
                 TransactionsSyncRequest(
@@ -88,10 +89,15 @@ class PlaidClient:
             added.extend(response.added)
             modified.extend(response.modified)
             removed.extend(response.removed)
+            # transactions/sync returns the institution's accounts on every page;
+            # the last page wins so we end with the freshest balances.
+            page_accounts = getattr(response, 'accounts', None) or []
+            if page_accounts:
+                accounts = list(page_accounts)
             cursor = response.next_cursor
             if not response.has_more:
                 break
-        return added, modified, removed, cursor
+        return added, modified, removed, cursor, accounts
 
     @staticmethod
     def get_error_code(api_exception):

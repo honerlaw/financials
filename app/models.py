@@ -32,6 +32,29 @@ class Institution(db.Model):
     sync_logs = db.relationship(
         'SyncLog', backref='institution', lazy=True, passive_deletes=True
     )
+    accounts = db.relationship(
+        'Account', backref='institution', lazy=True, cascade='all, delete-orphan'
+    )
+
+
+class Account(db.Model):
+    __tablename__ = 'accounts'
+
+    id = db.Column(db.Integer, primary_key=True)
+    institution_id = db.Column(
+        db.Integer, db.ForeignKey('institutions.id', ondelete='CASCADE'), nullable=False
+    )
+    plaid_account_id = db.Column(db.String(255), unique=True, nullable=False)
+    name = db.Column(db.String(255), nullable=False)
+    official_name = db.Column(db.String(255), nullable=True)
+    mask = db.Column(db.String(8), nullable=True)
+    type = db.Column(db.String(50), nullable=True)
+    subtype = db.Column(db.String(50), nullable=True)
+    current_balance = db.Column(db.Numeric(12, 2), nullable=True)
+    available_balance = db.Column(db.Numeric(12, 2), nullable=True)
+    iso_currency_code = db.Column(db.String(10), nullable=True)
+    last_synced_at = db.Column(db.DateTime(timezone=True), nullable=True)
+    created_at = db.Column(db.DateTime(timezone=True), default=_utcnow, nullable=False)
 
 
 class Transaction(db.Model):

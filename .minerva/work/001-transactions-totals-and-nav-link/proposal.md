@@ -110,8 +110,12 @@ Layout: Bootstrap `d-flex gap-2 overflow-auto pb-2` row of `card`s, each `min-wi
 - Running a sync against an already-linked institution populates the `accounts` table (no manual backfill steps required from the user).
 - `pytest` passes, including new tests covering the route context and sync-side account upsert.
 
+## Decisions (folded from open questions, 2026-05-20)
+
+- **Total semantics:** filtered sum (matches the table below). `current_balance` is still stored on the `accounts` row so a future iteration can surface it as a secondary metric without further schema changes.
+- **Sign convention:** keep parity with the existing table — positive = outflow (red), negative = inflow (green). No extra "Spent" / "Net" label; the existing color convention reads cleanly.
+- **Brand link:** keep the "Financials" brand text clickable. The explicit "Transactions" link is the new primary affordance; the brand link is preserved so existing muscle memory still works.
+
 ## Open Questions
 
-- **Total semantics — filtered sum vs. current balance.** Default chosen: filtered sum (matches what the table below shows). Plaid's `current_balance` is stored on the `accounts` row, so a future iteration can surface it as a secondary metric without further schema changes.
-- **Sign convention label.** The total uses the existing convention (positive = outflow, red). Worth labeling explicitly ("Spent" vs. "Net")?
-- **Brand link.** Should the "Financials" brand text still link to `/`, or become non-clickable now that there's an explicit Transactions link? Default: keep both.
+_None._

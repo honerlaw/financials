@@ -125,6 +125,7 @@ def test_sync_all_institutions_happy_path(MockPlaidClient, app):
         mock_client.sync_transactions.return_value = (
             [_mock_txn('txn-new')], [], [], 'new-cursor', [],
         )
+        mock_client.get_balances.return_value = []
         MockPlaidClient.return_value = mock_client
 
         sync_all_institutions()
@@ -205,11 +206,72 @@ def test_sync_all_institutions_persists_accounts(MockPlaidClient, app):
             [_mock_txn('txn-new')], [], [], 'cursor-x',
             [_mock_account('acc-001'), _mock_account('acc-002', name='Freedom')],
         )
+        mock_client.get_balances.return_value = []
         MockPlaidClient.return_value = mock_client
 
         sync_all_institutions()
 
         assert Account.query.count() == 2
+
+
+@patch('app.sync.PlaidClient')
+def test_sync_refreshes_balances_via_balance_endpoint(MockPlaidClient, app):
+    inst_id = _make_institution(app)
+    with app.app_context():
+        mock_client = MagicMock()
+        # piggyback returns a stale snapshot
+        mock_client.sync_transactions.return_value = (
+            [], [], [], 'cursor-x',
+            [_mock_account('acc-001', current=100.00, available=900.00)],
+        )
+        # /accounts/balance/get returns the authoritative live values
+        mock_client.get_balances.return_value = [
+            _mock_account('acc-001', current=150.75, available=849.25),
+        ]
+        MockPlaidClient.return_value = mock_client
+
+        sync_all_institutions()
+
+        row = Account.query.filter_by(plaid_account_id='acc-001').first()
+        assert row.current_balance == Decimal('150.75')
+        assert row.available_balance == Decimal('849.25')
+        log = SyncLog.query.first()
+        assert log.error is None
+        assert mock_client.get_balances.call_count == 1
+
+
+@patch('app.sync.PlaidClient')
+def test_sync_handles_balance_endpoint_error(MockPlaidClient, app):
+    import json
+    import plaid
+
+    inst_id = _make_institution(app)
+    with app.app_context():
+        mock_client = MagicMock()
+        mock_client.sync_transactions.return_value = (
+            [_mock_txn('txn-new')], [], [], 'cursor-x',
+            [_mock_account('acc-001', current=100.00)],
+        )
+        # Balance refresh blows up — sync should not abort.
+        api_exc = plaid.ApiException(status=429)
+        api_exc.body = json.dumps({'error_code': 'RATE_LIMIT_EXCEEDED', 'error_message': 'slow down'})
+        mock_client.get_balances.side_effect = api_exc
+        MockPlaidClient.return_value = mock_client
+
+        sync_all_institutions()
+
+        # The transaction still landed and the piggyback balance still applied.
+        assert Transaction.query.count() == 1
+        row = Account.query.filter_by(plaid_account_id='acc-001').first()
+        assert row.current_balance == Decimal('100.00')
+        # The error is recorded on the SyncLog.
+        log = SyncLog.query.first()
+        assert log.error is not None
+        assert 'RATE_LIMIT_EXCEEDED' in log.error
+        assert 'balance refresh failed' in log.error
+        # Institution remains active — balance failures are non-fatal.
+        inst = db.session.get(Institution, inst_id)
+        assert inst.status == 'active'
 
 
 @patch('app.sync.PlaidClient')

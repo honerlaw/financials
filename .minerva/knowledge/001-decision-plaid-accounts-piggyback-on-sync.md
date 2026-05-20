@@ -32,11 +32,15 @@ snapshot.
 
 - Adding `accounts/get` later would be a regression unless something specific
   (e.g. account-only refresh without a sync) genuinely requires it.
-- Account metadata is **only refreshed when a sync runs**. Balance freshness
-  is bounded by the sync schedule (and Plaid's own balance freshness for the
-  given institution).
+- Account metadata is **only refreshed when a sync runs**. Metadata freshness
+  is bounded by the sync schedule.
 - If `transactions/sync` ever returns a page with an empty `accounts` array
   while a previous page populated it, the previous page's data is retained
   for this sync run. Empty-on-every-page would leave `Account` rows
   unchanged, which is the right default (don't blow away known accounts on
   an ambiguous response).
+- **Balance freshness is handled separately.** As of work unit 003, balance
+  fields are overwritten by a dedicated `/accounts/balance/get` call after
+  the piggyback completes — the piggyback's balance values are treated as
+  cached snapshots, not authoritative. See
+  `002-decision-plaid-balance-refresh-via-dedicated-endpoint.md`.

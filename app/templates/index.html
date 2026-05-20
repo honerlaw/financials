@@ -1,5 +1,26 @@
 {% extends 'base.html' %}
 {% block content %}
+{% if account_totals %}
+<div class="d-flex gap-2 mb-3 overflow-auto pb-1">
+  {% for row in account_totals %}
+  <div class="card shadow-sm flex-shrink-0" style="min-width: 220px;">
+    <div class="card-body py-2 px-3">
+      <div class="text-muted small text-truncate">{{ row.institution_name }}</div>
+      <div class="fw-semibold text-truncate">
+        {{ row.account_name }}{% if row.mask %} <span class="text-muted">····{{ row.mask }}</span>{% endif %}
+      </div>
+      <div class="d-flex justify-content-between align-items-baseline mt-1">
+        <span class="fs-5 fw-bold {% if row.total > 0 %}text-danger{% elif row.total < 0 %}text-success{% else %}text-muted{% endif %}">
+          {% if row.total > 0 %}-{% elif row.total < 0 %}+{% endif %}${{ "%.2f"|format(row.total|abs) }}
+        </span>
+        <span class="text-muted small">{{ row.txn_count }} txn{% if row.txn_count != 1 %}s{% endif %}</span>
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
 <div class="d-flex gap-2 mb-3 flex-wrap">
   <select id="inst-filter" class="form-select form-select-sm w-auto" onchange="applyFilter()">
     <option value="">All institutions</option>

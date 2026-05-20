@@ -1,9 +1,9 @@
 from datetime import date
 from decimal import Decimal
 from unittest.mock import MagicMock, patch
-from app.models import Institution, Transaction, SyncLog
+from app.models import Institution, Transaction, SyncLog, Account
 from app.models import db
-from app.sync import sync_all_institutions, _upsert_transactions, _mark_removed
+from app.sync import sync_all_institutions, _upsert_transactions, _mark_removed, _upsert_accounts
 
 
 def _make_institution(app):
@@ -123,7 +123,7 @@ def test_sync_all_institutions_happy_path(MockPlaidClient, app):
     with app.app_context():
         mock_client = MagicMock()
         mock_client.sync_transactions.return_value = (
-            [_mock_txn('txn-new')], [], [], 'new-cursor'
+            [_mock_txn('txn-new')], [], [], 'new-cursor', [],
         )
         MockPlaidClient.return_value = mock_client
 
@@ -137,6 +137,79 @@ def test_sync_all_institutions_happy_path(MockPlaidClient, app):
         log = SyncLog.query.first()
         assert log.added_count == 1
         assert log.error is None
+
+
+def _mock_account(account_id='acc-001', name='Sapphire', mask='1234',
+                  type_='credit', subtype='credit card',
+                  current=125.50, available=874.50):
+    acct = MagicMock()
+    acct.account_id = account_id
+    acct.name = name
+    acct.official_name = f'{name} (Official)'
+    acct.mask = mask
+    type_mock = MagicMock()
+    type_mock.value = type_
+    acct.type = type_mock
+    subtype_mock = MagicMock()
+    subtype_mock.value = subtype
+    acct.subtype = subtype_mock
+    balances = MagicMock()
+    balances.current = current
+    balances.available = available
+    balances.iso_currency_code = 'USD'
+    acct.balances = balances
+    return acct
+
+
+def test_upsert_accounts_inserts_new_rows(app):
+    inst_id = _make_institution(app)
+    with app.app_context():
+        _upsert_accounts(inst_id, [_mock_account('acc-001'), _mock_account('acc-002', name='Freedom')])
+        db.session.commit()
+
+        rows = Account.query.order_by(Account.plaid_account_id).all()
+        assert [a.plaid_account_id for a in rows] == ['acc-001', 'acc-002']
+        first = rows[0]
+        assert first.institution_id == inst_id
+        assert first.name == 'Sapphire'
+        assert first.mask == '1234'
+        assert first.type == 'credit'
+        assert first.subtype == 'credit card'
+        assert first.current_balance == Decimal('125.50')
+        assert first.available_balance == Decimal('874.50')
+        assert first.iso_currency_code == 'USD'
+        assert first.last_synced_at is not None
+
+
+def test_upsert_accounts_updates_balances_on_second_call(app):
+    inst_id = _make_institution(app)
+    with app.app_context():
+        _upsert_accounts(inst_id, [_mock_account('acc-001', current=125.50)])
+        db.session.commit()
+
+        _upsert_accounts(inst_id, [_mock_account('acc-001', current=200.00, name='Sapphire Reserve')])
+        db.session.commit()
+
+        assert Account.query.count() == 1
+        row = Account.query.filter_by(plaid_account_id='acc-001').first()
+        assert row.current_balance == Decimal('200.00')
+        assert row.name == 'Sapphire Reserve'
+
+
+@patch('app.sync.PlaidClient')
+def test_sync_all_institutions_persists_accounts(MockPlaidClient, app):
+    inst_id = _make_institution(app)
+    with app.app_context():
+        mock_client = MagicMock()
+        mock_client.sync_transactions.return_value = (
+            [_mock_txn('txn-new')], [], [], 'cursor-x',
+            [_mock_account('acc-001'), _mock_account('acc-002', name='Freedom')],
+        )
+        MockPlaidClient.return_value = mock_client
+
+        sync_all_institutions()
+
+        assert Account.query.count() == 2
 
 
 @patch('app.sync.PlaidClient')

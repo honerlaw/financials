@@ -7,7 +7,7 @@ from flask import (
     url_for, session, jsonify, current_app,
 )
 
-from app.models import db, Institution, Transaction, SyncLog
+from app.models import db, Institution, Transaction, SyncLog, Account
 
 bp = Blueprint('main', __name__)
 
@@ -41,39 +41,90 @@ def logout():
 
 # ── Pages ─────────────────────────────────────────────────────────────────────
 
+def _month_bounds(month):
+    """Parse 'YYYY-MM' into (start_date, end_date_exclusive), or (None, None) on failure."""
+    if not month:
+        return None, None
+    try:
+        year, mon = int(month[:4]), int(month[5:7])
+        next_year = year + 1 if mon == 12 else year
+        next_mon = 1 if mon == 12 else mon + 1
+        return date(year, mon, 1), date(next_year, next_mon, 1)
+    except (ValueError, IndexError):
+        return None, None
+
+
 @bp.route('/')
 @login_required
 def index():
     page = request.args.get('page', 1, type=int)
     institution_id = request.args.get('institution', type=int)
     month = request.args.get('month', '')
+    month_start, month_end = _month_bounds(month)
 
     query = Transaction.query.filter_by(removed=False)
     if institution_id:
         query = query.filter_by(institution_id=institution_id)
-    if month:
-        try:
-            year, mon = int(month[:4]), int(month[5:7])
-            next_year = year + 1 if mon == 12 else year
-            next_mon = 1 if mon == 12 else mon + 1
-            query = query.filter(
-                Transaction.date >= date(year, mon, 1),
-                Transaction.date < date(next_year, next_mon, 1),
-            )
-        except (ValueError, IndexError):
-            pass
+    if month_start is not None:
+        query = query.filter(
+            Transaction.date >= month_start,
+            Transaction.date < month_end,
+        )
 
     transactions = query.order_by(Transaction.date.desc()).paginate(
         page=page, per_page=50, error_out=False
     )
     institutions = Institution.query.order_by(Institution.name).all()
+    account_totals = _account_totals(institution_id, month_start, month_end)
     return render_template(
         'index.html',
         transactions=transactions,
         institutions=institutions,
         selected_institution=institution_id,
         selected_month=month,
+        account_totals=account_totals,
     )
+
+
+def _account_totals(institution_id, month_start, month_end):
+    """Per-(institution, account) totals honoring the same filters as the table.
+
+    Accounts with no matching transactions still render with a $0.00 total so a
+    freshly-linked account shows up immediately; filtering by institution hides
+    accounts from other institutions.
+    """
+    txn_join = db.and_(
+        Transaction.account_id == Account.plaid_account_id,
+        Transaction.institution_id == Account.institution_id,
+        Transaction.removed.is_(False),
+    )
+    if month_start is not None:
+        txn_join = db.and_(
+            txn_join,
+            Transaction.date >= month_start,
+            Transaction.date < month_end,
+        )
+
+    rows_query = (
+        db.session.query(
+            Institution.id.label('institution_id'),
+            Institution.name.label('institution_name'),
+            Account.id.label('account_id'),
+            Account.name.label('account_name'),
+            Account.mask.label('mask'),
+            db.func.coalesce(db.func.sum(Transaction.amount), 0).label('total'),
+            db.func.count(Transaction.id).label('txn_count'),
+        )
+        .select_from(Account)
+        .join(Institution, Institution.id == Account.institution_id)
+        .outerjoin(Transaction, txn_join)
+        .group_by(Institution.id, Institution.name, Account.id, Account.name, Account.mask)
+        .order_by(Institution.name, Account.name)
+    )
+    if institution_id:
+        rows_query = rows_query.filter(Account.institution_id == institution_id)
+
+    return rows_query.all()
 
 
 @bp.route('/settings')

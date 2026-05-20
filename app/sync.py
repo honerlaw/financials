@@ -3,7 +3,7 @@ from decimal import Decimal
 import json
 import plaid
 from flask import current_app
-from app.models import db, Institution, Transaction, SyncLog
+from app.models import db, Institution, Transaction, SyncLog, Account
 from app.plaid_client import PlaidClient
 
 
@@ -33,11 +33,12 @@ def _sync_institution(client, institution):
     db.session.add(log)
 
     try:
-        added, modified, removed, new_cursor = client.sync_transactions(
+        added, modified, removed, new_cursor, accounts = client.sync_transactions(
             institution.access_token, institution.plaid_cursor
         )
         added_count = _upsert_transactions(institution.id, added + modified)
         removed_count = _mark_removed(removed)
+        _upsert_accounts(institution.id, accounts)
 
         institution.plaid_cursor = new_cursor
         institution.last_synced_at = _utcnow()
@@ -149,3 +150,48 @@ def _mark_removed(removed_transactions):
             txn.updated_at = _utcnow()
             count += 1
     return count
+
+
+def _to_decimal(value):
+    if value is None:
+        return None
+    try:
+        return Decimal(str(value))
+    except Exception:
+        return None
+
+
+def _enum_value(value):
+    if value is None:
+        return None
+    if hasattr(value, 'value'):
+        return value.value
+    return str(value)
+
+
+def _upsert_accounts(institution_id, accounts):
+    now = _utcnow()
+    for acct in accounts:
+        balances = getattr(acct, 'balances', None)
+        fields = {
+            'name': acct.name or '',
+            'official_name': getattr(acct, 'official_name', None),
+            'mask': getattr(acct, 'mask', None),
+            'type': _enum_value(getattr(acct, 'type', None)),
+            'subtype': _enum_value(getattr(acct, 'subtype', None)),
+            'current_balance': _to_decimal(getattr(balances, 'current', None)) if balances else None,
+            'available_balance': _to_decimal(getattr(balances, 'available', None)) if balances else None,
+            'iso_currency_code': getattr(balances, 'iso_currency_code', None) if balances else None,
+            'last_synced_at': now,
+        }
+        existing = Account.query.filter_by(plaid_account_id=acct.account_id).first()
+        if existing:
+            for key, value in fields.items():
+                setattr(existing, key, value)
+            existing.institution_id = institution_id
+        else:
+            db.session.add(Account(
+                institution_id=institution_id,
+                plaid_account_id=acct.account_id,
+                **fields,
+            ))

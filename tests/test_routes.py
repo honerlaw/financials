@@ -1,7 +1,7 @@
 from datetime import date
 from decimal import Decimal
 from unittest.mock import MagicMock, patch
-from app.models import Institution, Transaction, SyncLog
+from app.models import Institution, Transaction, SyncLog, Account
 from app.models import db
 
 
@@ -97,6 +97,99 @@ def test_remove_institution_deletes_it(MockPlaidClient, auth_client, app):
     assert res.status_code == 200
     with app.app_context():
         assert db.session.get(Institution, inst_id) is None
+
+
+def _make_account(app, inst_id, plaid_account_id='acc-001', name='Sapphire', mask='1234'):
+    with app.app_context():
+        acct = Account(
+            institution_id=inst_id,
+            plaid_account_id=plaid_account_id,
+            name=name,
+            mask=mask,
+            type='credit',
+            subtype='credit card',
+        )
+        db.session.add(acct)
+        db.session.commit()
+        return acct.id
+
+
+def _make_txn_row(app, inst_id, plaid_account_id, plaid_id, amount, txn_date):
+    with app.app_context():
+        db.session.add(Transaction(
+            plaid_transaction_id=plaid_id,
+            institution_id=inst_id,
+            account_id=plaid_account_id,
+            date=txn_date,
+            description='X',
+            amount=Decimal(str(amount)),
+        ))
+        db.session.commit()
+
+
+def test_index_navbar_has_transactions_link(auth_client, app):
+    res = auth_client.get('/')
+    assert res.status_code == 200
+    assert b'>Transactions<' in res.data
+    assert b'href="/chat"' in res.data
+
+
+def test_index_account_totals_aggregate_by_account(auth_client, app):
+    inst_id = _make_institution(app, name='AmEx', slug='amex')
+    _make_account(app, inst_id, plaid_account_id='acc-001', name='Platinum', mask='1111')
+    _make_account(app, inst_id, plaid_account_id='acc-002', name='Gold', mask='2222')
+    _make_txn_row(app, inst_id, 'acc-001', 'p-1', '10.00', date(2026, 5, 1))
+    _make_txn_row(app, inst_id, 'acc-001', 'p-2', '15.50', date(2026, 5, 2))
+    _make_txn_row(app, inst_id, 'acc-002', 'g-1', '-5.00', date(2026, 5, 3))
+
+    res = auth_client.get('/')
+    assert res.status_code == 200
+    # Card strip shows both accounts with their masks and totals.
+    assert b'Platinum' in res.data
+    assert b'1111' in res.data
+    assert b'Gold' in res.data
+    assert b'2222' in res.data
+    assert b'-$25.50' in res.data  # Platinum total (positive sums shown as outflow with leading -)
+    assert b'+$5.00' in res.data   # Gold total (refund shown as inflow)
+
+
+def test_index_account_totals_respect_month_filter(auth_client, app):
+    inst_id = _make_institution(app, name='Citi', slug='citi')
+    _make_account(app, inst_id, plaid_account_id='acc-c1', name='Double Cash', mask='9999')
+    _make_txn_row(app, inst_id, 'acc-c1', 'in-month', '10.00', date(2026, 5, 15))
+    _make_txn_row(app, inst_id, 'acc-c1', 'out-of-month', '99.00', date(2026, 4, 15))
+
+    res = auth_client.get('/?month=2026-05')
+    assert res.status_code == 200
+    assert b'-$10.00' in res.data
+    assert b'$99.00' not in res.data
+
+
+def test_index_account_totals_include_zero_txn_accounts(auth_client, app):
+    # Approach §5: a freshly-linked account renders with $0.00 even when no
+    # transactions yet match the active filter.
+    inst_id = _make_institution(app, name='Truist', slug='truist')
+    _make_account(app, inst_id, plaid_account_id='acc-fresh', name='Fresh Checking', mask='0000')
+
+    res = auth_client.get('/')
+    assert res.status_code == 200
+    assert b'Fresh Checking' in res.data
+    assert b'$0.00' in res.data
+    assert b'0 txns' in res.data
+
+
+def test_index_account_totals_hide_other_institutions_when_filtered(auth_client, app):
+    amex_id = _make_institution(app, name='AmEx', slug='amex')
+    citi_id = _make_institution(app, name='Citi', slug='citi')
+    _make_account(app, amex_id, plaid_account_id='acc-a', name='Platinum')
+    _make_account(app, citi_id, plaid_account_id='acc-c', name='Double Cash')
+    _make_txn_row(app, amex_id, 'acc-a', 'a-1', '10.00', date(2026, 5, 1))
+    _make_txn_row(app, citi_id, 'acc-c', 'c-1', '20.00', date(2026, 5, 1))
+
+    res = auth_client.get(f'/?institution={amex_id}')
+    assert res.status_code == 200
+    assert b'Platinum' in res.data
+    assert b'Double Cash' not in res.data
 
 
 def test_sync_status_returns_json(auth_client):

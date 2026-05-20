@@ -9,3 +9,4 @@ venv/
 sync.log
 .superpowers/
 instance/
+.minerva/worktrees/

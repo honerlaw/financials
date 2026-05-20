@@ -15,7 +15,7 @@ def fake_llm_client(monkeypatch):
             yield {'type': 'text_delta', 'text': 'pong'}
             yield {'type': 'stop', 'reason': 'stop'}
 
-    monkeypatch.setattr('app.chat.routes._make_client', lambda app: FakeClient())
+    monkeypatch.setattr('app.chat.routes._make_client', lambda app, model: FakeClient())
     return FakeClient
 
 

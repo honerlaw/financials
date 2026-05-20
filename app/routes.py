@@ -112,13 +112,19 @@ def _account_totals(institution_id, month_start, month_end):
             Account.id.label('account_id'),
             Account.name.label('account_name'),
             Account.mask.label('mask'),
+            Account.current_balance.label('current_balance'),
+            Account.iso_currency_code.label('iso_currency_code'),
             db.func.coalesce(db.func.sum(Transaction.amount), 0).label('total'),
             db.func.count(Transaction.id).label('txn_count'),
         )
         .select_from(Account)
         .join(Institution, Institution.id == Account.institution_id)
         .outerjoin(Transaction, txn_join)
-        .group_by(Institution.id, Institution.name, Account.id, Account.name, Account.mask)
+        .group_by(
+            Institution.id, Institution.name,
+            Account.id, Account.name, Account.mask,
+            Account.current_balance, Account.iso_currency_code,
+        )
         .order_by(Institution.name, Account.name)
     )
     if institution_id:

@@ -99,7 +99,8 @@ def test_remove_institution_deletes_it(MockPlaidClient, auth_client, app):
         assert db.session.get(Institution, inst_id) is None
 
 
-def _make_account(app, inst_id, plaid_account_id='acc-001', name='Sapphire', mask='1234'):
+def _make_account(app, inst_id, plaid_account_id='acc-001', name='Sapphire', mask='1234',
+                  current_balance=None):
     with app.app_context():
         acct = Account(
             institution_id=inst_id,
@@ -108,6 +109,7 @@ def _make_account(app, inst_id, plaid_account_id='acc-001', name='Sapphire', mas
             mask=mask,
             type='credit',
             subtype='credit card',
+            current_balance=Decimal(str(current_balance)) if current_balance is not None else None,
         )
         db.session.add(acct)
         db.session.commit()
@@ -163,6 +165,47 @@ def test_index_account_totals_respect_month_filter(auth_client, app):
     assert res.status_code == 200
     assert b'-$10.00' in res.data
     assert b'$99.00' not in res.data
+
+
+def test_index_account_card_renders_balance_and_filter_sum(auth_client, app):
+    inst_id = _make_institution(app, name='Chase', slug='chase')
+    _make_account(app, inst_id, plaid_account_id='acc-bal', name='Sapphire', mask='4242',
+                  current_balance='1234.56')
+    _make_txn_row(app, inst_id, 'acc-bal', 'b-1', '10.00', date(2026, 5, 1))
+    _make_txn_row(app, inst_id, 'acc-bal', 'b-2', '5.50', date(2026, 5, 2))
+
+    res = auth_client.get('/')
+    assert res.status_code == 200
+    # Headline = current_balance (no leading sign)
+    assert b'$1234.56' in res.data
+    # Secondary line = filtered transaction sum, labeled and signed
+    assert b'This filter: -$15.50' in res.data
+    assert b'2 txns' in res.data
+
+
+def test_index_account_card_renders_dash_when_balance_missing(auth_client, app):
+    inst_id = _make_institution(app, name='Truist', slug='truist')
+    _make_account(app, inst_id, plaid_account_id='acc-no-bal', name='Fresh Checking')
+
+    res = auth_client.get('/')
+    assert res.status_code == 200
+    assert b'Fresh Checking' in res.data
+    # No balance → em dash placeholder, NOT $0.00 as the headline
+    assert '—'.encode('utf-8') in res.data
+
+
+def test_index_account_totals_include_current_balance(auth_client, app):
+    inst_id = _make_institution(app, name='Citi', slug='citi')
+    _make_account(app, inst_id, plaid_account_id='acc-cb', name='Double Cash',
+                  current_balance='42.00')
+
+    with auth_client.application.test_request_context('/'):
+        from app.routes import _account_totals
+        rows = _account_totals(None, None, None)
+
+    matching = [r for r in rows if r.account_name == 'Double Cash']
+    assert len(matching) == 1
+    assert matching[0].current_balance == Decimal('42.00')
 
 
 def test_index_account_totals_include_zero_txn_accounts(auth_client, app):

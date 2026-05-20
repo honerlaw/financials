@@ -79,6 +79,22 @@ def test_sync_transactions_handles_pagination(MockApi):
     assert [a.account_id for a in accounts] == ['acc-1', 'acc-2']
 
 
+@patch('app.plaid_client.plaid_api.PlaidApi')
+def test_get_balances(MockApi):
+    api = MockApi.return_value
+    api.accounts_balance_get.return_value = MagicMock(accounts=[
+        MagicMock(account_id='acc-1'),
+        MagicMock(account_id='acc-2'),
+    ])
+
+    client = _make_client()
+    client._client = api
+    accounts = client.get_balances('access-token-xyz')
+
+    assert [a.account_id for a in accounts] == ['acc-1', 'acc-2']
+    assert api.accounts_balance_get.call_count == 1
+
+
 def test_get_error_code():
     e = MagicMock(spec=plaid.ApiException)
     e.body = json.dumps({'error_code': 'ITEM_LOGIN_REQUIRED'})

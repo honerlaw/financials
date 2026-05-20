@@ -40,6 +40,13 @@ def _sync_institution(client, institution):
         removed_count = _mark_removed(removed)
         _upsert_accounts(institution.id, accounts)
 
+        # Force-refresh balances via the dedicated Plaid endpoint. A failure
+        # here annotates the SyncLog but does not abort the sync — the
+        # piggyback above has already written a (possibly stale) balance.
+        balance_error = _refresh_balances(client, institution)
+        if balance_error:
+            log.error = balance_error
+
         institution.plaid_cursor = new_cursor
         institution.last_synced_at = _utcnow()
         institution.status = 'active'
@@ -55,6 +62,35 @@ def _sync_institution(client, institution):
         log.error = f'{code}: {e}'
 
     db.session.commit()
+
+
+def _refresh_balances(client, institution):
+    """Force-refresh real-time balances via Plaid's accounts/balance/get.
+
+    Returns an error string to record on the SyncLog if the call fails,
+    None on success. Never re-raises — balance refresh failures are
+    non-fatal to the sync.
+    """
+    try:
+        accounts = client.get_balances(institution.access_token)
+    except plaid.ApiException as e:
+        code = _get_plaid_error_code(e)
+        return f'balance refresh failed: {code}: {e}'
+
+    for acct in accounts:
+        balances = getattr(acct, 'balances', None)
+        if balances is None:
+            continue
+        row = Account.query.filter_by(plaid_account_id=acct.account_id).first()
+        if row is None:
+            continue
+        row.current_balance = _to_decimal(getattr(balances, 'current', None))
+        row.available_balance = _to_decimal(getattr(balances, 'available', None))
+        iso = getattr(balances, 'iso_currency_code', None)
+        if iso:
+            row.iso_currency_code = iso
+        row.last_synced_at = _utcnow()
+    return None
 
 
 def _to_jsonable(value):

@@ -13,6 +13,7 @@ from plaid.model.institutions_get_by_id_request import InstitutionsGetByIdReques
 from plaid.model.link_token_transactions import LinkTokenTransactions
 from plaid.model.transactions_sync_request import TransactionsSyncRequest
 from plaid.model.transactions_sync_request_options import TransactionsSyncRequestOptions
+from plaid.model.accounts_balance_get_request import AccountsBalanceGetRequest
 
 
 def slugify(name):
@@ -72,6 +73,18 @@ class PlaidClient:
 
     def remove_item(self, access_token):
         self._client.item_remove(ItemRemoveRequest(access_token=access_token))
+
+    def get_balances(self, access_token):
+        """Force-refresh balances for every account on this Item.
+
+        Unlike the accounts payload returned by transactions/sync (which is a
+        cached snapshot), accounts/balance/get instructs Plaid to pull live
+        balances from the institution.
+        """
+        response = self._client.accounts_balance_get(
+            AccountsBalanceGetRequest(access_token=access_token)
+        )
+        return response.accounts
 
     def sync_transactions(self, access_token, cursor=''):
         added, modified, removed = [], [], []

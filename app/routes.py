@@ -133,6 +133,36 @@ def _account_totals(institution_id, month_start, month_end):
     return rows_query.all()
 
 
+@bp.route('/subscriptions')
+@login_required
+def subscriptions():
+    from app.subscriptions import detect_subscriptions
+
+    # Full in-memory load is the intended tradeoff at personal-finance
+    # volumes. The removed=False filter here is a query optimization;
+    # detect_subscriptions owns the removed-gate as its tested contract.
+    transactions = Transaction.query.filter_by(removed=False).all()
+    streams = detect_subscriptions(transactions, date.today())
+
+    accounts = {a.plaid_account_id: a for a in Account.query.all()}
+    institution_names = {i.id: i.name for i in Institution.query.all()}
+    for stream in streams:
+        labels = set()
+        for institution_id, account_id in stream.pop('account_keys'):
+            institution = institution_names.get(institution_id, '')
+            account = accounts.get(account_id)
+            labels.add(f'{institution} · {account.name}' if account else institution)
+        stream['accounts'] = sorted(labels)
+
+    active_count = sum(1 for s in streams if s['active'])
+    return render_template(
+        'subscriptions.html',
+        streams=streams,
+        active_count=active_count,
+        inactive_count=len(streams) - active_count,
+    )
+
+
 @bp.route('/settings')
 @login_required
 def settings():

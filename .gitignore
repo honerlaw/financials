@@ -10,3 +10,4 @@ sync.log
 .superpowers/
 instance/
 .minerva/worktrees/
+.DS_Store

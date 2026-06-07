@@ -1,7 +1,7 @@
 # Proposal: subscriptions-view
 
 **Date**: 2026-06-07
-**Status**: Draft
+**Status**: Shipped (2026-06-07)
 
 ## Goal
 
@@ -23,16 +23,22 @@ product, black-box rules).
   returning a list of stream dicts. No DB schema changes; computed live on page
   load (fine at personal-finance data volumes).
 - **Grouping:** key by `merchant_entity_id` when present, else a normalized
-  merchant key (lowercase `merchant_name` or `description`, strip
-  digits/punctuation/location suffixes), then fuzzy-collapse near-identical
-  keys via token similarity so "NETFLIX.COM 866-..." and "Netflix" merge.
-  Grouping is global across accounts/institutions; contributing accounts are
-  shown per stream so a card switch doesn't split a stream.
+  merchant key — lowercased `merchant_name` (falling back to `description`),
+  digits/punctuation stripped, noise tokens (`com`, `inc`, …) dropped — so
+  "NETFLIX.COM 866-..." and "Netflix" normalize identically. Remaining
+  near-identical keys fuzzy-collapse via `SequenceMatcher` ratio ≥0.82 plus a
+  ≥5-char prefix guard (the prefix guard exists because ratio alone missed
+  prefix-shaped variants like "SPOTIFY USA" vs "Spotify"). Grouping is
+  global across accounts/institutions; contributing accounts are shown per
+  stream so a card switch doesn't split a stream.
 - **Cadence detection (the only gate):** for groups with ≥3 charges (≥2 for
-  annual), compute inter-charge gaps; the median gap maps to the nearest
-  bucket — weekly 7±2, biweekly 14±3, monthly 30±6, quarterly 91±12,
-  annual 365±30 — with a bounded gap variance to reject irregular merchants
-  (e.g. frequent grocery runs).
+  annual), compute inter-charge gaps (same-day charges count as one
+  occurrence); the median gap maps to the nearest bucket — weekly 7±2,
+  biweekly 14±3, monthly 30±6, quarterly 91±12, annual 365±30 — and
+  additionally ≥70% of individual gaps must sit inside the bucket tolerance,
+  rejecting irregular merchants (e.g. frequent grocery runs) whose median
+  accidentally lands in a bucket. See
+  `.minerva/knowledge/003-decision-subscriptions-cadence-only-detection.md`.
 - **Everything recurring:** no category exclusions — card payments, transfers,
   utilities, and recurring inflows (paychecks) all qualify. Inflows are
   visually distinguished. Pending transactions count (they're real charges;
@@ -68,4 +74,8 @@ product, black-box rules).
 ## Open Questions
 
 - Fuzzy-collapse similarity threshold and gap-variance bound may need tuning
-  against real synced data once live
+  against real synced data once live (constants: 0.82 similarity, ≥5-char
+  prefix guard, 70% gap regularity, 0.25 MAD ratio — all provisional)
+- No bimonthly (~60-day) bucket: cadence buckets are disjoint (monthly caps
+  at 36d, quarterly starts at 79d), so true every-two-months charges are
+  silently not detected

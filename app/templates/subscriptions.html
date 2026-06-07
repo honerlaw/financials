@@ -1,0 +1,59 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="d-flex align-items-baseline gap-3 mb-3">
+  <h4 class="mb-0">Subscriptions</h4>
+  <span class="text-muted small">
+    {{ active_count }} active{% if inactive_count %} · {{ inactive_count }} inactive{% endif %}
+  </span>
+</div>
+
+<div class="card shadow-sm">
+  <div class="table-responsive">
+    <table class="table table-hover align-middle mb-0">
+      <thead class="table-light">
+        <tr>
+          <th>Merchant</th>
+          <th>Cadence</th>
+          <th class="text-end">Typical amount</th>
+          <th>Last charge</th>
+          <th>Next expected</th>
+          <th class="text-end">Charges</th>
+          <th>Accounts</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for s in streams %}
+      <tr {% if not s.active %}class="opacity-50"{% endif %}>
+        <td class="fw-semibold">{{ s.name }}</td>
+        <td class="text-capitalize text-muted">{{ s.cadence }}</td>
+        <td class="text-end text-nowrap {% if s.is_inflow %}text-success{% else %}text-danger{% endif %}">
+          {% if s.is_inflow %}+{% else %}-{% endif %}${{ "%.2f"|format(s.amount|abs) }}
+          {% if s.varies %}<span class="badge bg-warning text-dark ms-1">varies</span>{% endif %}
+        </td>
+        <td class="text-muted small text-nowrap">{{ s.last_date.strftime('%b %d, %Y') }}</td>
+        <td class="text-muted small text-nowrap">
+          {% if s.active %}{{ s.next_date.strftime('%b %d, %Y') }}{% else %}—{% endif %}
+        </td>
+        <td class="text-end text-muted">{{ s.count }}</td>
+        <td class="small">
+          {% for label in s.accounts %}
+          <span class="badge bg-primary fw-normal">{{ label }}</span>
+          {% endfor %}
+        </td>
+        <td>
+          {% if s.active %}
+          <span class="badge bg-success">Active</span>
+          {% else %}
+          <span class="badge bg-secondary">Inactive</span>
+          {% endif %}
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="8" class="text-center text-muted py-5">No recurring transactions detected yet.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

@@ -168,6 +168,8 @@ def detect_subscriptions(transactions, today):
 
     Returns stream dicts sorted active-first, then by amount magnitude.
     """
+    # The removed-gate lives here (tested contract) even though the route
+    # also filters in SQL — callers may pass unfiltered rows.
     live = [t for t in transactions if not t.removed]
     streams = []
     for group in _group_transactions(live):

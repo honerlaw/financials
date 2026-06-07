@@ -261,6 +261,43 @@ def test_subscriptions_page_renders_stream(auth_client, app):
     assert b'Test Bank' in res.data
 
 
+def test_subscriptions_page_renders_multi_account_labels(auth_client, app):
+    # One stream split across two institutions/cards must render both
+    # "Institution · Account" badges on the single row.
+    with app.app_context():
+        amex = Institution(name='AmEx', slug='amex',
+                           access_token='tok-a', item_id='item-a')
+        citi = Institution(name='Citi', slug='citi',
+                           access_token='tok-c', item_id='item-c')
+        db.session.add_all([amex, citi])
+        db.session.flush()
+        db.session.add_all([
+            Account(institution_id=amex.id, plaid_account_id='acc-amex',
+                    name='Platinum'),
+            Account(institution_id=citi.id, plaid_account_id='acc-citi',
+                    name='Double Cash'),
+        ])
+        today = date.today()
+        rows = [
+            (amex.id, 'acc-amex', today - timedelta(days=90)),
+            (amex.id, 'acc-amex', today - timedelta(days=60)),
+            (citi.id, 'acc-citi', today - timedelta(days=30)),
+            (citi.id, 'acc-citi', today),
+        ]
+        for i, (inst_id, acct_id, d) in enumerate(rows):
+            db.session.add(Transaction(
+                plaid_transaction_id=f'txn-ma-{i}', institution_id=inst_id,
+                account_id=acct_id, date=d, description='Netflix',
+                merchant_name='Netflix', amount=Decimal('15.49'),
+            ))
+        db.session.commit()
+
+    res = auth_client.get('/subscriptions')
+    assert res.status_code == 200
+    assert 'AmEx · Platinum'.encode() in res.data
+    assert 'Citi · Double Cash'.encode() in res.data
+
+
 def test_subscriptions_page_empty_state(auth_client):
     res = auth_client.get('/subscriptions')
     assert res.status_code == 200

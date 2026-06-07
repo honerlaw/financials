@@ -9,6 +9,11 @@
 ## Panel decisions 2026-06-07
 - [user-directed] propose-phase gates (scope, approach, whole-proposal): user ran manual minerva:propose with grill-plan and approved all sections directly, then directed auto continuation from the work phase
 - [skipped — small] same-day duplicate handling: dedupe dates for cadence math, keep raw count (evidence: single helper in app/subscriptions.py, covered by gap math in tests)
+- [3/3 accept] completion verification: all 5 success criteria honestly met, 96 tests pass (low-severity notes: "spread" wording vs MAD implementation — fixed in proposal; prefix-merge aggressiveness + no bimonthly bucket acknowledged as Open Questions tuning risks)
+- [2/2 accept, arbiter skipped — quorum already secured] review triage: #1 FIX comment-only (removed-gate ownership), #2 SUGGEST (order-dependent fuzzy merge), #3-5 IGNORE (cosmetic/deliberate), #6 FIX (multi-account route-label test)
+
+## Review finding 2026-06-07
+- SUGGEST (from triage #2): name-group fuzzy merge is order-dependent and non-transitive — name groups only ever merge into entity-id-seeded or alphabetically-earlier groups via first-match `break`; they never re-coalesce transitively with each other. Distinct from (and sharper than) the general "fuzzy threshold tuning" Open Question. Revisit if real synced data shows borderline merchants landing in the wrong stream.
 
 ## Implementation notes 2026-06-07
 - Detection lives in `app/subscriptions.py` as pure functions — no DB access, route passes `Transaction.query.filter_by(removed=False).all()` plus `date.today()`.

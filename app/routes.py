@@ -138,6 +138,9 @@ def _account_totals(institution_id, month_start, month_end):
 def subscriptions():
     from app.subscriptions import detect_subscriptions
 
+    # Full in-memory load is the intended tradeoff at personal-finance
+    # volumes. The removed=False filter here is a query optimization;
+    # detect_subscriptions owns the removed-gate as its tested contract.
     transactions = Transaction.query.filter_by(removed=False).all()
     streams = detect_subscriptions(transactions, date.today())
 

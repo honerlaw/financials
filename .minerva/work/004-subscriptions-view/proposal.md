@@ -38,9 +38,11 @@ product, black-box rules).
   visually distinguished. Pending transactions count (they're real charges;
   excluding them would falsely mark fresh streams inactive). `removed=True`
   rows are excluded.
-- **Amount display:** median amount shown; "varies" badge when the spread
-  exceeds 25% of the median. Amount never gates detection — card payments and
-  utilities vary wildly and must still be detected.
+- **Amount display:** median amount shown; "varies" badge when the median
+  absolute deviation exceeds 25% of the median (MAD, so a single price hike
+  doesn't flag "varies" but genuine swings do). Amount never gates
+  detection — card payments and utilities vary wildly and must still be
+  detected.
 - **Status:** `inactive` when `today − last_charge > 1.5 × cadence_days`,
   else `active`. Next-expected date = last charge + cadence.
 - **Route/UI:** `/subscriptions` page + navbar link (mirroring the
@@ -55,9 +57,9 @@ product, black-box rules).
 
 - `/subscriptions` lists detected streams; merchant-name variants and amount
   jitter don't split a stream
-- Each row shows cadence, median amount (with varies badge when spread >25%),
-  last charge, next expected, accounts, occurrence count, and an
-  active/inactive status pill
+- Each row shows cadence, median amount (with varies badge when amount MAD
+  >25% of median), last charge, next expected, accounts, occurrence count,
+  and an active/inactive status pill
 - A stream overdue by >1.5× its cadence renders inactive; one within that
   window renders active
 - Recurring inflows appear, visually distinct from outflows

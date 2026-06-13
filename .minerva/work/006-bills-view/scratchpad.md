@@ -1,0 +1,2 @@
+Promoted 2026-06-13 — see archive/scratchpad.md and .minerva/knowledge/005-*, 006-*.
+[synthesis] refreshed overview.md (watermark 004→006; 2 entries synthesized: 005-decision-bills-inactive-override, 006-decision-bills-payment-status-algorithm)

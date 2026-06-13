@@ -1,7 +1,7 @@
 # Proposal: infinite-scroll-transactions
 
 **Date**: 2026-06-13
-**Status**: In Progress
+**Status**: Shipped (2026-06-13)
 
 ## Goal
 
@@ -27,7 +27,10 @@ scroll removes that friction: the user simply scrolls and the table extends.
 - **IntersectionObserver** JS in `index.html`'s `{% block scripts %}` — watches the
   sentinel; when it enters the viewport, fires a fetch to `/api/transactions?page=N&…`,
   appends new `<tr>` rows, and advances the page counter. Stops observing when
-  `has_next=false`. A simple loading indicator (aria-live span) shows while fetching.
+  `has_next=false`. A simple loading indicator (aria-live span) shows while fetching. Session
+  expiry is detected via a Content-Type check before calling `.json()` — `@login_required`
+  returns a 302 that the browser follows transparently, making the login page appear as a
+  200 response; `r.ok` cannot detect this (see knowledge `005-pattern-fetch-content-type-session-detection`).
 - **Filters preserved** — `institution` and `month` query params are read from the
   current URL's `URLSearchParams` and forwarded on every fetch, so filtering still works
   correctly. The existing `applyFilter()` already does a full page reload, so filter

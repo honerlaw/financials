@@ -83,7 +83,6 @@ def _month_bounds(month):
 @bp.route('/')
 @login_required
 def index():
-    page = request.args.get('page', 1, type=int)
     institution_id = request.args.get('institution', type=int)
     month = request.args.get('month', '')
     month_start, month_end = _month_bounds(month)
@@ -98,7 +97,7 @@ def index():
         )
 
     transactions = query.order_by(Transaction.date.desc()).paginate(
-        page=page, per_page=50, error_out=False
+        page=1, per_page=50, error_out=False
     )
     institutions = Institution.query.order_by(Institution.name).all()
     account_totals = _account_totals(institution_id, month_start, month_end)
@@ -111,6 +110,46 @@ def index():
         selected_month=month,
         account_totals=account_totals,
     )
+
+
+@bp.route('/api/transactions')
+@login_required
+def transactions_json():
+    page = request.args.get('page', 1, type=int)
+    institution_id = request.args.get('institution', type=int)
+    month = request.args.get('month', '')
+    month_start, month_end = _month_bounds(month)
+
+    query = Transaction.query.filter_by(removed=False)
+    if institution_id:
+        query = query.filter_by(institution_id=institution_id)
+    if month_start is not None:
+        query = query.filter(
+            Transaction.date >= month_start,
+            Transaction.date < month_end,
+        )
+
+    pagination = query.order_by(Transaction.date.desc()).paginate(
+        page=page, per_page=50, error_out=False
+    )
+
+    items = []
+    for txn in pagination.items:
+        items.append({
+            'date': txn.date.strftime('%b %d, %Y'),
+            'description': txn.description,
+            'merchant_name': txn.merchant_name if txn.merchant_name and txn.merchant_name != txn.description else None,
+            'institution_name': txn.institution.name,
+            'amount': '%.2f' % abs(float(txn.amount)),
+            'amount_sign': '-' if txn.amount > 0 else '+',
+            'amount_class': 'text-danger' if txn.amount > 0 else 'text-success',
+        })
+
+    return jsonify({
+        'items': items,
+        'has_next': pagination.has_next,
+        'next_page': pagination.next_num,
+    })
 
 
 def _account_totals(institution_id, month_start, month_end):

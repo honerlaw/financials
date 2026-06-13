@@ -294,3 +294,100 @@ def test_index_shows_week_headers(auth_client, app):
     assert res.status_code == 200
     assert b'Jun 7' in res.data
     assert b'May 31' in res.data
+
+
+# ── /api/transactions ──────────────────────────────────────────────────────────
+
+def _seed_transactions(app, inst_id, count, prefix='txn', account_id='acc-001'):
+    with app.app_context():
+        for i in range(count):
+            db.session.add(Transaction(
+                plaid_transaction_id=f'{prefix}-{i:03d}',
+                institution_id=inst_id,
+                account_id=account_id,
+                date=date(2026, 5, 1),
+                description=f'Merchant {i}',
+                amount=Decimal('10.00'),
+            ))
+        db.session.commit()
+
+
+def test_transactions_json_page1(auth_client, app):
+    inst_id = _make_institution(app)
+    _seed_transactions(app, inst_id, count=60)
+
+    res = auth_client.get('/api/transactions?page=1')
+    assert res.status_code == 200
+    data = res.json
+    assert len(data['items']) == 50
+    assert data['has_next'] is True
+    assert data['next_page'] == 2
+
+
+def test_transactions_json_page2(auth_client, app):
+    inst_id = _make_institution(app)
+    _seed_transactions(app, inst_id, count=60)
+
+    res = auth_client.get('/api/transactions?page=2')
+    assert res.status_code == 200
+    data = res.json
+    assert len(data['items']) == 10
+    assert data['has_next'] is False
+
+
+def test_transactions_json_institution_filter(auth_client, app):
+    inst_id = _make_institution(app, name='AmEx', slug='amex')
+    inst2_id = _make_institution(app, name='Citi', slug='citi')
+    _seed_transactions(app, inst_id, count=1, prefix='amex')
+    _seed_transactions(app, inst2_id, count=1, prefix='citi')
+
+    res = auth_client.get(f'/api/transactions?institution={inst_id}')
+    assert res.status_code == 200
+    data = res.json
+    assert len(data['items']) == 1
+    assert data['items'][0]['institution_name'] == 'AmEx'
+
+
+def test_transactions_json_month_filter(auth_client, app):
+    inst_id = _make_institution(app)
+    with app.app_context():
+        db.session.add(Transaction(
+            plaid_transaction_id='may-txn',
+            institution_id=inst_id,
+            account_id='acc-001',
+            date=date(2026, 5, 15),
+            description='In May',
+            amount=Decimal('5.00'),
+        ))
+        db.session.add(Transaction(
+            plaid_transaction_id='apr-txn',
+            institution_id=inst_id,
+            account_id='acc-001',
+            date=date(2026, 4, 15),
+            description='In April',
+            amount=Decimal('5.00'),
+        ))
+        db.session.commit()
+
+    res = auth_client.get('/api/transactions?month=2026-05')
+    assert res.status_code == 200
+    data = res.json
+    descriptions = [item['description'] for item in data['items']]
+    assert 'In May' in descriptions
+    assert 'In April' not in descriptions
+
+
+def test_transactions_json_item_shape(auth_client, app):
+    inst_id = _make_institution(app)
+    _make_transaction(app, inst_id, description='Coffee')
+
+    res = auth_client.get('/api/transactions')
+    assert res.status_code == 200
+    item = res.json['items'][0]
+    assert 'date' in item
+    assert 'description' in item
+    assert 'merchant_name' in item
+    assert 'institution_name' in item
+    assert 'amount' in item
+    assert 'amount_sign' in item
+    assert 'amount_class' in item

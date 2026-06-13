@@ -82,25 +82,11 @@
   </div>
 </div>
 
-{% if transactions.pages > 1 %}
-<nav class="mt-3 d-flex justify-content-center">
-  <ul class="pagination pagination-sm">
-    {% if transactions.has_prev %}
-    <li class="page-item">
-      <a class="page-link" href="?page={{ transactions.prev_num }}{% if selected_institution %}&institution={{ selected_institution }}{% endif %}{% if selected_month %}&month={{ selected_month }}{% endif %}">«</a>
-    </li>
-    {% endif %}
-    <li class="page-item disabled">
-      <span class="page-link">{{ transactions.page }} / {{ transactions.pages }}</span>
-    </li>
-    {% if transactions.has_next %}
-    <li class="page-item">
-      <a class="page-link" href="?page={{ transactions.next_num }}{% if selected_institution %}&institution={{ selected_institution }}{% endif %}{% if selected_month %}&month={{ selected_month }}{% endif %}">»</a>
-    </li>
-    {% endif %}
-  </ul>
-</nav>
-{% endif %}
+<div id="scroll-sentinel"
+     data-has-next="{{ 'true' if transactions.has_next else 'false' }}"
+     data-next-page="{{ transactions.next_num or 2 }}">
+</div>
+<p id="load-status" class="text-center text-muted small mt-2" aria-live="polite"></p>
 {% endblock %}
 
 {% block scripts %}
@@ -113,5 +99,87 @@ function applyFilter() {
   if (month) p.set('month', month);
   location.href = '/?' + p.toString();
 }
+
+(function () {
+  const sentinel = document.getElementById('scroll-sentinel');
+  const status = document.getElementById('load-status');
+  const tbody = document.querySelector('tbody');
+
+  if (!sentinel || sentinel.dataset.hasNext !== 'true') return;
+
+  let nextPage = parseInt(sentinel.dataset.nextPage, 10);
+  let loading = false;
+
+  const filterParams = new URLSearchParams(location.search);
+
+  function appendRow(txn) {
+    const tr = document.createElement('tr');
+
+    const tdDate = document.createElement('td');
+    tdDate.className = 'text-muted small text-nowrap';
+    tdDate.textContent = txn.date;
+
+    const tdDesc = document.createElement('td');
+    tdDesc.textContent = txn.description;
+    if (txn.merchant_name) {
+      const span = document.createElement('span');
+      span.className = 'text-muted small ms-1';
+      span.textContent = '· ' + txn.merchant_name;
+      tdDesc.appendChild(span);
+    }
+
+    const tdInst = document.createElement('td');
+    const badge = document.createElement('span');
+    badge.className = 'badge bg-primary';
+    badge.textContent = txn.institution_name;
+    tdInst.appendChild(badge);
+
+    const tdAmount = document.createElement('td');
+    tdAmount.className = 'text-end text-nowrap ' + txn.amount_class;
+    tdAmount.textContent = txn.amount_sign + '$' + txn.amount;
+
+    tr.appendChild(tdDate);
+    tr.appendChild(tdDesc);
+    tr.appendChild(tdInst);
+    tr.appendChild(tdAmount);
+    tbody.appendChild(tr);
+  }
+
+  const observer = new IntersectionObserver(function (entries) {
+    if (!entries[0].isIntersecting || loading) return;
+    loading = true;
+    status.textContent = 'Loading…';
+
+    const params = new URLSearchParams(filterParams);
+    params.set('page', nextPage);
+
+    fetch('/api/transactions?' + params.toString())
+      .then(function (r) {
+        if (!(r.headers.get('content-type') || '').includes('application/json')) {
+          observer.disconnect();
+          window.location.href = '/login';
+          return null;
+        }
+        return r.json();
+      })
+      .then(function (data) {
+        if (!data) return;
+        data.items.forEach(appendRow);
+        status.textContent = '';
+        if (data.has_next) {
+          nextPage = data.next_page;
+          loading = false;
+        } else {
+          observer.disconnect();
+        }
+      })
+      .catch(function () {
+        loading = false;
+        status.textContent = 'Failed to load more — scroll up and try again.';
+      });
+  }, { rootMargin: '200px' });
+
+  observer.observe(sentinel);
+}());
 </script>
 {% endblock %}

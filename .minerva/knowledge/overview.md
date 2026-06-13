@@ -1,6 +1,6 @@
 # Knowledge overview
 
-<!-- synthesis-watermark: 004 -->
+<!-- synthesis-watermark: 006 -->
 
 ## Plaid data flow: piggyback, then refresh
 
@@ -24,6 +24,17 @@ card payments and utilities vanish), median-bucket fit alone is insufficient
 without a per-gap regularity requirement, and the "varies" badge uses MAD so
 single price hikes don't false-flag. Its numeric thresholds are provisional
 pending real synced data.
+
+The `/bills` page extends this pattern with a monthly payment-status layer.
+[[006-decision-bills-payment-status-algorithm]] records the algorithm: expected
+day-of-month is the median of historical transaction `.day` values; a bill is
+`paid` if any current-month transaction falls within ±6 days of that expected
+date, `upcoming` if the window hasn't opened yet, and `unpaid` otherwise. The
+±6-day window matches the monthly cadence tolerance already in `CADENCES`.
+[[005-decision-bills-inactive-override]] records the safety rule that prevents
+false alarms: a stream past 1.5× its cadence age-out boundary gets
+`payment_status='inactive'` (with dimmed rendering) instead of `'unpaid'` — a
+lapsed cancelled bill must never surface as an overdue obligation.
 
 ## Testing time-dependent code
 

@@ -163,6 +163,36 @@ def subscriptions():
     )
 
 
+@bp.route('/bills')
+@login_required
+def bills():
+    from app.bills import detect_bills
+
+    transactions = Transaction.query.filter_by(removed=False).all()
+    bill_list = detect_bills(transactions, date.today())
+
+    accounts = {a.plaid_account_id: a for a in Account.query.all()}
+    institution_names = {i.id: i.name for i in Institution.query.all()}
+    for bill in bill_list:
+        labels = set()
+        for institution_id, account_id in bill.pop('account_keys'):
+            institution = institution_names.get(institution_id, '')
+            account = accounts.get(account_id)
+            labels.add(f'{institution} · {account.name}' if account else institution)
+        bill['accounts'] = sorted(labels)
+
+    paid_count = sum(1 for b in bill_list if b['payment_status'] == 'paid')
+    unpaid_count = sum(1 for b in bill_list if b['payment_status'] == 'unpaid')
+    upcoming_count = sum(1 for b in bill_list if b['payment_status'] == 'upcoming')
+    return render_template(
+        'bills.html',
+        bills=bill_list,
+        paid_count=paid_count,
+        unpaid_count=unpaid_count,
+        upcoming_count=upcoming_count,
+    )
+
+
 @bp.route('/settings')
 @login_required
 def settings():

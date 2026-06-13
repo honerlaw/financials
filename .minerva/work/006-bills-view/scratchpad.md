@@ -1,6 +1,1 @@
-## Scratchpad — 006-bills-view
-
-## Panel decisions 2026-06-13
-- [skipped — small] scope check: single additive unit (evidence: new module bills.py, new route /bills, new template bills.html, nav link in base.html, tests/test_bills.py — no schema changes, no shared-contract mutations)
-- [skipped — small] approach selection: Approach A (bills.py imports subscriptions.py internals) strictly dominant (rejected: B — loses raw transactions needed for payment-status computation; C — subscriptions.py multi-purpose, harder to test)
-- [skipped — small] whole-proposal acceptance: every section trivially sound, single-surface new page with no cross-cutting contract changes
+Promoted 2026-06-13 — see archive/scratchpad.md and .minerva/knowledge/005-*, 006-*.

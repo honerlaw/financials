@@ -13,7 +13,7 @@ transaction history rather than manual entry.
 
 ## Status
 
-Draft
+Shipped (2026-06-13)
 
 ## Approach
 

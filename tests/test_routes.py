@@ -241,3 +241,56 @@ def test_sync_status_returns_json(auth_client):
     data = res.json
     assert 'last_sync' in data
     assert 'institutions' in data
+
+
+# ── Week grouping ─────────────────────────────────────────────────────────────
+
+class _FakeTxn:
+    def __init__(self, d):
+        self.date = d
+
+
+def test_group_by_week_sunday_boundary():
+    from app.routes import _group_by_week
+    # 2026-06-07 is a Sunday; 2026-06-13 is a Saturday (same week)
+    # 2026-06-14 is the next Sunday (new week)
+    txns = [_FakeTxn(date(2026, 6, 14)), _FakeTxn(date(2026, 6, 13)), _FakeTxn(date(2026, 6, 7))]
+    groups = _group_by_week(txns)
+    assert len(groups) == 2
+    label0, group0 = groups[0]
+    label1, group1 = groups[1]
+    assert group0 == [txns[0]]
+    assert group1 == [txns[1], txns[2]]
+    assert 'Jun 14' in label0
+    assert 'Jun 7' in label1
+    assert '13' in label1
+
+
+def test_group_by_week_empty():
+    from app.routes import _group_by_week
+    assert _group_by_week([]) == []
+
+
+def test_group_by_week_cross_month():
+    from app.routes import _group_by_week
+    # May 31, 2026 is a Sunday; Jun 1 is in the same week
+    txns = [_FakeTxn(date(2026, 6, 1)), _FakeTxn(date(2026, 5, 31))]
+    groups = _group_by_week(txns)
+    assert len(groups) == 1
+    label, group = groups[0]
+    assert len(group) == 2
+    assert 'May 31' in label
+    assert 'Jun 6' in label
+
+
+def test_index_shows_week_headers(auth_client, app):
+    inst_id = _make_institution(app)
+    _make_account(app, inst_id)
+    # Mon Jun 1 → preceding Sunday May 31 → week header "May 31 – Jun 6, 2026"
+    # Mon Jun 8 → preceding Sunday Jun 7  → week header "Jun 7–13, 2026"
+    _make_txn_row(app, inst_id, 'acc-001', 'w1', '5.00', date(2026, 6, 1))
+    _make_txn_row(app, inst_id, 'acc-001', 'w2', '8.00', date(2026, 6, 8))
+    res = auth_client.get('/')
+    assert res.status_code == 200
+    assert b'Jun 7' in res.data
+    assert b'May 31' in res.data

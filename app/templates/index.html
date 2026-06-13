@@ -53,23 +53,30 @@
         </tr>
       </thead>
       <tbody>
-      {% for txn in transactions.items %}
-      <tr>
-        <td class="text-muted small text-nowrap">{{ txn.date.strftime('%b %d, %Y') }}</td>
-        <td>
-          {{ txn.description }}
-          {% if txn.merchant_name and txn.merchant_name != txn.description %}
-          <span class="text-muted small ms-1">· {{ txn.merchant_name }}</span>
-          {% endif %}
-        </td>
-        <td><span class="badge bg-primary">{{ txn.institution.name }}</span></td>
-        <td class="text-end text-nowrap {% if txn.amount > 0 %}text-danger{% else %}text-success{% endif %}">
-          {% if txn.amount > 0 %}-{% else %}+{% endif %}${{ "%.2f"|format(txn.amount|abs) }}
-        </td>
-      </tr>
+      {% if week_groups %}
+        {% for label, group in week_groups %}
+        <tr class="table-secondary">
+          <td colspan="4" class="small fw-semibold text-muted py-1 px-3">{{ label }}</td>
+        </tr>
+        {% for txn in group %}
+        <tr>
+          <td class="text-muted small text-nowrap">{{ txn.date.strftime('%b %d, %Y') }}</td>
+          <td>
+            {{ txn.description }}
+            {% if txn.merchant_name and txn.merchant_name != txn.description %}
+            <span class="text-muted small ms-1">· {{ txn.merchant_name }}</span>
+            {% endif %}
+          </td>
+          <td><span class="badge bg-primary">{{ txn.institution.name }}</span></td>
+          <td class="text-end text-nowrap {% if txn.amount > 0 %}text-danger{% else %}text-success{% endif %}">
+            {% if txn.amount > 0 %}-{% else %}+{% endif %}${{ "%.2f"|format(txn.amount|abs) }}
+          </td>
+        </tr>
+        {% endfor %}
+        {% endfor %}
       {% else %}
       <tr><td colspan="4" class="text-center text-muted py-5">No transactions found.</td></tr>
-      {% endfor %}
+      {% endif %}
       </tbody>
     </table>
   </div>

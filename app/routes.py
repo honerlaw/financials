@@ -1,5 +1,5 @@
 from functools import wraps
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 import threading
 
 from flask import (
@@ -41,6 +41,32 @@ def logout():
 
 # ── Pages ─────────────────────────────────────────────────────────────────────
 
+def _week_label(week_start):
+    week_end = week_start + timedelta(days=6)
+    if week_start.year != week_end.year:
+        return f"{week_start.strftime('%b %-d, %Y')} – {week_end.strftime('%b %-d, %Y')}"
+    if week_start.month != week_end.month:
+        return f"{week_start.strftime('%b %-d')} – {week_end.strftime('%b %-d, %Y')}"
+    return f"{week_start.strftime('%b %-d')}–{week_end.day}, {week_end.year}"
+
+
+def _group_by_week(transactions):
+    """Group an ordered list of transactions into (week_label, [txns]) pairs.
+
+    Weeks run Sunday–Saturday. Input order is preserved within each group.
+    """
+    groups = {}
+    order = []
+    for txn in transactions:
+        days_back = (txn.date.weekday() + 1) % 7
+        week_start = txn.date - timedelta(days=days_back)
+        if week_start not in groups:
+            groups[week_start] = []
+            order.append(week_start)
+        groups[week_start].append(txn)
+    return [(_week_label(ws), groups[ws]) for ws in order]
+
+
 def _month_bounds(month):
     """Parse 'YYYY-MM' into (start_date, end_date_exclusive), or (None, None) on failure."""
     if not month:
@@ -79,6 +105,7 @@ def index():
     return render_template(
         'index.html',
         transactions=transactions,
+        week_groups=_group_by_week(transactions.items),
         institutions=institutions,
         selected_institution=institution_id,
         selected_month=month,

@@ -1,7 +1,7 @@
 # Proposal: transactions-week-sections
 
 **Date**: 2026-06-13
-**Status**: In Progress
+**Status**: Shipped (2026-06-13)
 
 ## Goal
 

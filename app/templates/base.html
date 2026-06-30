@@ -25,6 +25,23 @@
   </div>
 </nav>
 {% endif %}
+{% if login_required_institutions %}
+<div class="alert alert-warning border-0 rounded-0 mb-0 px-4 py-3" role="alert">
+  <div class="d-flex align-items-center flex-wrap gap-2">
+    <strong>⚠ Reconnection needed.</strong>
+    <span>These accounts have stopped syncing and need to be re-authenticated —
+      transactions are not being pulled until you reconnect:</span>
+  </div>
+  <div class="d-flex flex-wrap gap-2 mt-2">
+    {% for inst in login_required_institutions %}
+    <button class="btn btn-sm btn-warning fw-medium"
+            onclick="reconnectInstitution({{ inst.id }}, this)">
+      Reconnect {{ inst.name }}
+    </button>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
 <div class="{% block container_class %}container-fluid py-4 px-4{% endblock %}">
   {% block content %}{% endblock %}
 </div>
@@ -42,6 +59,39 @@ async function triggerSync(btn) {
   }
 }
 </script>
+{% if session.get('authenticated') %}
+<script src="https://cdn.plaid.com/link/v2/stable/link-initialize.js"></script>
+<script>
+// Shared reconnect helper: re-authenticate an existing Item via Plaid update
+// mode. Used by the reconnect banner (above) and the settings "Re-connect"
+// button. Update mode keeps the existing access_token, so onSuccess performs
+// NO token exchange — we just clear login_required server-side and reload.
+async function reconnectInstitution(id, btn) {
+  const orig = btn ? btn.textContent : null;
+  const reset = () => { if (btn) { btn.disabled = false; btn.textContent = orig; } };
+  if (btn) { btn.disabled = true; btn.textContent = 'Connecting…'; }
+  try {
+    const res = await fetch(`/api/plaid/update_link_token/${id}`, { method: 'POST' });
+    const { link_token, error } = await res.json();
+    if (error) { alert('Error: ' + error); reset(); return; }
+    Plaid.create({
+      token: link_token,
+      onSuccess: async (_publicToken, _metadata) => {
+        await fetch(`/api/plaid/reconnect/${id}`, { method: 'POST' });
+        location.reload();
+      },
+      onExit: (err) => {
+        if (err) alert(err.display_message || err.error_message || 'Cancelled');
+        reset();
+      },
+    }).open();
+  } catch (e) {
+    alert('Failed to start reconnect: ' + e.message);
+    reset();
+  }
+}
+</script>
+{% endif %}
 {% block scripts %}{% endblock %}
 </body>
 </html>

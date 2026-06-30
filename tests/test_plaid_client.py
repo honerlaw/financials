@@ -32,6 +32,25 @@ def test_create_link_token(MockApi):
 
 
 @patch('app.plaid_client.plaid_api.PlaidApi')
+def test_create_update_link_token(MockApi):
+    mock_response = MagicMock()
+    mock_response.link_token = 'link-update-xyz'
+    MockApi.return_value.link_token_create.return_value = mock_response
+
+    client = _make_client()
+    client._client = MockApi.return_value
+    token = client.create_update_link_token('access-existing-123')
+
+    assert token == 'link-update-xyz'
+    # Update mode: the request must carry the existing access_token and must
+    # NOT carry the link-time-only products/transactions parameters.
+    request = MockApi.return_value.link_token_create.call_args[0][0]
+    assert request.access_token == 'access-existing-123'
+    assert not hasattr(request, 'products')
+    assert not hasattr(request, 'transactions')
+
+
+@patch('app.plaid_client.plaid_api.PlaidApi')
 def test_exchange_token(MockApi):
     api = MockApi.return_value
     api.item_public_token_exchange.return_value = MagicMock(

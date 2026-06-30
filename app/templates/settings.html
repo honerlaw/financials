@@ -29,7 +29,8 @@
       </div>
       {% if inst.status == 'login_required' %}
         <span class="badge bg-warning text-dark">Login required</span>
-        <button class="btn btn-sm btn-outline-primary" onclick="connectInstitution()">Re-connect</button>
+        <button class="btn btn-sm btn-outline-primary"
+                onclick="reconnectInstitution({{ inst.id }}, this)">Re-connect</button>
       {% else %}
         <span class="badge bg-success">Active</span>
       {% endif %}
@@ -79,7 +80,6 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="https://cdn.plaid.com/link/v2/stable/link-initialize.js"></script>
 <script>
 async function connectInstitution() {
   const res = await fetch('/api/plaid/create_link_token', { method: 'POST' });

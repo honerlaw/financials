@@ -21,6 +21,23 @@ def login_required(f):
     return decorated
 
 
+@bp.app_context_processor
+def inject_login_required_institutions():
+    """Expose institutions needing re-auth to every template.
+
+    Drives the reconnect banner in base.html. Skips the DB query entirely for
+    unauthenticated requests (login page, future error pages).
+    """
+    if not session.get('authenticated'):
+        return {'login_required_institutions': []}
+    return {
+        'login_required_institutions': Institution.query
+        .filter_by(status='login_required')
+        .order_by(Institution.name)
+        .all()
+    }
+
+
 # ── Auth ──────────────────────────────────────────────────────────────────────
 
 @bp.route('/login', methods=['GET', 'POST'])
@@ -320,6 +337,52 @@ def remove_institution(institution_id):
         pass  # clean up locally even if Plaid call fails
     db.session.delete(inst)
     db.session.commit()
+    return jsonify({'status': 'ok'})
+
+
+@bp.route('/api/plaid/update_link_token/<int:institution_id>', methods=['POST'])
+@login_required
+def update_link_token(institution_id):
+    """Create a Plaid Link token in update mode for an existing institution.
+
+    Used by the reconnect flow to re-authenticate an Item that hit
+    ITEM_LOGIN_REQUIRED, without creating a new Item.
+    """
+    from app.plaid_client import PlaidClient
+    inst = db.session.get(Institution, institution_id)
+    if inst is None:
+        return jsonify({'error': 'Institution not found'}), 404
+    client = PlaidClient(current_app.config)
+    try:
+        return jsonify({'link_token': client.create_update_link_token(inst.access_token)})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 400
+
+
+@bp.route('/api/plaid/reconnect/<int:institution_id>', methods=['POST'])
+@login_required
+def reconnect_institution(institution_id):
+    """Mark an institution active again after a successful update-mode re-auth.
+
+    Update mode keeps the existing access_token, so there is no token to
+    exchange — we just clear the login_required state and kick a background
+    sync to backfill the transactions missed while the Item was disconnected.
+    """
+    from app.sync import sync_all_institutions
+    inst = db.session.get(Institution, institution_id)
+    if inst is None:
+        return jsonify({'error': 'Institution not found'}), 404
+
+    inst.status = 'active'
+    db.session.commit()
+
+    app = current_app._get_current_object()
+
+    def run():
+        with app.app_context():
+            sync_all_institutions()
+
+    threading.Thread(target=run, daemon=True).start()
     return jsonify({'status': 'ok'})
 
 

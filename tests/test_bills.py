@@ -177,10 +177,14 @@ def test_inactive_stream_gets_inactive_status():
 
 def test_inactive_sorts_last():
     """Inactive bills sort after unpaid/upcoming/paid."""
+    # Pure function takes `today` as an argument, so a FIXED today + fixed seeds
+    # is deterministic (knowledge 004). Mixing fixed seeds with date.today()
+    # was the bug: as real time drifted past mid-June 2026 the electric stream's
+    # last charge aged beyond the 45-day active boundary and flipped to inactive.
     # unpaid: expected Jun 5, no Jun txn; last charge May 5 — still active (39d < 45d)
     unpaid = monthly_bill(5, day=5, description='ELECTRIC')
-    # inactive: stopped 50 days ago
-    base = date.today() - timedelta(days=50)
+    # inactive: stopped 50 days before TODAY (> 1.5 * 30 = 45-day boundary)
+    base = TODAY - timedelta(days=50)
     inactive = [
         FakeTxn(base - timedelta(days=90), amount='60.00', description='OLD GYM',
                 merchant_entity_id='ent-gym'),
@@ -191,8 +195,10 @@ def test_inactive_sorts_last():
         FakeTxn(base, amount='60.00', description='OLD GYM',
                 merchant_entity_id='ent-gym'),
     ]
-    bills = detect_bills(unpaid + inactive, date.today())
+    bills = detect_bills(unpaid + inactive, TODAY)
     statuses = [b['payment_status'] for b in bills]
+    assert 'unpaid' in statuses
+    assert 'inactive' in statuses
     assert statuses.index('inactive') > statuses.index('unpaid')
 
 

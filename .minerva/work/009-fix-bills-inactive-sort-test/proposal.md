@@ -1,7 +1,7 @@
 # Proposal: fix-bills-inactive-sort-test
 
 **Date**: 2026-06-30
-**Status**: Draft
+**Status**: Shipped (2026-06-30)
 
 ## Goal
 

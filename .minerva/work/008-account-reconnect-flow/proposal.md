@@ -1,7 +1,7 @@
 # Proposal: account-reconnect-flow
 
 **Date**: 2026-06-30
-**Status**: Draft
+**Status**: Shipped (2026-06-30)
 
 ## Goal
 

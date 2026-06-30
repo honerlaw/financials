@@ -52,6 +52,26 @@ class PlaidClient:
         )
         return response.link_token
 
+    def create_update_link_token(self, access_token):
+        """Create a link token in *update mode* for an existing Item.
+
+        Passing ``access_token`` puts Plaid Link into update mode for that
+        specific Item, letting the user re-authenticate after an
+        ITEM_LOGIN_REQUIRED without creating a new Item. ``products`` and
+        ``transactions`` are link-time-only parameters and are omitted — Plaid
+        rejects them when ``access_token`` is present.
+        """
+        response = self._client.link_token_create(
+            LinkTokenCreateRequest(
+                client_name='Financial Sync',
+                country_codes=[CountryCode('US')],
+                language='en',
+                user=LinkTokenCreateRequestUser(client_user_id='local-user'),
+                access_token=access_token,
+            )
+        )
+        return response.link_token
+
     def exchange_token(self, public_token):
         exchange_resp = self._client.item_public_token_exchange(
             ItemPublicTokenExchangeRequest(public_token=public_token)

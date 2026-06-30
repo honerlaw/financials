@@ -99,6 +99,88 @@ def test_remove_institution_deletes_it(MockPlaidClient, auth_client, app):
         assert db.session.get(Institution, inst_id) is None
 
 
+# ── Reconnect banner + update-mode reconnect ───────────────────────────────────
+
+def _make_login_required_institution(app, name='Test Bank', slug='test_bank'):
+    with app.app_context():
+        inst = Institution(
+            name=name, slug=slug,
+            access_token='access-test', item_id=f'item-{slug}',
+            status='login_required',
+        )
+        db.session.add(inst)
+        db.session.commit()
+        return inst.id
+
+
+def test_banner_shows_when_login_required(auth_client, app):
+    _make_login_required_institution(app, name='Truist Bank', slug='truist')
+    res = auth_client.get('/')
+    assert res.status_code == 200
+    assert b'Reconnection needed' in res.data
+    assert b'Reconnect Truist Bank' in res.data
+
+
+def test_banner_absent_when_all_active(auth_client, app):
+    _make_institution(app, name='Active Bank', slug='active_bank')  # status defaults to 'active'
+    res = auth_client.get('/')
+    assert res.status_code == 200
+    assert b'Reconnection needed' not in res.data
+
+
+def test_banner_absent_when_unauthenticated(client, app):
+    # Unauthenticated request redirects to login; no DB-driven banner served.
+    _make_login_required_institution(app)
+    res = client.get('/', follow_redirects=True)
+    assert b'Reconnection needed' not in res.data
+
+
+@patch('app.plaid_client.PlaidClient')
+def test_update_link_token_returns_token(MockPlaidClient, auth_client, app):
+    inst_id = _make_login_required_institution(app)
+    MockPlaidClient.return_value.create_update_link_token.return_value = 'link-update-abc'
+    res = auth_client.post(f'/api/plaid/update_link_token/{inst_id}')
+    assert res.status_code == 200
+    assert res.json['link_token'] == 'link-update-abc'
+    # Built from the institution's stored access token.
+    MockPlaidClient.return_value.create_update_link_token.assert_called_once_with('access-test')
+
+
+def test_update_link_token_404_for_missing(auth_client):
+    res = auth_client.post('/api/plaid/update_link_token/99999')
+    assert res.status_code == 404
+
+
+def test_update_link_token_requires_auth(client, app):
+    inst_id = _make_login_required_institution(app)
+    res = client.post(f'/api/plaid/update_link_token/{inst_id}')
+    assert res.status_code == 302  # redirect to login, not a 200 with a token
+
+
+@patch('app.sync.sync_all_institutions')
+def test_reconnect_sets_status_active(mock_sync, auth_client, app):
+    inst_id = _make_login_required_institution(app)
+    res = auth_client.post(f'/api/plaid/reconnect/{inst_id}')
+    assert res.status_code == 200
+    assert res.json['status'] == 'ok'
+    with app.app_context():
+        assert db.session.get(Institution, inst_id).status == 'active'
+
+
+def test_reconnect_404_for_missing(auth_client):
+    res = auth_client.post('/api/plaid/reconnect/99999')
+    assert res.status_code == 404
+
+
+def test_reconnect_requires_auth(client, app):
+    inst_id = _make_login_required_institution(app)
+    res = client.post(f'/api/plaid/reconnect/{inst_id}')
+    assert res.status_code == 302
+    with app.app_context():
+        # Status unchanged because the endpoint never ran.
+        assert db.session.get(Institution, inst_id).status == 'login_required'
+
+
 def _make_account(app, inst_id, plaid_account_id='acc-001', name='Sapphire', mask='1234',
                   current_balance=None):
     with app.app_context():

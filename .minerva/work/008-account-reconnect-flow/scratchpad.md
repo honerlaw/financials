@@ -17,5 +17,7 @@
 
 ---
 
+- [synthesis] no-op (below threshold: only entry 007 unsynthesized, watermark 6→still 6; no link rot).
+
 ## Promoted 2026-06-30
 Knowledge promoted to `.minerva/knowledge/007-decision-plaid-reconnect-update-mode.md`. Raw working notes above retained for history; proposal.md reflects shipped reality.

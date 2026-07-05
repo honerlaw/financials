@@ -1,0 +1,6 @@
+# Doppler project/config mapping for this repo. `doppler setup` reads this so a
+# developer running locally is auto-linked to the right project/config without
+# an interactive prompt. See docs/doppler-migration.md.
+setup:
+  project: financials
+  config: dev

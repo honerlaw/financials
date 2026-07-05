@@ -15,3 +15,5 @@
 
 ## Review finding 2026-07-05
 - [SUGGEST] `spending.week_start` duplicates the inline Sun-start math in `routes._group_by_week` (`(weekday()+1)%7`). Not worth a cross-module refactor now; if a third caller appears, consolidate into one shared helper.
+
+- [synthesis] refreshed overview.md (watermark 006→008; 2 entries: 007 reconnect, 008 spend/budget)

@@ -19,7 +19,7 @@ transaction history.
 
 ## Status
 
-Draft
+Shipped (2026-07-05)
 
 ## Approach
 

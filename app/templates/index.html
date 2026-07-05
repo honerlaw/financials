@@ -9,8 +9,11 @@
 
     <div class="row row-cols-2 row-cols-md-3 row-cols-xl-5 g-2 mb-3">
       {% for wk in budget_weeks %}
+      {% set wk_iso = wk.week_start.strftime('%Y-%m-%d') %}
       <div class="col">
-        <div class="border rounded p-2 h-100 {% if wk.is_current %}border-primary border-2 bg-primary-subtle{% endif %}">
+        <div class="border rounded p-2 h-100 {% if wk.is_current %}border-primary border-2 bg-primary-subtle{% endif %}{% if selected_start == wk_iso %} border-primary border-2 shadow bg-primary-subtle{% endif %}"
+             style="cursor: pointer;" title="Show this week's transactions"
+             onclick="selectWindow('{{ wk_iso }}', 7)">
           <div class="d-flex justify-content-between align-items-baseline gap-1">
             <span class="small fw-semibold text-nowrap">{{ wk.label }}</span>
             {% if wk.is_current %}<span class="badge bg-primary">This week</span>{% endif %}
@@ -34,8 +37,11 @@
     {% if spend_max and spend_max > 0 %}
     <div class="d-flex align-items-end gap-1" style="height: 120px;">
       {% for bar in spend_bars %}
-      <div class="flex-fill d-flex flex-column justify-content-end h-100"
-           title="{{ bar.date.strftime('%b %-d') }}: ${{ '%.2f'|format(bar.total) }}">
+      {% set bar_iso = bar.date.strftime('%Y-%m-%d') %}
+      <div class="flex-fill d-flex flex-column justify-content-end h-100 {% if selected_start == bar_iso %}bg-primary-subtle rounded{% endif %}"
+           style="cursor: pointer;"
+           title="{{ bar.date.strftime('%b %-d') }}: ${{ '%.2f'|format(bar.total) }} — click to filter"
+           onclick="selectWindow('{{ bar_iso }}', 1)">
         <div class="bg-primary rounded-top"
              style="height: {{ bar.pct }}%;{% if bar.total > 0 %} min-height: 2px;{% endif %}"></div>
       </div>
@@ -95,6 +101,15 @@
   {% endif %}
 </div>
 
+{% if window_active %}
+<div class="d-flex align-items-center gap-2 mb-2 flex-wrap">
+  <span class="badge bg-primary-subtle text-primary-emphasis border border-primary-subtle">
+    Showing {{ window_label }}
+  </span>
+  <button class="btn btn-sm btn-outline-secondary py-0" onclick="clearWindow()">Clear window</button>
+</div>
+{% endif %}
+
 <div class="card shadow-sm">
   <div class="table-responsive">
     <table class="table table-hover align-middle mb-0">
@@ -149,6 +164,30 @@ function applyFilter() {
   const p = new URLSearchParams();
   if (inst) p.set('institution', inst);
   if (month) p.set('month', month);
+  location.href = '/?' + p.toString();
+}
+
+// Filter the transactions table to a date window [start, start+days) when a
+// chart element is clicked. Preserves the other filters (institution/month),
+// drops pagination. Local date math avoids the UTC rollback of toISOString().
+function selectWindow(startStr, days) {
+  const p = new URLSearchParams(location.search);
+  p.set('start', startStr);
+  const d = new Date(startStr + 'T00:00:00');
+  d.setDate(d.getDate() + days);
+  const iso = d.getFullYear() + '-' +
+    String(d.getMonth() + 1).padStart(2, '0') + '-' +
+    String(d.getDate()).padStart(2, '0');
+  p.set('end', iso);
+  p.delete('page');
+  location.href = '/?' + p.toString();
+}
+
+function clearWindow() {
+  const p = new URLSearchParams(location.search);
+  p.delete('start');
+  p.delete('end');
+  p.delete('page');
   location.href = '/?' + p.toString();
 }
 

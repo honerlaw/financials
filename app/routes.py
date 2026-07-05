@@ -97,6 +97,28 @@ def _month_bounds(month):
         return None, None
 
 
+def _parse_iso(s):
+    """Parse a 'YYYY-MM-DD' string to a date, or None if missing/invalid."""
+    try:
+        return date.fromisoformat(s)
+    except (ValueError, TypeError):
+        return None
+
+
+def _table_date_bounds(args):
+    """Effective (start, end_exclusive) date filter for the transactions table.
+
+    A valid ?start=&end= window (from clicking a chart element) takes precedence
+    over ?month=. Returns (None, None) when neither is set or valid — a
+    malformed window falls back to the month filter rather than erroring.
+    """
+    start = _parse_iso(args.get('start'))
+    end = _parse_iso(args.get('end'))
+    if start and end and start < end:
+        return start, end
+    return _month_bounds(args.get('month', ''))
+
+
 def _spending_context(institution_id, chart_month, today):
     """Daily spend series + weekly-budget rows for the dashboard spending section.
 
@@ -148,22 +170,35 @@ def _spending_context(institution_id, chart_month, today):
 def index():
     institution_id = request.args.get('institution', type=int)
     month = request.args.get('month', '')
-    month_start, month_end = _month_bounds(month)
+    filter_start, filter_end = _table_date_bounds(request.args)
 
     query = Transaction.query.filter_by(removed=False)
     if institution_id:
         query = query.filter_by(institution_id=institution_id)
-    if month_start is not None:
+    if filter_start is not None:
         query = query.filter(
-            Transaction.date >= month_start,
-            Transaction.date < month_end,
+            Transaction.date >= filter_start,
+            Transaction.date < filter_end,
         )
 
     transactions = query.order_by(Transaction.date.desc()).paginate(
         page=1, per_page=50, error_out=False
     )
     institutions = Institution.query.order_by(Institution.name).all()
-    account_totals = _account_totals(institution_id, month_start, month_end)
+    account_totals = _account_totals(institution_id, filter_start, filter_end)
+
+    # A ?start/?end window (chart click) drives a "Showing …" indicator above
+    # the table; the spending chart itself stays scoped to the month.
+    window_start = _parse_iso(request.args.get('start'))
+    window_end = _parse_iso(request.args.get('end'))
+    window_active = bool(window_start and window_end and window_start < window_end)
+    window_label = None
+    if window_active:
+        last = window_end - timedelta(days=1)
+        window_label = (
+            window_start.strftime('%b %-d, %Y') if window_start == last
+            else f"{window_start.strftime('%b %-d')} – {last.strftime('%b %-d, %Y')}"
+        )
 
     today = date.today()
     spending = _spending_context(institution_id, month or today.strftime('%Y-%m'), today)
@@ -175,6 +210,9 @@ def index():
         selected_institution=institution_id,
         selected_month=month,
         account_totals=account_totals,
+        window_active=window_active,
+        window_label=window_label,
+        selected_start=request.args.get('start') if window_active else None,
         **spending,
     )
 
@@ -184,16 +222,15 @@ def index():
 def transactions_json():
     page = request.args.get('page', 1, type=int)
     institution_id = request.args.get('institution', type=int)
-    month = request.args.get('month', '')
-    month_start, month_end = _month_bounds(month)
+    filter_start, filter_end = _table_date_bounds(request.args)
 
     query = Transaction.query.filter_by(removed=False)
     if institution_id:
         query = query.filter_by(institution_id=institution_id)
-    if month_start is not None:
+    if filter_start is not None:
         query = query.filter(
-            Transaction.date >= month_start,
-            Transaction.date < month_end,
+            Transaction.date >= filter_start,
+            Transaction.date < filter_end,
         )
 
     pagination = query.order_by(Transaction.date.desc()).paginate(

@@ -58,13 +58,15 @@ is the provider-agnostic mechanism.
 
 ### Why the hybrid is safe (resolved from Doppler docs, not assumed)
 
-- **`DATABASE_URL` precedence:** `doppler run` **preserves pre-existing OS
-  environment variables by default** — an OS-set var wins over a same-named
-  Doppler secret. So DO's binding-injected `DATABASE_URL` (and the shell-level
-  `DATABASE_ADMIN_URL` override) win even if someone later adds a `DATABASE_URL`
-  to Doppler. This behavior is **version-dependent** (it changed across CLI
-  versions), which is why the CLI is **pinned** (below) and precedence is a
-  verification step in the runbook.
+- **`DATABASE_URL` precedence:** verified against CLI **v3.76.0** — `doppler run`
+  **overrides** existing OS env vars by default (`--preserve-env` defaults to
+  `"false"`). So the entrypoint explicitly passes
+  `--preserve-env="DATABASE_URL,DATABASE_ADMIN_URL"`, handing precedence back to
+  the OS values for exactly the DB URLs. DO's binding-injected `DATABASE_URL`
+  (and the shell-level `DATABASE_ADMIN_URL` override) therefore win even if
+  someone later adds a `DATABASE_URL` to Doppler. Because this default is
+  version-dependent, the CLI is **pinned** and the flag makes the intent explicit
+  rather than relying on a default.
 - **Graceful shutdown:** the Doppler CLI **forwards container signals
   (SIGTERM/SIGINT) to the child process**, so `exec doppler run -- gunicorn`
   preserves the drain-on-deploy behavior DO relies on for zero-downtime — the

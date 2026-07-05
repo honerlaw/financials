@@ -109,3 +109,28 @@ class SyncLog(db.Model):
     added_count = db.Column(db.Integer, default=0, nullable=False)
     removed_count = db.Column(db.Integer, default=0, nullable=False)
     error = db.Column(db.Text, nullable=True)
+
+
+class BudgetAlert(db.Model):
+    """One row per weekly-budget SMS actually sent.
+
+    Grain is (Sun–Sat ``week_start``, ``threshold`` 50/75/100, ``recipient``):
+    each threshold texts a given recipient at most once per week. Written only
+    after a successful Twilio send, so a failed send is retried next sync. The
+    unique constraint is also the cross-process dedup backstop for the notifier's
+    module-level lock (see app/notifications.py).
+    """
+    __tablename__ = 'budget_alerts'
+
+    id = db.Column(db.Integer, primary_key=True)
+    week_start = db.Column(db.Date, nullable=False)
+    threshold = db.Column(db.Integer, nullable=False)
+    recipient = db.Column(db.String(32), nullable=False)
+    sent_at = db.Column(db.DateTime(timezone=True), default=_utcnow, nullable=False)
+
+    __table_args__ = (
+        db.UniqueConstraint(
+            'week_start', 'threshold', 'recipient',
+            name='uq_budget_alerts_week_threshold_recipient',
+        ),
+    )

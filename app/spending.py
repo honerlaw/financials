@@ -76,6 +76,24 @@ def daily_spend(transactions, start, end_exclusive):
     return series
 
 
+def week_spend(transactions, today):
+    """Total ``is_spend`` amount for the Sun–Sat week containing ``today``.
+
+    Used by the budget-alert notifier for the current week's household spend.
+    The caller passes an already-fetched transaction list; this re-filters to
+    the week defensively so a padded fetch can't inflate the total. Takes
+    ``today`` as a parameter for deterministic tests, like the rest of this
+    module.
+    """
+    ws = week_start(today)
+    week_end_exclusive = ws + timedelta(days=7)
+    total = Decimal('0')
+    for txn in transactions:
+        if is_spend(txn) and ws <= txn.date < week_end_exclusive:
+            total += txn.amount
+    return total
+
+
 def weekly_budget(transactions, month_start, month_end_exclusive, today,
                   budget=WEEKLY_BUDGET):
     """Per-week spend vs ``budget`` for the Sun–Sat weeks overlapping the month.

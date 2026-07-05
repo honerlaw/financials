@@ -35,6 +35,12 @@ def create_app(config=None):
                 'google/gemini-2.5-pro,x-ai/grok-4.3',
             ).split(',') if m.strip()
         ],
+        # Weekly-budget SMS alerts (app/notifications.py). All four must be set
+        # for alerting to activate; missing config soft-disables the feature.
+        TWILIO_ACCOUNT_SID=os.getenv('TWILIO_ACCOUNT_SID', ''),
+        TWILIO_AUTH_TOKEN=os.getenv('TWILIO_AUTH_TOKEN', ''),
+        TWILIO_FROM_NUMBER=os.getenv('TWILIO_FROM_NUMBER', ''),
+        BUDGET_ALERT_RECIPIENTS=os.getenv('BUDGET_ALERT_RECIPIENTS', ''),
     )
 
     if config:

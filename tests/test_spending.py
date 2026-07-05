@@ -2,7 +2,7 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 from app.spending import (
-    is_spend, week_start, daily_spend, weekly_budget, WEEKLY_BUDGET,
+    is_spend, week_start, daily_spend, weekly_budget, week_spend, WEEKLY_BUDGET,
 )
 from app.models import db, Institution, Transaction
 
@@ -212,3 +212,34 @@ def test_dashboard_spending_honors_institution_filter(app, auth_client):
     # Unfiltered month total includes both accounts; filtered shows only Alpha's.
     assert 'Total $950.00' in all_body
     assert 'Total $900.00' in filtered_body
+
+
+# ── week_spend ────────────────────────────────────────────────────────────────
+
+# 2026-07-08 is a Wednesday; its Sun–Sat week is Jul 5 (Sun) – Jul 11 (Sat).
+_WS_TODAY = date(2026, 7, 8)
+
+
+def test_week_spend_sums_current_week_only():
+    txns = [
+        FakeTxn(date(2026, 7, 5), '100.00'),   # Sunday, in week
+        FakeTxn(date(2026, 7, 8), '50.00'),    # Wednesday, in week
+        FakeTxn(date(2026, 7, 11), '25.00'),   # Saturday, in week
+        FakeTxn(date(2026, 7, 4), '999.00'),   # prior Saturday, excluded
+        FakeTxn(date(2026, 7, 12), '999.00'),  # next Sunday, excluded
+    ]
+    assert week_spend(txns, _WS_TODAY) == Decimal('175.00')
+
+
+def test_week_spend_excludes_inflows_and_transfers():
+    txns = [
+        FakeTxn(date(2026, 7, 8), '40.00'),
+        FakeTxn(date(2026, 7, 8), '-200.00'),                          # inflow
+        FakeTxn(date(2026, 7, 8), '500.00', category='TRANSFER_OUT'),  # transfer
+        FakeTxn(date(2026, 7, 8), '300.00', category='LOAN_PAYMENTS'), # loan
+    ]
+    assert week_spend(txns, _WS_TODAY) == Decimal('40.00')
+
+
+def test_week_spend_empty_is_zero():
+    assert week_spend([], _WS_TODAY) == Decimal('0')

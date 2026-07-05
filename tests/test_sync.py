@@ -293,3 +293,35 @@ def test_sync_sets_login_required_on_error(MockPlaidClient, app):
         assert inst.status == 'login_required'
         log = SyncLog.query.first()
         assert log.error is not None
+
+
+@patch('app.sync.PlaidClient')
+def test_sync_dispatches_budget_alerts(MockPlaidClient, app):
+    """sync_all_institutions fires the budget-alert hook after syncing."""
+    MockPlaidClient.return_value = MagicMock()
+    with app.app_context():
+        with patch('app.notifications.send_budget_alerts') as mock_send:
+            sync_all_institutions()
+            assert mock_send.called
+
+
+@patch('app.sync.PlaidClient')
+def test_sync_survives_budget_alert_failure(MockPlaidClient, app):
+    """A notifier exception must not abort the sync (non-fatal contract)."""
+    MockPlaidClient.return_value = MagicMock()
+    with app.app_context():
+        with patch('app.notifications.send_budget_alerts',
+                   side_effect=RuntimeError('boom')):
+            # Should not raise.
+            sync_all_institutions()
+
+
+@patch('app.sync.PlaidClient')
+def test_sync_survives_budget_alert_import_failure(MockPlaidClient, app):
+    """An import-time failure in the notifier path must not abort the sync."""
+    import sys
+    MockPlaidClient.return_value = MagicMock()
+    with app.app_context():
+        # Poisoning sys.modules makes `from app.notifications import ...` raise.
+        with patch.dict(sys.modules, {'app.notifications': None}):
+            sync_all_institutions()  # should not raise

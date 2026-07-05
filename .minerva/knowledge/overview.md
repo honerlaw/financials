@@ -1,6 +1,6 @@
 # Knowledge overview
 
-<!-- synthesis-watermark: 008 -->
+<!-- synthesis-watermark: 010 -->
 
 ## Plaid data flow: piggyback, then refresh
 
@@ -62,6 +62,34 @@ whole week boundaries so edge weeks straddling the month aren't undercounted —
 and flags the current week only when it overlaps the displayed month. The
 spending section defaults to the current month on a self-labeled header rather
 than changing the transactions table's all-time default.
+
+Those charts are also interactive. [[009-decision-chart-click-window-filter]]
+records that clicking a week card or day bar filters the transactions table to a
+`?start`/`?end` date window (a day click = 1 day, a week click = the 7-day
+Sun–Sat window), computed with **local** date math so negative-UTC zones don't
+roll back a day. The window takes precedence over `?month=` for the table, its
+infinite-scroll pages, and the account-totals strip (via
+`_table_date_bounds`), while the spending chart itself deliberately stays
+month-scoped so it remains a stable picker. A day-bar click filters to *all*
+transactions that day, not only spend-classified ones.
+
+## Acting on synced data: proactive alerts
+
+Beyond deriving views, the sync path now fires an outbound side-effect.
+[[010-decision-budget-alert-notifier]] records the design of the weekly-budget
+SMS alerts: after every sync, each configured recipient is texted once per
+Sun–Sat week for each newly-crossed 50/75/100% threshold of the current week's
+household spend (reusing `week_spend` over the same `is_spend` definition as the
+dashboard). Load-bearing decisions: dedup is **per-recipient**
+(`BudgetAlert` unique on week+threshold+recipient); no-double-send comes from a
+module-level lock **plus** that unique constraint, correct only under the
+`--workers 1` invariant the APScheduler already assumes (a gap that is *not*
+runtime-enforced — see the unit's followups); the row is written **after** a
+successful send so a failure retries rather than silently dropping a milestone
+(duplicate > miss, for a budget alert); and the whole feature is **soft-disabled**
+(a clean no-op, `twilio` never imported) unless all four Twilio/recipient env
+vars are set, so it ships inert. The hook is non-fatal, mirroring
+`_refresh_balances` — a notifier failure never aborts a sync.
 
 ## Testing time-dependent code
 

@@ -430,6 +430,78 @@ def test_transactions_json_institution_filter(auth_client, app):
     assert data['items'][0]['institution_name'] == 'AmEx'
 
 
+def _seed_two_dated(app, inst_id):
+    """One transaction on 2026-05-15, one on 2026-04-15, distinct descriptions."""
+    with app.app_context():
+        db.session.add(Transaction(
+            plaid_transaction_id='mid-may', institution_id=inst_id,
+            account_id='acc-001', date=date(2026, 5, 15),
+            description='MidMayTxn', amount=Decimal('5.00'),
+        ))
+        db.session.add(Transaction(
+            plaid_transaction_id='mid-apr', institution_id=inst_id,
+            account_id='acc-001', date=date(2026, 4, 15),
+            description='MidAprTxn', amount=Decimal('5.00'),
+        ))
+        db.session.commit()
+
+
+def test_index_window_filter(auth_client, app):
+    """?start/?end restricts the table to the [start, end) window."""
+    inst_id = _make_institution(app)
+    _seed_two_dated(app, inst_id)
+    body = auth_client.get('/?start=2026-05-11&end=2026-05-18').get_data(as_text=True)
+    assert 'MidMayTxn' in body
+    assert 'MidAprTxn' not in body
+
+
+def test_index_window_end_is_exclusive(auth_client, app):
+    inst_id = _make_institution(app)
+    _make_txn_row(app, inst_id, 'acc-001', 'boundary', '5.00', date(2026, 5, 18))
+    # Window ends 2026-05-18 exclusive → the 18th is NOT included.
+    body = auth_client.get('/?start=2026-05-11&end=2026-05-18').get_data(as_text=True)
+    assert 'No transactions found' in body
+
+
+def test_transactions_json_window_filter(auth_client, app):
+    inst_id = _make_institution(app)
+    _seed_two_dated(app, inst_id)
+    res = auth_client.get('/api/transactions?start=2026-05-11&end=2026-05-18')
+    assert res.status_code == 200
+    descriptions = [i['description'] for i in res.json['items']]
+    assert 'MidMayTxn' in descriptions
+    assert 'MidAprTxn' not in descriptions
+
+
+def test_window_takes_precedence_over_month(auth_client, app):
+    """A start/end window overrides ?month= for the table."""
+    inst_id = _make_institution(app)
+    _seed_two_dated(app, inst_id)
+    # Month says April, window says mid-May → window wins.
+    body = auth_client.get('/?month=2026-04&start=2026-05-11&end=2026-05-18').get_data(as_text=True)
+    assert 'MidMayTxn' in body
+    assert 'MidAprTxn' not in body
+
+
+def test_malformed_window_falls_back_to_month(auth_client, app):
+    """Garbage/partial start/end is ignored (no 500); month filter still applies."""
+    inst_id = _make_institution(app)
+    _seed_two_dated(app, inst_id)
+    # start present but unparseable, no end → falls back to ?month=2026-05.
+    body = auth_client.get('/?month=2026-05&start=not-a-date').get_data(as_text=True)
+    assert 'MidMayTxn' in body
+    assert 'MidAprTxn' not in body
+
+
+def test_window_indicator_renders(auth_client, app):
+    inst_id = _make_institution(app)
+    _seed_two_dated(app, inst_id)
+    body = auth_client.get('/?start=2026-05-11&end=2026-05-18').get_data(as_text=True)
+    assert 'Showing' in body
+    assert 'Clear window' in body
+    assert 'May 11' in body  # window_label start
+
+
 def test_transactions_json_month_filter(auth_client, app):
     inst_id = _make_institution(app)
     with app.app_context():

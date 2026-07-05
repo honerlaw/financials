@@ -1,5 +1,57 @@
 {% extends 'base.html' %}
 {% block content %}
+<div class="card shadow-sm mb-3">
+  <div class="card-body">
+    <div class="d-flex justify-content-between align-items-baseline mb-3 flex-wrap gap-2">
+      <h2 class="h6 fw-bold mb-0">Spending · {{ spending_month_label }}</h2>
+      <span class="text-muted small">Weekly budget ${{ "%.0f"|format(weekly_budget) }}</span>
+    </div>
+
+    <div class="row row-cols-2 row-cols-md-3 row-cols-xl-5 g-2 mb-3">
+      {% for wk in budget_weeks %}
+      <div class="col">
+        <div class="border rounded p-2 h-100 {% if wk.is_current %}border-primary border-2 bg-primary-subtle{% endif %}">
+          <div class="d-flex justify-content-between align-items-baseline gap-1">
+            <span class="small fw-semibold text-nowrap">{{ wk.label }}</span>
+            {% if wk.is_current %}<span class="badge bg-primary">This week</span>{% endif %}
+          </div>
+          <div class="fw-bold mt-1">
+            ${{ "%.0f"|format(wk.spent) }}<span class="text-muted small fw-normal"> / ${{ "%.0f"|format(wk.budget) }}</span>
+          </div>
+          <div class="progress mt-1" style="height: 6px;" role="progressbar"
+               aria-valuenow="{{ wk.pct }}" aria-valuemin="0" aria-valuemax="100">
+            <div class="progress-bar {% if wk.over %}bg-danger{% elif wk.pct >= 80 %}bg-warning{% else %}bg-success{% endif %}"
+                 style="width: {{ 100 if wk.pct > 100 else wk.pct }}%;"></div>
+          </div>
+          <div class="small mt-1 {% if wk.over %}text-danger{% else %}text-muted{% endif %}">
+            {% if wk.over %}${{ "%.0f"|format(-wk.remaining) }} over{% else %}${{ "%.0f"|format(wk.remaining) }} left{% endif %}
+          </div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+
+    {% if spend_max and spend_max > 0 %}
+    <div class="d-flex align-items-end gap-1" style="height: 120px;">
+      {% for bar in spend_bars %}
+      <div class="flex-fill d-flex flex-column justify-content-end h-100"
+           title="{{ bar.date.strftime('%b %-d') }}: ${{ '%.2f'|format(bar.total) }}">
+        <div class="bg-primary rounded-top"
+             style="height: {{ bar.pct }}%;{% if bar.total > 0 %} min-height: 2px;{% endif %}"></div>
+      </div>
+      {% endfor %}
+    </div>
+    <div class="d-flex justify-content-between text-muted small mt-1">
+      <span>{{ spend_bars[0].date.strftime('%b %-d') }}</span>
+      <span class="fw-semibold">Total ${{ "%.2f"|format(month_total) }}</span>
+      <span>{{ spend_bars[-1].date.strftime('%b %-d') }}</span>
+    </div>
+    {% else %}
+    <p class="text-muted small mb-0">No spending recorded this month.</p>
+    {% endif %}
+  </div>
+</div>
+
 {% if account_totals %}
 <div class="d-flex gap-2 mb-3 overflow-auto pb-1">
   {% for row in account_totals %}

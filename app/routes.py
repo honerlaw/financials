@@ -97,6 +97,48 @@ def _month_bounds(month):
         return None, None
 
 
+def _spending_context(institution_id, chart_month, today):
+    """Daily spend series + weekly-budget rows for the dashboard spending section.
+
+    Scoped to ``chart_month`` (the selected month, or the current month by
+    default), honoring the institution filter. The transaction fetch is padded
+    to full Sun–Sat week boundaries covering the month so edge weeks that
+    straddle the month boundary are summed in full rather than undercounted.
+    """
+    from app.spending import daily_spend, weekly_budget, week_start, WEEKLY_BUDGET
+
+    month_start, month_end = _month_bounds(chart_month)
+    span_start = week_start(month_start)
+    span_end = week_start(month_end - timedelta(days=1)) + timedelta(days=7)
+
+    query = Transaction.query.filter_by(removed=False).filter(
+        Transaction.date >= span_start,
+        Transaction.date < span_end,
+    )
+    if institution_id:
+        query = query.filter_by(institution_id=institution_id)
+    txns = query.all()
+
+    spend_series = daily_spend(txns, month_start, month_end)
+    spend_max = max((total for _, total in spend_series), default=0)
+    spend_bars = [
+        {
+            'date': day,
+            'total': total,
+            'pct': int(total / spend_max * 100) if spend_max else 0,
+        }
+        for day, total in spend_series
+    ]
+    return {
+        'spend_bars': spend_bars,
+        'spend_max': spend_max,
+        'month_total': sum((total for _, total in spend_series), 0),
+        'budget_weeks': weekly_budget(txns, month_start, month_end, today),
+        'weekly_budget': WEEKLY_BUDGET,
+        'spending_month_label': month_start.strftime('%B %Y'),
+    }
+
+
 @bp.route('/')
 @login_required
 def index():
@@ -118,6 +160,9 @@ def index():
     )
     institutions = Institution.query.order_by(Institution.name).all()
     account_totals = _account_totals(institution_id, month_start, month_end)
+
+    today = date.today()
+    spending = _spending_context(institution_id, month or today.strftime('%Y-%m'), today)
     return render_template(
         'index.html',
         transactions=transactions,
@@ -126,6 +171,7 @@ def index():
         selected_institution=institution_id,
         selected_month=month,
         account_totals=account_totals,
+        **spending,
     )
 
 

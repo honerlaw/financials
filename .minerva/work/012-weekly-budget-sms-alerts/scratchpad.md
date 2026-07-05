@@ -12,3 +12,4 @@
 - Full suite: **179 passed** (incl. 5 `newly_crossed`, 3 `week_spend`, 8 notifier/concurrency, 2 sync-hook tests).
 - Migration verified in isolation on sqlite (upgrade builds `budget_alerts` w/ 3-col unique constraint; downgrade drops it). NOTE: `flask db upgrade` cannot run end-to-end on sqlite because the **pre-existing** `00a2889ed2af` GRANT migration is Postgres-only (no dialect guard) — not a regression; prod migrates on Postgres. Verified chain head via `flask db history`.
 - twilio not pip-installed locally; import is lazy inside `TwilioSender`, so tests (which inject fakes) never touch it.
+- [reviewed — clean] completion verification: Verifier verdict **accept** — all 6 success criteria independently reproduced (incl. a real `flask db upgrade` from the stamped parent revision, and confirming twilio absent yet suite green). Folded its one minor note by adding `test_noop_when_partial_credentials`. Notifier tests now 13 passing.

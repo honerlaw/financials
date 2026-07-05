@@ -118,6 +118,20 @@ def test_noop_when_credentials_missing_and_no_injected_sender(app):
         assert BudgetAlert.query.count() == 0
 
 
+def test_noop_when_partial_credentials(app):
+    """Partial Twilio config (some creds blank) soft-disables — no send, no row."""
+    with app.app_context():
+        _seed_inst('900.00')
+        cfg = {
+            'BUDGET_ALERT_RECIPIENTS': '+1111',
+            'TWILIO_ACCOUNT_SID': 'sid', 'TWILIO_AUTH_TOKEN': 'tok',
+            'TWILIO_FROM_NUMBER': '',  # missing → feature disabled
+        }
+        # sender=None forces the config path; must build no TwilioSender.
+        send_budget_alerts(db.session, TODAY, cfg)
+        assert BudgetAlert.query.count() == 0
+
+
 def test_failed_send_is_not_recorded_and_retries(app):
     with app.app_context():
         _seed_inst('600.00')  # 60% → threshold 50

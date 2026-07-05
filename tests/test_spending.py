@@ -170,3 +170,38 @@ def test_dashboard_spending_section_renders_with_no_transactions(app, auth_clien
     resp = auth_client.get('/')
     assert resp.status_code == 200
     assert 'Spending' in resp.get_data(as_text=True)
+
+
+def test_dashboard_renders_with_explicit_month(app, auth_client):
+    """Selecting a specific (past) month renders the section for that month."""
+    resp = auth_client.get('/?month=2026-03')
+    assert resp.status_code == 200
+    body = resp.get_data(as_text=True)
+    assert 'Spending · March 2026' in body
+    # A past month contains no "current" week, so no running highlight.
+    assert 'This week' not in body
+
+
+def test_dashboard_spending_honors_institution_filter(app, auth_client):
+    """The spending section is scoped by the institution filter."""
+    with app.app_context():
+        a = Institution(name='Alpha', slug='alpha', access_token='t', item_id='i-a')
+        b = Institution(name='Beta', slug='beta', access_token='t', item_id='i-b')
+        db.session.add_all([a, b])
+        db.session.flush()
+        db.session.add_all([
+            Transaction(plaid_transaction_id='a1', institution_id=a.id,
+                        account_id='a', date=date.today(), description='x',
+                        amount=Decimal('900.00'), category='FOOD_AND_DRINK'),
+            Transaction(plaid_transaction_id='b1', institution_id=b.id,
+                        account_id='b', date=date.today(), description='y',
+                        amount=Decimal('50.00'), category='FOOD_AND_DRINK'),
+        ])
+        db.session.commit()
+        a_id = a.id
+
+    all_body = auth_client.get('/').get_data(as_text=True)
+    filtered_body = auth_client.get(f'/?institution={a_id}').get_data(as_text=True)
+    # Unfiltered month total includes both accounts; filtered shows only Alpha's.
+    assert 'Total $950.00' in all_body
+    assert 'Total $900.00' in filtered_body

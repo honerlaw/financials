@@ -14,3 +14,5 @@
 
 ## Review finding 2026-07-05
 - [SUGGEST] Clickable chart divs (week cards, day bars) use onclick without `role="button"`/`tabindex`, so they aren't keyboard-focusable. Low priority for this personal app; revisit if accessibility becomes a goal.
+
+- [synthesis] no-op (only 009 un-synthesized; a minor extension of the already-synthesized [[008]] spending-views theme — below refresh threshold, no link rot)

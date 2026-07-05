@@ -26,6 +26,22 @@ def sync_all_institutions():
     institutions = Institution.query.filter_by(status='active').all()
     for institution in institutions:
         _sync_institution(client, institution)
+    _send_budget_alerts_safe()
+
+
+def _send_budget_alerts_safe():
+    """Fire weekly-budget SMS alerts after a sync, non-fatally.
+
+    A notification failure must never abort the sync (mirrors the non-fatal
+    _refresh_balances contract). The notifier already swallows per-send errors;
+    this guards any other failure (e.g. the DB query) so it only annotates the
+    log.
+    """
+    from app.notifications import send_budget_alerts
+    try:
+        send_budget_alerts(db.session, date.today(), current_app.config)
+    except Exception:
+        current_app.logger.exception('budget alert dispatch failed')
 
 
 def _sync_institution(client, institution):

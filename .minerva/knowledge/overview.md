@@ -1,6 +1,6 @@
 # Knowledge overview
 
-<!-- synthesis-watermark: 010 -->
+<!-- synthesis-watermark: 011 -->
 
 ## Plaid data flow: piggyback, then refresh
 
@@ -90,6 +90,19 @@ successful send so a failure retries rather than silently dropping a milestone
 (a clean no-op, `twilio` never imported) unless all four Twilio/recipient env
 vars are set, so it ships inert. The hook is non-fatal, mirroring
 `_refresh_balances` — a notifier failure never aborts a sync.
+
+## Configuration and secrets
+
+All config is read through `os.getenv` in `app/__init__.py`, which made moving to
+a secrets manager a pure deployment change. [[011-decision-doppler-hybrid-config]]
+records the Doppler migration: the CLI is baked into the image (pinned, signed apt
+repo) and the app runs via `doppler run` **only when `DOPPLER_TOKEN` is set** —
+otherwise it falls back to plain environment variables, so the same image boots
+either way and the production cutover is staged and reversible (and fail-closed:
+a bad token aborts boot). It is a **hybrid**: `DATABASE_URL`/`DATABASE_ADMIN_URL`
+stay injected by DigitalOcean's managed-database binding rather than Doppler, and
+the entrypoint passes `--preserve-env` for exactly those so the DO values always
+win. Application code did not change — Doppler only populates the environment.
 
 ## Testing time-dependent code
 

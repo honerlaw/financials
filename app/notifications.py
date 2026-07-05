@@ -142,3 +142,15 @@ def send_budget_alerts(session, today, config, sender=None):
                     # A concurrent claim already recorded this (week, threshold,
                     # recipient); drop our duplicate row.
                     session.rollback()
+                except Exception:
+                    # The SMS already went out but recording it failed (e.g. a
+                    # dropped connection). Roll back so the session isn't left
+                    # poisoned for the remaining recipients/thresholds, and keep
+                    # going. The unrecorded row means a retry next sync *may*
+                    # re-text this threshold — an acceptable rare duplicate,
+                    # preferable to silently dropping a milestone.
+                    session.rollback()
+                    current_app.logger.exception(
+                        'budget alert recorded-send failed to persist '
+                        '(recipient=%s threshold=%s)', recipient, threshold,
+                    )

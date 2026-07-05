@@ -37,8 +37,10 @@ def _send_budget_alerts_safe():
     this guards any other failure (e.g. the DB query) so it only annotates the
     log.
     """
-    from app.notifications import send_budget_alerts
     try:
+        # Imported inside the try so even an import-time failure in the
+        # notification path (or its transitive imports) is non-fatal.
+        from app.notifications import send_budget_alerts
         send_budget_alerts(db.session, date.today(), current_app.config)
     except Exception:
         current_app.logger.exception('budget alert dispatch failed')

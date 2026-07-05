@@ -2,6 +2,8 @@ import threading
 from datetime import date
 from decimal import Decimal
 
+from sqlalchemy.exc import OperationalError
+
 from app.models import db, Institution, Transaction, BudgetAlert
 from app.notifications import newly_crossed, send_budget_alerts
 
@@ -144,6 +146,43 @@ def test_failed_send_is_not_recorded_and_retries(app):
         send_budget_alerts(db.session, TODAY, cfg, sender=working)
         assert len(working.sent) == 1
         assert BudgetAlert.query.count() == 1
+
+
+class _FlakyCommitSession:
+    """Delegates to a real session but raises a non-Integrity error on commit."""
+
+    def __init__(self, real, fail_times=1):
+        self._real = real
+        self._fail = fail_times
+
+    def query(self, *a, **k):
+        return self._real.query(*a, **k)
+
+    def add(self, *a, **k):
+        return self._real.add(*a, **k)
+
+    def rollback(self, *a, **k):
+        return self._real.rollback(*a, **k)
+
+    def commit(self):
+        if self._fail > 0:
+            self._fail -= 1
+            raise OperationalError('stmt', {}, Exception('db down'))
+        return self._real.commit()
+
+
+def test_commit_failure_after_send_is_swallowed_and_not_recorded(app):
+    """A non-Integrity commit failure after a successful send must not propagate,
+    must roll back, and must leave no dedup row (so it is retried, not lost)."""
+    with app.app_context():
+        _seed_inst('600.00')  # 60% → threshold 50
+        cfg = {'BUDGET_ALERT_RECIPIENTS': '+1111'}
+        sender = FakeSender()
+        flaky = _FlakyCommitSession(db.session, fail_times=1)
+        # Must not raise despite the commit blowing up.
+        send_budget_alerts(flaky, TODAY, cfg, sender=sender)
+        assert len(sender.sent) == 1          # the SMS did go out
+        assert BudgetAlert.query.count() == 0  # but nothing was recorded
 
 
 def test_concurrent_calls_do_not_double_send(tmp_path):

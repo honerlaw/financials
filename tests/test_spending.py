@@ -182,6 +182,13 @@ def test_dashboard_renders_with_explicit_month(app, auth_client):
     assert 'This week' not in body
 
 
+def test_dashboard_tolerates_malformed_month(app, auth_client):
+    """A bad ?month= param falls back to the current month, not a 500."""
+    resp = auth_client.get('/?month=not-a-month')
+    assert resp.status_code == 200
+    assert 'Spending' in resp.get_data(as_text=True)
+
+
 def test_dashboard_spending_honors_institution_filter(app, auth_client):
     """The spending section is scoped by the institution filter."""
     with app.app_context():

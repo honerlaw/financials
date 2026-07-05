@@ -108,6 +108,10 @@ def _spending_context(institution_id, chart_month, today):
     from app.spending import daily_spend, weekly_budget, week_start, WEEKLY_BUDGET
 
     month_start, month_end = _month_bounds(chart_month)
+    if month_start is None:
+        # Malformed ?month= — fall back to the current month rather than 500,
+        # matching the transactions table's tolerance of a bad month param.
+        month_start, month_end = _month_bounds(today.strftime('%Y-%m'))
     span_start = week_start(month_start)
     span_end = week_start(month_end - timedelta(days=1)) + timedelta(days=7)
 

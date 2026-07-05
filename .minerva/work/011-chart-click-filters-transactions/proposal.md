@@ -15,7 +15,7 @@ the table that's already on the page.
 
 ## Status
 
-Draft
+Shipped (2026-07-05)
 
 ## Approach
 

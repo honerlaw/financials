@@ -33,6 +33,9 @@
                 onclick="reconnectInstitution({{ inst.id }}, this)">Re-connect</button>
       {% else %}
         <span class="badge bg-success">Active</span>
+        <button class="btn btn-sm btn-outline-secondary"
+                title="Re-open Plaid to refresh this connection's permissions — e.g. grant access to newly-added data like account due dates &amp; balances."
+                onclick="reconnectInstitution({{ inst.id }}, this)">Relink</button>
       {% endif %}
       <button class="btn btn-sm btn-outline-danger"
               onclick="removeInstitution({{ inst.id }}, '{{ inst.name | e }}')">

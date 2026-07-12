@@ -62,10 +62,17 @@ class PlaidClient:
         """Create a link token in *update mode* for an existing Item.
 
         Passing ``access_token`` puts Plaid Link into update mode for that
-        specific Item, letting the user re-authenticate after an
-        ITEM_LOGIN_REQUIRED without creating a new Item. ``products`` and
-        ``transactions`` are link-time-only parameters and are omitted — Plaid
-        rejects them when ``access_token`` is present.
+        specific Item, letting the user re-authenticate (after an
+        ITEM_LOGIN_REQUIRED) or proactively relink to refresh consent, without
+        creating a new Item. ``products`` and ``transactions`` are
+        link-time-only parameters and are omitted — Plaid rejects them when
+        ``access_token`` is present.
+
+        ``additional_consented_products`` *is* accepted in update mode and is
+        how consent for a newer product (``liabilities``) gets added to an Item
+        that was linked before we requested it — every proactive relink
+        re-presents that consent so old Items catch up to the current product
+        set. It mirrors the same list passed by ``create_link_token``.
         """
         response = self._client.link_token_create(
             LinkTokenCreateRequest(
@@ -74,6 +81,7 @@ class PlaidClient:
                 language='en',
                 user=LinkTokenCreateRequestUser(client_user_id='local-user'),
                 access_token=access_token,
+                additional_consented_products=[Products('liabilities')],
             )
         )
         return response.link_token

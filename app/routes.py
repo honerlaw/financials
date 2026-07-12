@@ -455,11 +455,16 @@ def update_link_token(institution_id):
 @bp.route('/api/plaid/reconnect/<int:institution_id>', methods=['POST'])
 @login_required
 def reconnect_institution(institution_id):
-    """Mark an institution active again after a successful update-mode re-auth.
+    """Finalize a successful update-mode relink for an existing Item.
 
-    Update mode keeps the existing access_token, so there is no token to
-    exchange — we just clear the login_required state and kick a background
-    sync to backfill the transactions missed while the Item was disconnected.
+    Called after Plaid Link update mode succeeds — whether the user was
+    recovering from ITEM_LOGIN_REQUIRED or proactively relinking an active
+    Item to refresh consent (e.g. granting the `liabilities` product to an
+    Item linked before we requested it). Update mode keeps the existing
+    access_token, so there is no token to exchange — we just (re)assert
+    `active` status and kick a background sync, which backfills any
+    transactions missed while disconnected and, on the first relink that adds
+    liabilities consent, populates the new due-date / balance fields.
     """
     from app.sync import sync_all_institutions
     inst = db.session.get(Institution, institution_id)

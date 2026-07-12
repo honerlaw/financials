@@ -167,6 +167,26 @@ def test_reconnect_sets_status_active(mock_sync, auth_client, app):
         assert db.session.get(Institution, inst_id).status == 'active'
 
 
+def test_settings_shows_relink_for_active_institution(auth_client, app):
+    # An active institution can be relinked on demand (to refresh consent /
+    # permissions), not only when it hits login_required.
+    _make_institution(app, name='Active Bank', slug='active_bank')
+    res = auth_client.get('/settings')
+    assert res.status_code == 200
+    assert b'>Relink</button>' in res.data
+
+
+@patch('app.sync.sync_all_institutions')
+def test_reconnect_keeps_active_institution_active(mock_sync, auth_client, app):
+    # Proactive relink of an already-active Item: stays active and still ok.
+    inst_id = _make_institution(app, name='Active Bank', slug='active_bank')
+    res = auth_client.post(f'/api/plaid/reconnect/{inst_id}')
+    assert res.status_code == 200
+    assert res.json['status'] == 'ok'
+    with app.app_context():
+        assert db.session.get(Institution, inst_id).status == 'active'
+
+
 def test_reconnect_404_for_missing(auth_client):
     res = auth_client.post('/api/plaid/reconnect/99999')
     assert res.status_code == 404

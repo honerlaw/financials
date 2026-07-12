@@ -182,7 +182,8 @@ def test_reconnect_requires_auth(client, app):
 
 
 def _make_account(app, inst_id, plaid_account_id='acc-001', name='Sapphire', mask='1234',
-                  current_balance=None):
+                  current_balance=None, next_payment_due_date=None,
+                  last_statement_balance=None, minimum_payment_amount=None):
     with app.app_context():
         acct = Account(
             institution_id=inst_id,
@@ -192,6 +193,13 @@ def _make_account(app, inst_id, plaid_account_id='acc-001', name='Sapphire', mas
             type='credit',
             subtype='credit card',
             current_balance=Decimal(str(current_balance)) if current_balance is not None else None,
+            next_payment_due_date=next_payment_due_date,
+            last_statement_balance=(
+                Decimal(str(last_statement_balance)) if last_statement_balance is not None else None
+            ),
+            minimum_payment_amount=(
+                Decimal(str(minimum_payment_amount)) if minimum_payment_amount is not None else None
+            ),
         )
         db.session.add(acct)
         db.session.commit()
@@ -288,6 +296,61 @@ def test_index_account_totals_include_current_balance(auth_client, app):
     matching = [r for r in rows if r.account_name == 'Double Cash']
     assert len(matching) == 1
     assert matching[0].current_balance == Decimal('42.00')
+
+
+def test_index_account_totals_include_liability_fields(auth_client, app):
+    inst_id = _make_institution(app, name='Citi', slug='citi')
+    _make_account(app, inst_id, plaid_account_id='acc-l', name='Double Cash',
+                  next_payment_due_date=date(2026, 8, 1),
+                  last_statement_balance='250.00', minimum_payment_amount='25.00')
+
+    with auth_client.application.test_request_context('/'):
+        from app.routes import _account_totals
+        rows = _account_totals(None, None, None)
+
+    match = [r for r in rows if r.account_name == 'Double Cash'][0]
+    assert match.next_payment_due_date == date(2026, 8, 1)
+    assert match.last_statement_balance == Decimal('250.00')
+    assert match.minimum_payment_amount == Decimal('25.00')
+
+
+def test_index_account_card_renders_due_date_and_balance_due(auth_client, app):
+    inst_id = _make_institution(app, name='Chase', slug='chase')
+    # Far-future due date so it renders "Due" (not "Overdue") regardless of the
+    # real date the test runs on.
+    _make_account(app, inst_id, plaid_account_id='acc-liab', name='Sapphire', mask='4242',
+                  current_balance='1000.00', next_payment_due_date=date(2099, 12, 25),
+                  last_statement_balance='432.10', minimum_payment_amount='35.00')
+
+    res = auth_client.get('/')
+    assert res.status_code == 200
+    assert b'Due Dec 25' in res.data
+    assert b'$432.10' in res.data
+    assert b'min $35.00 due' in res.data
+
+
+def test_index_account_card_marks_overdue_payment(auth_client, app):
+    inst_id = _make_institution(app, name='Amex', slug='amex')
+    # Far-past due date so it always renders as overdue.
+    _make_account(app, inst_id, plaid_account_id='acc-od', name='Platinum',
+                  next_payment_due_date=date(2000, 1, 5), last_statement_balance='99.00')
+
+    res = auth_client.get('/')
+    assert res.status_code == 200
+    assert b'Overdue Jan 5' in res.data
+
+
+def test_index_account_card_omits_liability_line_without_data(auth_client, app):
+    inst_id = _make_institution(app, name='Truist', slug='truist')
+    _make_account(app, inst_id, plaid_account_id='acc-dep', name='Fresh Checking')
+
+    res = auth_client.get('/')
+    assert res.status_code == 200
+    assert b'Fresh Checking' in res.data
+    # No liability data → no due-date / balance-due line.
+    assert b'Due ' not in res.data
+    assert b'Overdue' not in res.data
+    assert b'min $' not in res.data
 
 
 def test_index_account_totals_include_zero_txn_accounts(auth_client, app):

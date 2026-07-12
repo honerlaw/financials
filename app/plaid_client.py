@@ -14,6 +14,7 @@ from plaid.model.link_token_transactions import LinkTokenTransactions
 from plaid.model.transactions_sync_request import TransactionsSyncRequest
 from plaid.model.transactions_sync_request_options import TransactionsSyncRequestOptions
 from plaid.model.accounts_balance_get_request import AccountsBalanceGetRequest
+from plaid.model.liabilities_get_request import LiabilitiesGetRequest
 
 
 def slugify(name):
@@ -43,6 +44,11 @@ class PlaidClient:
         response = self._client.link_token_create(
             LinkTokenCreateRequest(
                 products=[Products('transactions')],
+                # `liabilities` is consented but not required: institutions that
+                # don't support it still link (transactions stays the only
+                # required product), and when present we can call
+                # /liabilities/get to surface credit-card due dates & balances.
+                additional_consented_products=[Products('liabilities')],
                 client_name='Financial Sync',
                 country_codes=[CountryCode('US')],
                 language='en',
@@ -105,6 +111,21 @@ class PlaidClient:
             AccountsBalanceGetRequest(access_token=access_token)
         )
         return response.accounts
+
+    def get_liabilities(self, access_token):
+        """Fetch liability details (due dates, statement/minimum amounts).
+
+        Returns the ``liabilities`` object, which carries ``.credit``,
+        ``.student``, and ``.mortgage`` arrays. Each entry ties back to an
+        ``Account`` via ``account_id`` and exposes the payment fields we surface
+        on the dashboard. Raises ``plaid.ApiException`` when the Item wasn't
+        consented to the ``liabilities`` product (callers treat this as
+        non-fatal — see app/sync.py::_refresh_liabilities).
+        """
+        response = self._client.liabilities_get(
+            LiabilitiesGetRequest(access_token=access_token)
+        )
+        return response.liabilities
 
     def sync_transactions(self, access_token, cursor=''):
         added, modified, removed = [], [], []

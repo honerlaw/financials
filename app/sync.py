@@ -58,12 +58,19 @@ def _sync_institution(client, institution):
         removed_count = _mark_removed(removed)
         _upsert_accounts(institution.id, accounts)
 
-        # Force-refresh balances via the dedicated Plaid endpoint. A failure
-        # here annotates the SyncLog but does not abort the sync — the
-        # piggyback above has already written a (possibly stale) balance.
+        # Force-refresh balances via the dedicated Plaid endpoint, then pull
+        # liability details (due dates / statement balances). Both are
+        # best-effort: a failure annotates the SyncLog but does not abort the
+        # sync — the transactions above have already landed.
+        errors = []
         balance_error = _refresh_balances(client, institution)
         if balance_error:
-            log.error = balance_error
+            errors.append(balance_error)
+        liability_error = _refresh_liabilities(client, institution)
+        if liability_error:
+            errors.append(liability_error)
+        if errors:
+            log.error = '; '.join(errors)
 
         institution.plaid_cursor = new_cursor
         institution.last_synced_at = _utcnow()
@@ -108,6 +115,63 @@ def _refresh_balances(client, institution):
         if iso:
             row.iso_currency_code = iso
         row.last_synced_at = _utcnow()
+    return None
+
+
+# Liability error codes that are expected/normal, not worth annotating a
+# SyncLog with: the Item was never consented to the `liabilities` product
+# (every Item linked before this feature), or it simply has no credit/loan
+# accounts. Treated as a no-op refresh rather than an error.
+_BENIGN_LIABILITY_ERROR_CODES = frozenset({
+    'PRODUCTS_NOT_SUPPORTED',
+    'NO_LIABILITY_ACCOUNTS',
+    'NO_ACCOUNTS',
+})
+
+
+def _refresh_liabilities(client, institution):
+    """Populate credit/loan due dates & statement balances via liabilities/get.
+
+    Returns an error string to record on the SyncLog for *unexpected* failures,
+    or None on success — including the benign "this Item has no liabilities"
+    responses that are normal for depository-only or non-consented Items. Never
+    re-raises; like balance refresh, liability refresh is non-fatal to the sync.
+    """
+    try:
+        liabilities = client.get_liabilities(institution.access_token)
+    except plaid.ApiException as e:
+        code = _get_plaid_error_code(e)
+        if code in _BENIGN_LIABILITY_ERROR_CODES:
+            return None
+        return f'liability refresh failed: {code}: {e}'
+
+    if liabilities is None:
+        return None
+
+    now = _utcnow()
+    groups = (
+        getattr(liabilities, 'credit', None) or [],
+        getattr(liabilities, 'student', None) or [],
+        getattr(liabilities, 'mortgage', None) or [],
+    )
+    for group in groups:
+        for entry in group:
+            account_id = getattr(entry, 'account_id', None)
+            if not account_id:
+                continue
+            row = Account.query.filter_by(plaid_account_id=account_id).first()
+            if row is None:
+                continue
+            row.next_payment_due_date = _to_date(getattr(entry, 'next_payment_due_date', None))
+            row.last_statement_balance = _to_decimal(getattr(entry, 'last_statement_balance', None))
+            # Mortgages express the amount owed as next_monthly_payment rather
+            # than a minimum_payment_amount; fall back to it so every liability
+            # type surfaces an amount due.
+            minimum = getattr(entry, 'minimum_payment_amount', None)
+            if minimum is None:
+                minimum = getattr(entry, 'next_monthly_payment', None)
+            row.minimum_payment_amount = _to_decimal(minimum)
+            row.last_synced_at = now
     return None
 
 
@@ -212,6 +276,20 @@ def _to_decimal(value):
     try:
         return Decimal(str(value))
     except Exception:
+        return None
+
+
+def _to_date(value):
+    """Coerce a Plaid date field (a ``date`` or 'YYYY-MM-DD' string) to a date."""
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    try:
+        return date.fromisoformat(str(value))
+    except (ValueError, TypeError):
         return None
 
 

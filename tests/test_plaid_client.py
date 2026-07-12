@@ -30,6 +30,11 @@ def test_create_link_token(MockApi):
     client._client = MockApi.return_value
     assert client.create_link_token() == 'link-sandbox-xyz'
 
+    # `liabilities` is consented as an additional product so new links can
+    # surface credit-card due dates without making it a required product.
+    request = MockApi.return_value.link_token_create.call_args[0][0]
+    assert 'liabilities' in [p.value for p in request.additional_consented_products]
+
 
 @patch('app.plaid_client.plaid_api.PlaidApi')
 def test_create_update_link_token(MockApi):
@@ -112,6 +117,20 @@ def test_get_balances(MockApi):
 
     assert [a.account_id for a in accounts] == ['acc-1', 'acc-2']
     assert api.accounts_balance_get.call_count == 1
+
+
+@patch('app.plaid_client.plaid_api.PlaidApi')
+def test_get_liabilities(MockApi):
+    api = MockApi.return_value
+    liabilities = MagicMock()
+    api.liabilities_get.return_value = MagicMock(liabilities=liabilities)
+
+    client = _make_client()
+    client._client = api
+    result = client.get_liabilities('access-token-xyz')
+
+    assert result is liabilities
+    assert api.liabilities_get.call_count == 1
 
 
 def test_get_error_code():

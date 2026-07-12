@@ -210,6 +210,7 @@ def index():
         selected_institution=institution_id,
         selected_month=month,
         account_totals=account_totals,
+        today=today,
         window_active=window_active,
         window_label=window_label,
         selected_start=request.args.get('start') if window_active else None,
@@ -284,6 +285,9 @@ def _account_totals(institution_id, month_start, month_end):
             Account.mask.label('mask'),
             Account.current_balance.label('current_balance'),
             Account.iso_currency_code.label('iso_currency_code'),
+            Account.next_payment_due_date.label('next_payment_due_date'),
+            Account.last_statement_balance.label('last_statement_balance'),
+            Account.minimum_payment_amount.label('minimum_payment_amount'),
             db.func.coalesce(db.func.sum(Transaction.amount), 0).label('total'),
             db.func.count(Transaction.id).label('txn_count'),
         )
@@ -294,6 +298,8 @@ def _account_totals(institution_id, month_start, month_end):
             Institution.id, Institution.name,
             Account.id, Account.name, Account.mask,
             Account.current_balance, Account.iso_currency_code,
+            Account.next_payment_due_date, Account.last_statement_balance,
+            Account.minimum_payment_amount,
         )
         .order_by(Institution.name, Account.name)
     )

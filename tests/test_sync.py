@@ -3,7 +3,10 @@ from decimal import Decimal
 from unittest.mock import MagicMock, patch
 from app.models import Institution, Transaction, SyncLog, Account
 from app.models import db
-from app.sync import sync_all_institutions, _upsert_transactions, _mark_removed, _upsert_accounts
+from app.sync import (
+    sync_all_institutions, _upsert_transactions, _mark_removed, _upsert_accounts,
+    _refresh_liabilities,
+)
 
 
 def _make_institution(app):
@@ -270,6 +273,134 @@ def test_sync_handles_balance_endpoint_error(MockPlaidClient, app):
         assert 'RATE_LIMIT_EXCEEDED' in log.error
         assert 'balance refresh failed' in log.error
         # Institution remains active — balance failures are non-fatal.
+        inst = db.session.get(Institution, inst_id)
+        assert inst.status == 'active'
+
+
+def _mock_credit_liability(account_id='acc-001', due_date=None,
+                           statement=250.00, minimum=35.00):
+    entry = MagicMock()
+    entry.account_id = account_id
+    entry.next_payment_due_date = due_date if due_date is not None else date(2026, 8, 1)
+    entry.last_statement_balance = statement
+    entry.minimum_payment_amount = minimum
+    return entry
+
+
+def _mock_liabilities(credit=None, student=None, mortgage=None):
+    liab = MagicMock()
+    liab.credit = credit or []
+    liab.student = student or []
+    liab.mortgage = mortgage or []
+    return liab
+
+
+@patch('app.sync.PlaidClient')
+def test_sync_populates_liability_fields(MockPlaidClient, app):
+    inst_id = _make_institution(app)
+    with app.app_context():
+        mock_client = MagicMock()
+        mock_client.sync_transactions.return_value = (
+            [], [], [], 'cursor-x', [_mock_account('acc-001')],
+        )
+        mock_client.get_balances.return_value = []
+        mock_client.get_liabilities.return_value = _mock_liabilities(
+            credit=[_mock_credit_liability('acc-001', due_date=date(2026, 8, 15),
+                                           statement=432.10, minimum=35.00)]
+        )
+        MockPlaidClient.return_value = mock_client
+
+        sync_all_institutions()
+
+        row = Account.query.filter_by(plaid_account_id='acc-001').first()
+        assert row.next_payment_due_date == date(2026, 8, 15)
+        assert row.last_statement_balance == Decimal('432.10')
+        assert row.minimum_payment_amount == Decimal('35.00')
+        log = SyncLog.query.first()
+        assert log.error is None
+
+
+def test_refresh_liabilities_uses_next_monthly_payment_for_mortgage(app):
+    inst_id = _make_institution(app)
+    with app.app_context():
+        _upsert_accounts(inst_id, [_mock_account('acc-mtg', type_='loan', subtype='mortgage')])
+        db.session.commit()
+
+        mortgage = MagicMock()
+        mortgage.account_id = 'acc-mtg'
+        mortgage.next_payment_due_date = date(2026, 9, 1)
+        # Mortgages have no minimum_payment_amount — the amount owed lives on
+        # next_monthly_payment, which _refresh_liabilities falls back to.
+        mortgage.minimum_payment_amount = None
+        mortgage.next_monthly_payment = 1500.00
+
+        client = MagicMock()
+        client.get_liabilities.return_value = _mock_liabilities(mortgage=[mortgage])
+        inst = db.session.get(Institution, inst_id)
+        err = _refresh_liabilities(client, inst)
+        db.session.commit()
+
+        assert err is None
+        row = Account.query.filter_by(plaid_account_id='acc-mtg').first()
+        assert row.next_payment_due_date == date(2026, 9, 1)
+        assert row.minimum_payment_amount == Decimal('1500.00')
+
+
+@patch('app.sync.PlaidClient')
+def test_sync_ignores_benign_liability_error(MockPlaidClient, app):
+    """PRODUCTS_NOT_SUPPORTED (depository-only / non-consented Item) is normal."""
+    import json
+    import plaid
+
+    inst_id = _make_institution(app)
+    with app.app_context():
+        mock_client = MagicMock()
+        mock_client.sync_transactions.return_value = (
+            [_mock_txn('txn-new')], [], [], 'cursor-x', [_mock_account('acc-001')],
+        )
+        mock_client.get_balances.return_value = []
+        api_exc = plaid.ApiException(status=400)
+        api_exc.body = json.dumps(
+            {'error_code': 'PRODUCTS_NOT_SUPPORTED', 'error_message': 'no liabilities'}
+        )
+        mock_client.get_liabilities.side_effect = api_exc
+        MockPlaidClient.return_value = mock_client
+
+        sync_all_institutions()
+
+        log = SyncLog.query.first()
+        assert log.error is None  # benign — not annotated
+        inst = db.session.get(Institution, inst_id)
+        assert inst.status == 'active'
+
+
+@patch('app.sync.PlaidClient')
+def test_sync_logs_unexpected_liability_error(MockPlaidClient, app):
+    """An unexpected liabilities failure is recorded on the SyncLog, non-fatally."""
+    import json
+    import plaid
+
+    inst_id = _make_institution(app)
+    with app.app_context():
+        mock_client = MagicMock()
+        mock_client.sync_transactions.return_value = (
+            [_mock_txn('txn-new')], [], [], 'cursor-x', [_mock_account('acc-001')],
+        )
+        mock_client.get_balances.return_value = []
+        api_exc = plaid.ApiException(status=429)
+        api_exc.body = json.dumps(
+            {'error_code': 'RATE_LIMIT_EXCEEDED', 'error_message': 'slow down'}
+        )
+        mock_client.get_liabilities.side_effect = api_exc
+        MockPlaidClient.return_value = mock_client
+
+        sync_all_institutions()
+
+        assert Transaction.query.count() == 1  # sync did not abort
+        log = SyncLog.query.first()
+        assert log.error is not None
+        assert 'liability refresh failed' in log.error
+        assert 'RATE_LIMIT_EXCEEDED' in log.error
         inst = db.session.get(Institution, inst_id)
         assert inst.status == 'active'
 

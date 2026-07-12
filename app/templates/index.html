@@ -80,6 +80,26 @@
         </span>
         <span class="text-muted">{{ row.txn_count }} txn{% if row.txn_count != 1 %}s{% endif %}</span>
       </div>
+      {% if row.next_payment_due_date is not none or row.last_statement_balance is not none %}
+      {% set overdue = row.next_payment_due_date is not none and row.next_payment_due_date < today %}
+      <div class="d-flex justify-content-between align-items-baseline small mt-1 pt-1 border-top">
+        <span class="{% if overdue %}text-danger fw-semibold{% else %}text-muted{% endif %}">
+          {% if row.next_payment_due_date is not none %}
+            {% if overdue %}Overdue {{ row.next_payment_due_date.strftime('%b %-d') }}{% else %}Due {{ row.next_payment_due_date.strftime('%b %-d') }}{% endif %}
+          {% else %}Balance due{% endif %}
+        </span>
+        <span class="fw-semibold {% if overdue %}text-danger{% endif %}">
+          {% if row.last_statement_balance is not none %}
+            ${{ "%.2f"|format(row.last_statement_balance) }}
+          {% elif row.minimum_payment_amount is not none %}
+            ${{ "%.2f"|format(row.minimum_payment_amount) }}
+          {% else %}—{% endif %}
+        </span>
+      </div>
+      {% if row.last_statement_balance is not none and row.minimum_payment_amount is not none %}
+      <div class="text-muted text-end" style="font-size: 0.72rem;">min ${{ "%.2f"|format(row.minimum_payment_amount) }} due</div>
+      {% endif %}
+      {% endif %}
     </div>
   </div>
   {% endfor %}

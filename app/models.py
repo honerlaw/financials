@@ -53,6 +53,13 @@ class Account(db.Model):
     current_balance = db.Column(db.Numeric(12, 2), nullable=True)
     available_balance = db.Column(db.Numeric(12, 2), nullable=True)
     iso_currency_code = db.Column(db.String(10), nullable=True)
+    # Liability fields, populated from Plaid's /liabilities/get for credit,
+    # student, and mortgage accounts. Null for depository accounts (and for any
+    # Item not consented to the `liabilities` product). See
+    # .minerva/knowledge/014-decision-plaid-liabilities-piggyback-on-sync.md.
+    next_payment_due_date = db.Column(db.Date, nullable=True)
+    last_statement_balance = db.Column(db.Numeric(12, 2), nullable=True)
+    minimum_payment_amount = db.Column(db.Numeric(12, 2), nullable=True)
     last_synced_at = db.Column(db.DateTime(timezone=True), nullable=True)
     created_at = db.Column(db.DateTime(timezone=True), default=_utcnow, nullable=False)
 

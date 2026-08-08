@@ -43,6 +43,14 @@ from sqlalchemy.exc import IntegrityError
 from app.models import Account, DailyDigest, Institution, Transaction
 from app.spending import WEEKLY_BUDGET, week_spend, week_start
 
+# The registered A2P 10DLC brand, carried as the first line of every message.
+# Campaign registration requires the business name to appear in the body, and
+# carrier traffic must match the sample messages filed with the campaign — so
+# changing either constant below means re-filing those samples. See
+# docs/twilio-a2p-campaign-resubmission.md.
+BRAND = 'Onerlaw'
+OPT_OUT_LINE = 'Reply STOP to unsubscribe.'
+
 # Serializes send_daily_digest across any concurrent callers. Correct only
 # under a single worker process (see module docstring); the DB unique constraint
 # is the cross-process backstop.
@@ -88,8 +96,14 @@ def digest_body(today, spent, accounts, budget=WEEKLY_BUDGET):
 
     ``accounts`` is an iterable of ``(institution_name, account_name, mask,
     balance[, stale])`` tuples — plain data, not ORM rows, so this stays pure.
+
+    Opens with ``BRAND`` and closes with ``OPT_OUT_LINE`` because A2P 10DLC
+    registration requires both in the body; they are part of the message
+    contract, not decoration. Both are plain GSM-7, so they add roughly one
+    UCS-2 segment to a body already pushed off GSM-7 by ``—``/``·``/``••``.
     """
     lines = [
+        BRAND,
         f"Good morning — {today.strftime('%a %b %-d')}",
         '',
         budget_line(spent, budget),
@@ -99,6 +113,7 @@ def digest_body(today, spent, accounts, budget=WEEKLY_BUDGET):
     ]
     account_lines = [account_line(*a) for a in accounts]
     lines.extend(account_lines or ['No linked accounts.'])
+    lines.extend(['', OPT_OUT_LINE])
     return '\n'.join(lines)
 
 

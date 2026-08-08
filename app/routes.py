@@ -460,6 +460,9 @@ def reconnect_institution(institution_id):
     Update mode keeps the existing access_token, so there is no token to
     exchange — we just clear the login_required state and kick a background
     sync to backfill the transactions missed while the Item was disconnected.
+    For an already-active Item (re-connected to add the `liabilities` consent)
+    the status write is a no-op and the sync is what pulls the newly-consented
+    liability data.
     """
     from app.sync import sync_all_institutions
     inst = db.session.get(Institution, institution_id)

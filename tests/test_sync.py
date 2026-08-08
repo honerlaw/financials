@@ -375,6 +375,41 @@ def test_sync_ignores_benign_liability_error(MockPlaidClient, app):
 
 
 @patch('app.sync.PlaidClient')
+def test_sync_ignores_additional_consent_required(MockPlaidClient, app):
+    """An Item linked before the `liabilities` consent must not spam the log.
+
+    Plaid returns ADDITIONAL_CONSENT_REQUIRED for every such Item on every
+    sync; annotating the SyncLog for it would bury real errors in noise. The
+    user clears it by re-connecting (update mode requests the consent).
+    """
+    import json
+    import plaid
+
+    inst_id = _make_institution(app)
+    with app.app_context():
+        mock_client = MagicMock()
+        mock_client.sync_transactions.return_value = (
+            [_mock_txn('txn-new')], [], [], 'cursor-x', [_mock_account('acc-001')],
+        )
+        mock_client.get_balances.return_value = []
+        api_exc = plaid.ApiException(status=400)
+        api_exc.body = json.dumps({
+            'error_code': 'ADDITIONAL_CONSENT_REQUIRED',
+            'error_message': 'consent required for liabilities',
+        })
+        mock_client.get_liabilities.side_effect = api_exc
+        MockPlaidClient.return_value = mock_client
+
+        sync_all_institutions()
+
+        log = SyncLog.query.first()
+        assert log.error is None  # benign — not annotated
+        assert Transaction.query.count() == 1  # sync did not abort
+        inst = db.session.get(Institution, inst_id)
+        assert inst.status == 'active'
+
+
+@patch('app.sync.PlaidClient')
 def test_sync_logs_unexpected_liability_error(MockPlaidClient, app):
     """An unexpected liabilities failure is recorded on the SyncLog, non-fatally."""
     import json

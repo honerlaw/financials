@@ -122,7 +122,15 @@ def _refresh_balances(client, institution):
 # SyncLog with: the Item was never consented to the `liabilities` product
 # (every Item linked before this feature), or it simply has no credit/loan
 # accounts. Treated as a no-op refresh rather than an error.
+#
+# ADDITIONAL_CONSENT_REQUIRED is the code Plaid actually returns for a
+# never-consented Item — it is the common case for every Item linked before
+# liabilities was added as an additional consented product, so it would
+# otherwise annotate every institution on every sync. The remedy is for the
+# user to re-connect the institution (Plaid update mode now requests the
+# liabilities consent); until then the liability columns simply stay null.
 _BENIGN_LIABILITY_ERROR_CODES = frozenset({
+    'ADDITIONAL_CONSENT_REQUIRED',
     'PRODUCTS_NOT_SUPPORTED',
     'NO_LIABILITY_ACCOUNTS',
     'NO_ACCOUNTS',

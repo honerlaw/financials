@@ -11,6 +11,15 @@ metadata:
 **Type**: decision
 **Context**: .minerva/work/012-weekly-budget-sms-alerts
 
+> **Superseded (2026-08-08) by [[016-decision-daily-digest-notifier]].** The
+> threshold cadence described here no longer exists: `newly_crossed`,
+> `THRESHOLDS` and the `BudgetAlert` model were removed in unit 016 in favour of
+> one daily 7am digest. What still holds is the *shape* of the notifier —
+> soft-disable on missing config, per-recipient dedup, record-after-send, the
+> module lock plus unique-constraint backstop, and the non-fatal sync hook. Read
+> decisions 2, 3, 4 and 5 below as live rationale; read decision 1 and the spend
+> semantics as history.
+
 ## Context
 
 Work unit 012 added proactive SMS alerts on top of the existing weekly-budget
@@ -91,3 +100,5 @@ excluding `TRANSFER`/`LOAN_PAYMENTS`, Sun–Sat weeks). It is a **household tota
   side-effect (`_refresh_balances`) inside the sync path that this hook mirrors.
 - [[004-pattern-seed-relative-dates-in-time-sensitive-tests]] — why `week_spend`
   and `newly_crossed` take the reference date / state as parameters.
+- [[016-decision-daily-digest-notifier]] — the daily-digest design that replaced
+  this one, and what it kept.

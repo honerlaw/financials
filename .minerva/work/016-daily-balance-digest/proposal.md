@@ -1,7 +1,7 @@
 # Proposal: daily-balance-digest
 
 **Date**: 2026-08-08
-**Status**: Draft
+**Status**: Shipped (2026-08-08)
 
 ## Goal
 
@@ -32,7 +32,7 @@ so `Account.current_balance` is authoritative as of the last sync — and the
 digest is dispatched immediately after the 7am sync, making it as fresh as the
 data gets.
 
-## Approach
+## Approach (as shipped)
 
 ### 1. Notifier rewrite — `app/notifications.py`
 
@@ -41,17 +41,17 @@ by `send_daily_digest(session, today, config, sender=None)`. The pure
 message-building helpers stay pure and unit-tested; the Twilio send and the
 `DailyDigest` write remain the impure shell.
 
-Message shape (one text, GSM-7, multi-segment is expected and fine):
+Message shape (one text; the punctuation makes it UCS-2, so ~4 segments):
 
 ```
-Good morning — Fri Aug 8
+Good morning — Sat Aug 8
 
 Budget: $750 of $1,000 (75%) — $250 left
 Week of Aug 2
 
 Balances
-Amex · Platinum ••1004: $2,143.19
-Citi · Double Cash ••8821: $612.40
+American Express · Platinum Card ••1004: $2,143.19
+Citi · Double Cash ••8821: $612.40 (reconnect needed)
 Truist · Checking ••3390: $4,880.02
 ```
 
@@ -64,6 +64,11 @@ Truist · Checking ••3390: $4,880.02
   `current_balance`, no sign flipping) so the text and the UI never disagree.
   A null balance renders `—`.
 - Accounts with no balance still appear, so a newly-linked account is visible.
+- An account whose institution is not `status='active'` gets a
+  `(reconnect needed)` suffix. `sync_all_institutions` skips those Items, so
+  their balance is frozen at the last good sync; the dashboard can show that
+  number safely next to a reconnect banner, an SMS cannot. (Added during review
+  — finding F1.)
 
 ### 2. Dedup model — `DailyDigest` + migration
 
@@ -85,8 +90,15 @@ The `_send_budget_alerts_safe()` hook is **removed from
 A new `run_daily_sync()` in `app/sync.py` runs the sync and then dispatches the
 digest through a non-fatal wrapper (`_send_daily_digest_safe`), preserving the
 contract that a notifier failure — import-time included — never aborts a sync.
-`wsgi.py`'s 7am APScheduler cron calls `run_daily_sync` instead of
+The 7am APScheduler cron calls `run_daily_sync` instead of
 `sync_all_institutions`.
+
+The scheduler wiring itself moved out of `wsgi.py` into
+`app/scheduler.py::start_scheduler(app)`. Importing `wsgi` starts a real
+scheduler as a side effect, which left the "fires at 7am in the right zone"
+behaviour untestable; `tests/test_scheduler.py` now pins the hour, the trigger
+timezone, and that the scheduled callable is the notifying path. `wsgi.py` is
+reduced to `create_app()` + `start_scheduler(app)`.
 
 ### 4. 7am means 7am here, not 7am UTC — `APP_TIMEZONE`
 
@@ -100,6 +112,13 @@ not a code change.
 Side effect, intended: the daily *sync* also moves from 07:00 UTC to 07:00 ET.
 `/api/sync` on page load remains the primary sync trigger, so this is a
 backstop shift, not a data-freshness regression.
+
+Two implementation details worth keeping: the zone is handed to APScheduler as
+an IANA **name** (`str(ZoneInfo)`) rather than a `tzinfo`, because
+`requirements.txt` pins only `APScheduler>=3.10.0` and older 3.x rejected
+non-pytz tzinfo objects; and `tzdata` was added to requirements, since
+`python:3.12-slim` is not guaranteed to ship the system IANA database and a
+missing tzdb would silently route every lookup through the fallback.
 
 ### 5. Config surface
 
@@ -144,3 +163,14 @@ the whole feature is an inert no-op.
 
 None blocking. `APP_TIMEZONE`'s default is inferred from commit offsets
 (`-0400`); if it is wrong, it is a one-line config fix.
+
+## Verification
+
+`pytest`: 209 passed. Migration `d5a1c9e37b48` round-tripped by hand — the full
+chain cannot replay on SQLite (see
+[[016-pattern-migration-chain-is-postgres-only]]), so it was stamped, upgraded
+and downgraded in isolation. Digest bodies were rendered end-to-end against a
+seeded 3-institution / 4-account database, under and over budget.
+
+Deferred, in `followups.md`: no catch-up for a 7am the container sleeps through
+(F4), UCS-2 segment count (F3), no 1600-character cap (F5).

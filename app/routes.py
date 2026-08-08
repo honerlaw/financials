@@ -214,25 +214,19 @@ def index():
         window_active=window_active,
         window_label=window_label,
         selected_start=request.args.get('start') if window_active else None,
-        sms_configured=_sms_configured(),
+        sms_configured=_digest_configured(),
         **spending,
     )
 
 
-def _sms_configured():
-    """True when the digest could actually be texted right now.
+def _digest_configured():
+    """Whether the digest button should render enabled.
 
-    Mirrors app.notifications' soft-disable gate (recipients AND all three
-    Twilio credentials) so the button renders disabled up front instead of only
-    failing on press.
+    Delegates to the notifier's own gate rather than re-deriving it, so the
+    button's state and the endpoint's behaviour can never disagree.
     """
-    cfg = current_app.config
-    return bool(
-        (cfg.get('BUDGET_ALERT_RECIPIENTS') or '').strip()
-        and cfg.get('TWILIO_ACCOUNT_SID')
-        and cfg.get('TWILIO_AUTH_TOKEN')
-        and cfg.get('TWILIO_FROM_NUMBER')
-    )
+    from app.notifications import is_configured
+    return is_configured(current_app.config)
 
 
 @bp.route('/api/transactions')

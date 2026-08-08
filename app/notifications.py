@@ -126,14 +126,34 @@ def _recipients(config):
     return [r.strip() for r in raw.split(',') if r.strip()]
 
 
+def _has_credentials(config):
+    """True when all three Twilio credentials are present."""
+    return bool(config.get('TWILIO_ACCOUNT_SID')
+                and config.get('TWILIO_AUTH_TOKEN')
+                and config.get('TWILIO_FROM_NUMBER'))
+
+
+def is_configured(config):
+    """True when a digest could actually be sent right now.
+
+    The single source of truth for the soft-disable gate — recipients that
+    actually parse, AND complete credentials. The dashboard asks this to decide
+    whether to render its button enabled, so it must agree exactly with what
+    the send paths do; a caller re-deriving it (say, a bare truthiness check on
+    the raw recipients string) would enable the button for a value like ``","``
+    that parses to no recipients at all.
+
+    Constructs nothing, so the lazy ``twilio`` import stays lazy on a page load.
+    """
+    return bool(_recipients(config)) and _has_credentials(config)
+
+
 def _sender_from_config(config):
     """Build a TwilioSender when fully configured, else None (feature disabled)."""
-    sid = config.get('TWILIO_ACCOUNT_SID')
-    token = config.get('TWILIO_AUTH_TOKEN')
-    from_number = config.get('TWILIO_FROM_NUMBER')
-    if not (sid and token and from_number):
+    if not _has_credentials(config):
         return None
-    return TwilioSender(sid, token, from_number)
+    return TwilioSender(config['TWILIO_ACCOUNT_SID'], config['TWILIO_AUTH_TOKEN'],
+                        config['TWILIO_FROM_NUMBER'])
 
 
 def _week_spent(session, today):

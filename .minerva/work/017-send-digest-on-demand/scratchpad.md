@@ -10,3 +10,31 @@
 - [decided] must follow [[012-pattern-fetch-content-type-session-detection]] in the button's fetch — session expiry on a `@login_required` route returns HTML 200, not a non-ok status
 
 ## Notes
+- Rendered the dashboard header end-to-end (test client, configured + unconfigured) rather than
+  trusting the assertions alone — button markup, title, and disabled state all correct.
+
+## Review triage 2026-08-08
+Inline review (minerva spec/knowledge audit + code review of `git diff main...HEAD`). No PR yet,
+so no `code-review:code-review` delegation.
+
+- **F1 (medium) → FIX.** `routes._sms_configured()` hand-reimplemented the soft-disable gate,
+  approximating `_recipients()` with a bare `.strip()` on the raw string. The two could disagree:
+  `BUDGET_ALERT_RECIPIENTS=","` is truthy after strip (button renders enabled) but parses to zero
+  recipients (press → 400). Replaced with `notifications.is_configured(config)` as the single
+  source of truth, built from the same `_recipients` the send paths use plus a new
+  `_has_credentials` helper that `_sender_from_config` now shares. `is_configured` constructs
+  nothing, so the deliberate lazy `twilio` import ([[010-decision-budget-alert-notifier]]) is
+  preserved on page loads. Regression test:
+  `test_button_disabled_for_recipients_that_parse_to_nothing`.
+- **F2 (low) → accepted, documented.** The endpoint is synchronous and the app runs
+  `--workers 1`, so a hung Twilio blocks the single worker for up to 10s per recipient (the
+  `TwilioSender` timeout), bounded overall by gunicorn's 120s. Not worth a background thread:
+  reporting the outcome is the whole point of the button, and the person waiting is the one who
+  pressed it. Noted as a limitation rather than fixed.
+- **Spec fidelity: clean.** All seven success criteria met with test evidence; no divergence from
+  the written approach.
+- **Knowledge compliance: clean.** The button's fetch checks Content-Type before parsing
+  ([[012-pattern-fetch-content-type-session-detection]]); the scheduled path's contract from
+  [[016-decision-daily-digest-notifier]] is untouched — `send_daily_digest` is not modified at
+  all, and the manual path shares only pure builders; the lazy twilio import from
+  [[010-decision-budget-alert-notifier]] survives the `_sender_from_config` refactor.

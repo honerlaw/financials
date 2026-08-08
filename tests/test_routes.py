@@ -691,3 +691,12 @@ def test_dashboard_button_enabled_when_sms_configured(auth_client, app):
     app.config.update(_SMS_CFG)
     html = auth_client.get('/').get_data(as_text=True)
     assert 'disabled' not in html.split('id="digest-btn"')[1][:300]
+
+
+def test_button_disabled_for_recipients_that_parse_to_nothing(auth_client, app):
+    """A value like "," is truthy but yields no recipients — the button must not
+    claim to be usable when a press would 400."""
+    app.config.update(dict(_SMS_CFG, BUDGET_ALERT_RECIPIENTS=' , '))
+    html = auth_client.get('/').get_data(as_text=True)
+    assert 'disabled' in html.split('id="digest-btn"')[1][:300]
+    assert auth_client.post('/api/digest/send').status_code == 400

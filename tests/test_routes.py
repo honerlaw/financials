@@ -700,3 +700,32 @@ def test_button_disabled_for_recipients_that_parse_to_nothing(auth_client, app):
     html = auth_client.get('/').get_data(as_text=True)
     assert 'disabled' in html.split('id="digest-btn"')[1][:300]
     assert auth_client.post('/api/digest/send').status_code == 400
+
+
+def test_send_digest_reports_a_crash_as_json_not_html(auth_client, app):
+    """A crash must never reach the browser as an HTML 500 — that is
+    indistinguishable from the login redirect and reads as a phantom logout."""
+    app.config.update(_SMS_CFG)
+    with patch('app.notifications.send_digest_now',
+               side_effect=RuntimeError('twilio exploded')):
+        res = auth_client.post('/api/digest/send')
+    assert res.status_code == 500
+    assert res.headers['Content-Type'].startswith('application/json')
+    assert res.json['error'] == 'RuntimeError: twilio exploded'
+
+
+def test_send_digest_crash_message_is_truncated(auth_client, app):
+    app.config.update(_SMS_CFG)
+    with patch('app.notifications.send_digest_now',
+               side_effect=RuntimeError('x' * 500)):
+        res = auth_client.post('/api/digest/send')
+    assert len(res.json['error']) == 300
+
+
+def test_send_digest_still_redirects_a_genuinely_expired_session(client, app):
+    """The real expiry path must keep working — no session, so login_required
+    302s to /login (which is what the button's `redirected` check keys on)."""
+    app.config.update(_SMS_CFG)
+    res = client.post('/api/digest/send')
+    assert res.status_code == 302
+    assert '/login' in res.headers['Location']

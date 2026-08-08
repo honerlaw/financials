@@ -1,5 +1,7 @@
 import threading
 from datetime import date
+
+import pytest
 from decimal import Decimal
 
 from sqlalchemy.exc import OperationalError
@@ -439,3 +441,68 @@ def test_manual_send_reports_partial_failure(app):
                                  sender=sender)
         assert result['sent'] == ['+1222']
         assert result['failed'] == ['+1111']
+
+
+# ── the real TwilioSender construction path ───────────────────────────────────
+#
+# Every other test in this file injects a fake sender, so `_sender_from_config`
+# — the line that actually threw in production — was never executed by the
+# suite. These stub the `twilio` package in sys.modules so the real construction
+# path runs identically whether or not twilio is installed locally.
+
+def _twilio_stub(raise_on_client=None):
+    """A minimal fake `twilio` package tree for sys.modules."""
+    import sys, types
+
+    rest = types.ModuleType('twilio.rest')
+    http = types.ModuleType('twilio.http')
+    http_client = types.ModuleType('twilio.http.http_client')
+    root = types.ModuleType('twilio')
+
+    class _Client:
+        def __init__(self, sid, token, http_client=None):
+            if raise_on_client:
+                raise raise_on_client
+            self.sid = sid
+
+    class _TwilioHttpClient:
+        def __init__(self, timeout=None):
+            self.timeout = timeout
+
+    rest.Client = _Client
+    http_client.TwilioHttpClient = _TwilioHttpClient
+    return {'twilio': root, 'twilio.rest': rest, 'twilio.http': http,
+            'twilio.http.http_client': http_client}
+
+
+def test_sender_is_constructed_from_complete_config(app):
+    """The real _sender_from_config path, not an injected fake."""
+    from unittest.mock import patch as _patch
+    from app.notifications import _sender_from_config
+
+    with _patch.dict('sys.modules', _twilio_stub()):
+        sender = _sender_from_config({
+            'TWILIO_ACCOUNT_SID': 'AC' + '0' * 32,
+            'TWILIO_AUTH_TOKEN': '0' * 32,
+            'TWILIO_FROM_NUMBER': '+15550000000',
+        })
+    assert sender is not None
+    assert sender._from == '+15550000000'
+
+
+def test_sender_construction_failure_propagates(app):
+    """A bad credential blows up at construction — the caller must handle it.
+
+    This is the production failure shape: the exception escapes send_digest_now
+    rather than being caught per-recipient.
+    """
+    from unittest.mock import patch as _patch
+
+    with _patch.dict('sys.modules', _twilio_stub(raise_on_client=RuntimeError('bad creds'))):
+        with pytest.raises(RuntimeError):
+            send_digest_now(db.session, TODAY, {
+                'BUDGET_ALERT_RECIPIENTS': '+1111',
+                'TWILIO_ACCOUNT_SID': 'AC' + '0' * 32,
+                'TWILIO_AUTH_TOKEN': '0' * 32,
+                'TWILIO_FROM_NUMBER': '+15550000000',
+            })

@@ -200,10 +200,17 @@ async function sendDigest(btn) {
   try {
     const res = await fetch('/api/digest/send', { method: 'POST' });
     // An expired session 302s to /login and the browser follows it
-    // transparently, so this arrives as a 200 of HTML — check the type before
-    // parsing (see .minerva/knowledge 012-pattern-fetch-content-type-session-detection).
-    if (!(res.headers.get('content-type') || '').includes('application/json')) {
+    // transparently, arriving as a 200 of HTML (knowledge 012). But a crashed
+    // endpoint is ALSO non-JSON, so Content-Type alone cannot tell them apart —
+    // treating every non-JSON response as expiry is what made a 500 look like a
+    // logout. `redirected` + the final URL is the precise expiry signal.
+    if (res.redirected && new URL(res.url).pathname === '/login') {
       window.location.href = '/login';
+      return;
+    }
+    if (!(res.headers.get('content-type') || '').includes('application/json')) {
+      status.className = 'small text-danger';
+      status.textContent = `Server error (${res.status}) — check the logs.`;
       return;
     }
     const data = await res.json();

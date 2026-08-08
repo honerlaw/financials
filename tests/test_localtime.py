@@ -26,3 +26,28 @@ def test_unknown_timezone_falls_back_to_default_not_utc(caplog):
 def test_local_today_is_not_utc_date():
     assert local_today({'APP_TIMEZONE': 'America/New_York'}) == date(2026, 8, 8)
     assert local_today({'APP_TIMEZONE': 'UTC'}) == date(2026, 8, 9)
+
+
+def test_missing_tz_database_degrades_to_utc_instead_of_raising(caplog):
+    """With no tz database at all, the DEFAULT_TIMEZONE recovery fails too.
+
+    It used to raise the very error it was recovering from, killing every caller
+    — including a web request. UTC is the wrong schedule but a working app, and
+    the degradation is logged at ERROR because 016 chose a non-UTC default
+    precisely so this could not happen quietly.
+    """
+    import zoneinfo
+    from datetime import timezone
+    import app.localtime as lt
+
+    def boom(name):
+        raise zoneinfo.ZoneInfoNotFoundError(name)
+
+    original = lt.ZoneInfo
+    lt.ZoneInfo = boom
+    try:
+        with caplog.at_level(logging.ERROR, logger='app.localtime'):
+            assert lt.app_timezone({'APP_TIMEZONE': 'America/New_York'}) is timezone.utc
+    finally:
+        lt.ZoneInfo = original
+    assert 'degrading to UTC' in caplog.text

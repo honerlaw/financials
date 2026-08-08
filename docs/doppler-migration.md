@@ -10,7 +10,7 @@ staged production cutover, rollback, and day-2 operations.
 
 | Value | Source |
 |---|---|
-| `SECRET_KEY`, `APP_PASSWORD`, `PLAID_*`, `OPENROUTER_*`, `CHAT_*`, `TWILIO_*`, `BUDGET_ALERT_RECIPIENTS` | **Doppler** |
+| `SECRET_KEY`, `APP_PASSWORD`, `PLAID_*`, `OPENROUTER_*`, `CHAT_*`, `TWILIO_*`, `BUDGET_ALERT_RECIPIENTS`, `APP_TIMEZONE` | **Doppler** |
 | `DATABASE_URL`, `DATABASE_ADMIN_URL` | **DigitalOcean managed-DB binding** (NOT Doppler) |
 | `DOPPLER_TOKEN` | **DO App Platform** dashboard (the one bootstrap secret) |
 

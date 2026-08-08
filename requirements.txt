@@ -3,6 +3,9 @@ flask>=3.0.0
 flask-sqlalchemy>=3.1.0
 flask-migrate>=4.0.0
 APScheduler>=3.10.0
+# zoneinfo's IANA database — the python:3.12-slim base image is not guaranteed to
+# carry system tzdata, and APP_TIMEZONE lookups must not fall over in the container.
+tzdata>=2024.1
 psycopg2-binary>=2.9.0
 python-dotenv>=1.0.0
 gunicorn>=21.0.0

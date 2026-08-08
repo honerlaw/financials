@@ -1,11 +1,13 @@
 from datetime import date
 from decimal import Decimal
 from unittest.mock import MagicMock, patch
+
+from freezegun import freeze_time
 from app.models import Institution, Transaction, SyncLog, Account
 from app.models import db
 from app.sync import (
-    sync_all_institutions, _upsert_transactions, _mark_removed, _upsert_accounts,
-    _refresh_liabilities,
+    sync_all_institutions, run_daily_sync, _upsert_transactions, _mark_removed,
+    _upsert_accounts, _refresh_liabilities,
 )
 
 
@@ -427,32 +429,58 @@ def test_sync_sets_login_required_on_error(MockPlaidClient, app):
 
 
 @patch('app.sync.PlaidClient')
-def test_sync_dispatches_budget_alerts(MockPlaidClient, app):
-    """sync_all_institutions fires the budget-alert hook after syncing."""
+def test_daily_sync_dispatches_digest(MockPlaidClient, app):
+    """run_daily_sync fires the digest hook after syncing."""
     MockPlaidClient.return_value = MagicMock()
     with app.app_context():
-        with patch('app.notifications.send_budget_alerts') as mock_send:
-            sync_all_institutions()
+        with patch('app.notifications.send_daily_digest') as mock_send:
+            run_daily_sync()
             assert mock_send.called
 
 
 @patch('app.sync.PlaidClient')
-def test_sync_survives_budget_alert_failure(MockPlaidClient, app):
-    """A notifier exception must not abort the sync (non-fatal contract)."""
+def test_page_load_sync_does_not_text(MockPlaidClient, app):
+    """The shared sync path (/api/sync on every page load) must never notify.
+
+    This is what makes the digest land at 7am rather than whenever the dashboard
+    is next opened.
+    """
     MockPlaidClient.return_value = MagicMock()
     with app.app_context():
-        with patch('app.notifications.send_budget_alerts',
-                   side_effect=RuntimeError('boom')):
-            # Should not raise.
+        with patch('app.notifications.send_daily_digest') as mock_send:
             sync_all_institutions()
+            assert not mock_send.called
 
 
 @patch('app.sync.PlaidClient')
-def test_sync_survives_budget_alert_import_failure(MockPlaidClient, app):
+def test_daily_sync_uses_local_today_not_utc(MockPlaidClient, app):
+    """The digest's "today" comes from APP_TIMEZONE, not the container's UTC."""
+    MockPlaidClient.return_value = MagicMock()
+    with app.app_context():
+        app.config['APP_TIMEZONE'] = 'America/New_York'
+        with freeze_time('2026-08-09 03:30:00'):  # 11:30pm Aug 8 in New York
+            with patch('app.notifications.send_daily_digest') as mock_send:
+                run_daily_sync()
+        assert mock_send.call_args[0][1] == date(2026, 8, 8)
+
+
+@patch('app.sync.PlaidClient')
+def test_daily_sync_survives_digest_failure(MockPlaidClient, app):
+    """A notifier exception must not abort the sync (non-fatal contract)."""
+    MockPlaidClient.return_value = MagicMock()
+    with app.app_context():
+        with patch('app.notifications.send_daily_digest',
+                   side_effect=RuntimeError('boom')):
+            # Should not raise.
+            run_daily_sync()
+
+
+@patch('app.sync.PlaidClient')
+def test_daily_sync_survives_digest_import_failure(MockPlaidClient, app):
     """An import-time failure in the notifier path must not abort the sync."""
     import sys
     MockPlaidClient.return_value = MagicMock()
     with app.app_context():
         # Poisoning sys.modules makes `from app.notifications import ...` raise.
         with patch.dict(sys.modules, {'app.notifications': None}):
-            sync_all_institutions()  # should not raise
+            run_daily_sync()  # should not raise

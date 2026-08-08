@@ -4,38 +4,71 @@ from decimal import Decimal
 
 from sqlalchemy.exc import OperationalError
 
-from app.models import db, Institution, Transaction, BudgetAlert
-from app.notifications import newly_crossed, send_budget_alerts
+from app.models import db, Account, Institution, Transaction, DailyDigest
+from app.notifications import (
+    account_line, budget_line, digest_body, send_daily_digest,
+)
 
 
-# 2026-07-08 is a Wednesday; its Sun–Sat week starts Jul 5 (a Sunday).
-TODAY = date(2026, 7, 8)
-WS = date(2026, 7, 5)
+# 2026-08-08 is a Saturday; its Sun–Sat week starts Aug 2 (a Sunday).
+TODAY = date(2026, 8, 8)
+WS = date(2026, 8, 2)
 
 
-# ── newly_crossed (pure) ──────────────────────────────────────────────────────
+# ── message building (pure) ───────────────────────────────────────────────────
 
-def test_newly_crossed_at_exact_threshold():
-    assert newly_crossed(50, []) == [50]
-
-
-def test_newly_crossed_below_threshold():
-    assert newly_crossed(49, []) == []
+def test_budget_line_under_budget():
+    line = budget_line(Decimal('750'))
+    assert line == 'Budget: $750 of $1,000 (75%) — $250 left'
 
 
-def test_newly_crossed_skips_already_sent():
-    assert newly_crossed(80, [50]) == [75]
+def test_budget_line_at_budget_reads_zero_left():
+    assert budget_line(Decimal('1000')) == 'Budget: $1,000 of $1,000 (100%) — $0 left'
 
 
-def test_newly_crossed_multi_threshold_jump():
-    assert newly_crossed(105, []) == [50, 75, 100]
+def test_budget_line_over_budget_reports_percent_and_overage():
+    """Percent keeps climbing past 100 and the tail flips to OVER."""
+    line = budget_line(Decimal('1240'))
+    assert '(124%)' in line
+    assert '$240 OVER' in line
 
 
-def test_newly_crossed_nothing_new_when_all_sent():
-    assert newly_crossed(100, [50, 75, 100]) == []
+def test_budget_line_zero_spend():
+    assert budget_line(Decimal('0')) == 'Budget: $0 of $1,000 (0%) — $1,000 left'
 
 
-# ── send_budget_alerts (orchestration) ────────────────────────────────────────
+def test_account_line_formats_label_and_balance():
+    assert account_line('Truist', 'Checking', '3390', Decimal('4880.02')) == \
+        'Truist · Checking ••3390: $4,880.02'
+
+
+def test_account_line_without_mask():
+    assert account_line('Amex', 'Platinum', None, Decimal('12.00')) == \
+        'Amex · Platinum: $12.00'
+
+
+def test_account_line_null_balance_renders_dash():
+    assert account_line('Citi', 'New Card', '8821', None) == 'Citi · New Card ••8821: —'
+
+
+def test_digest_body_contains_budget_week_and_every_account():
+    body = digest_body(TODAY, Decimal('750'), [
+        ('Amex', 'Platinum', '1004', Decimal('2143.19')),
+        ('Truist', 'Checking', '3390', Decimal('4880.02')),
+    ])
+    assert body.startswith('Good morning — Sat Aug 8')
+    assert 'Budget: $750 of $1,000 (75%) — $250 left' in body
+    assert 'Week of Aug 2' in body
+    assert 'Amex · Platinum ••1004: $2,143.19' in body
+    assert 'Truist · Checking ••3390: $4,880.02' in body
+
+
+def test_digest_body_with_no_accounts():
+    body = digest_body(TODAY, Decimal('0'), [])
+    assert 'No linked accounts.' in body
+
+
+# ── send_daily_digest (orchestration) ─────────────────────────────────────────
 
 class FakeSender:
     """Records sends; optionally raises for specific recipients."""
@@ -50,74 +83,123 @@ class FakeSender:
         self.sent.append((to, body))
 
 
-def _seed_inst(week_total=None, txn_date=None):
-    """Insert an institution and (optionally) one current-week transaction."""
-    inst = Institution(name='B', slug='b', access_token='a', item_id='i')
+def _seed_inst(week_total=None, txn_date=None, name='B', accounts=()):
+    """Insert an institution, optionally one current-week txn and some accounts."""
+    inst = Institution(name=name, slug=name.lower(), access_token='a',
+                       item_id=f'i-{name}')
     db.session.add(inst)
     db.session.commit()
     if week_total is not None:
         db.session.add(Transaction(
-            plaid_transaction_id='t1', institution_id=inst.id, account_id='a1',
-            date=txn_date or TODAY, description='x',
+            plaid_transaction_id=f't1-{name}', institution_id=inst.id,
+            account_id='a1', date=txn_date or TODAY, description='x',
             amount=Decimal(week_total), category='FOOD_AND_DRINK',
         ))
-        db.session.commit()
+    for i, (acct_name, mask, balance) in enumerate(accounts):
+        db.session.add(Account(
+            institution_id=inst.id, plaid_account_id=f'{name}-acct-{i}',
+            name=acct_name, mask=mask, current_balance=balance,
+        ))
+    db.session.commit()
     return inst.id
 
 
-def test_sends_each_crossed_threshold_to_each_recipient(app):
+def test_sends_one_digest_to_each_recipient(app):
     with app.app_context():
-        _seed_inst('750.00')  # 75% of $1000 → thresholds 50 and 75
+        _seed_inst('750.00', accounts=[('Checking', '3390', Decimal('4880.02'))])
         cfg = {'BUDGET_ALERT_RECIPIENTS': '+1111,+1222'}
         sender = FakeSender()
-        send_budget_alerts(db.session, TODAY, cfg, sender=sender)
-        # 2 thresholds × 2 recipients
-        assert len(sender.sent) == 4
-        assert BudgetAlert.query.count() == 4
-        assert {r.threshold for r in BudgetAlert.query.all()} == {50, 75}
-        # Message states the spend and percent.
-        assert any('75%' in body and '750' in body for _, body in sender.sent)
+        send_daily_digest(db.session, TODAY, cfg, sender=sender)
+
+        assert len(sender.sent) == 2
+        assert {to for to, _ in sender.sent} == {'+1111', '+1222'}
+        assert DailyDigest.query.count() == 2
+        assert {r.sent_date for r in DailyDigest.query.all()} == {TODAY}
+        # Both budget status and balances ride in the one message.
+        body = sender.sent[0][1]
+        assert '75%' in body and '$750' in body
+        assert 'B · Checking ••3390: $4,880.02' in body
 
 
-def test_multi_threshold_jump_sends_all_three(app):
+def test_digest_lists_every_account_ordered_by_institution(app):
     with app.app_context():
-        _seed_inst('1050.00')  # 105% → 50, 75, 100 in one run
-        cfg = {'BUDGET_ALERT_RECIPIENTS': '+1111'}
+        _seed_inst('0.00', name='Zeta', accounts=[('Savings', '1111', Decimal('10'))])
+        _seed_inst(None, name='Alpha', accounts=[
+            ('Checking', '2222', Decimal('20')),
+            ('Brokerage', '3333', None),  # null balance still listed
+        ])
         sender = FakeSender()
-        send_budget_alerts(db.session, TODAY, cfg, sender=sender)
-        assert len(sender.sent) == 3
-        assert {r.threshold for r in BudgetAlert.query.all()} == {50, 75, 100}
+        send_daily_digest(db.session, TODAY,
+                          {'BUDGET_ALERT_RECIPIENTS': '+1111'}, sender=sender)
+
+        body = sender.sent[0][1]
+        assert 'Alpha · Brokerage ••3333: —' in body
+        assert body.index('Alpha · Brokerage') < body.index('Alpha · Checking') \
+            < body.index('Zeta · Savings')
 
 
-def test_idempotent_second_run_sends_nothing(app):
+def test_over_budget_digest_reports_overage(app):
     with app.app_context():
-        _seed_inst('600.00')  # 60% → threshold 50
+        _seed_inst('1240.00')
+        sender = FakeSender()
+        send_daily_digest(db.session, TODAY,
+                          {'BUDGET_ALERT_RECIPIENTS': '+1111'}, sender=sender)
+        assert '$240 OVER' in sender.sent[0][1]
+
+
+def test_second_run_same_day_sends_nothing(app):
+    with app.app_context():
+        _seed_inst('600.00')
         cfg = {'BUDGET_ALERT_RECIPIENTS': '+1111'}
         first = FakeSender()
-        send_budget_alerts(db.session, TODAY, cfg, sender=first)
+        send_daily_digest(db.session, TODAY, cfg, sender=first)
         assert len(first.sent) == 1
+
         second = FakeSender()
-        send_budget_alerts(db.session, TODAY, cfg, sender=second)
+        send_daily_digest(db.session, TODAY, cfg, sender=second)
         assert second.sent == []
-        assert BudgetAlert.query.filter_by(recipient='+1111').count() == 1
+        assert DailyDigest.query.filter_by(recipient='+1111').count() == 1
+
+
+def test_next_day_sends_again(app):
+    with app.app_context():
+        _seed_inst('600.00')
+        cfg = {'BUDGET_ALERT_RECIPIENTS': '+1111'}
+        send_daily_digest(db.session, TODAY, cfg, sender=FakeSender())
+        tomorrow = FakeSender()
+        send_daily_digest(db.session, date(2026, 8, 9), cfg, sender=tomorrow)
+        assert len(tomorrow.sent) == 1
+        assert DailyDigest.query.count() == 2
+
+
+def test_only_untexted_recipients_are_sent_to(app):
+    """Adding a recipient mid-day texts only the new one."""
+    with app.app_context():
+        _seed_inst('600.00')
+        send_daily_digest(db.session, TODAY,
+                          {'BUDGET_ALERT_RECIPIENTS': '+1111'}, sender=FakeSender())
+        sender = FakeSender()
+        send_daily_digest(db.session, TODAY,
+                          {'BUDGET_ALERT_RECIPIENTS': '+1111,+1222'}, sender=sender)
+        assert [to for to, _ in sender.sent] == ['+1222']
 
 
 def test_noop_when_no_recipients(app):
     with app.app_context():
         _seed_inst('900.00')
         sender = FakeSender()
-        send_budget_alerts(db.session, TODAY, {'BUDGET_ALERT_RECIPIENTS': ''},
-                           sender=sender)
+        send_daily_digest(db.session, TODAY, {'BUDGET_ALERT_RECIPIENTS': ''},
+                          sender=sender)
         assert sender.sent == []
-        assert BudgetAlert.query.count() == 0
+        assert DailyDigest.query.count() == 0
 
 
 def test_noop_when_credentials_missing_and_no_injected_sender(app):
     with app.app_context():
         _seed_inst('900.00')
         # Recipients set, but no TWILIO_* creds and no injected sender → disabled.
-        send_budget_alerts(db.session, TODAY, {'BUDGET_ALERT_RECIPIENTS': '+1111'})
-        assert BudgetAlert.query.count() == 0
+        send_daily_digest(db.session, TODAY, {'BUDGET_ALERT_RECIPIENTS': '+1111'})
+        assert DailyDigest.query.count() == 0
 
 
 def test_noop_when_partial_credentials(app):
@@ -130,22 +212,33 @@ def test_noop_when_partial_credentials(app):
             'TWILIO_FROM_NUMBER': '',  # missing → feature disabled
         }
         # sender=None forces the config path; must build no TwilioSender.
-        send_budget_alerts(db.session, TODAY, cfg)
-        assert BudgetAlert.query.count() == 0
+        send_daily_digest(db.session, TODAY, cfg)
+        assert DailyDigest.query.count() == 0
 
 
 def test_failed_send_is_not_recorded_and_retries(app):
     with app.app_context():
-        _seed_inst('600.00')  # 60% → threshold 50
+        _seed_inst('600.00')
         cfg = {'BUDGET_ALERT_RECIPIENTS': '+1111'}
         failing = FakeSender(fail_for={'+1111'})
         # Must not raise even though the send fails.
-        send_budget_alerts(db.session, TODAY, cfg, sender=failing)
-        assert BudgetAlert.query.count() == 0  # unrecorded → retryable
+        send_daily_digest(db.session, TODAY, cfg, sender=failing)
+        assert DailyDigest.query.count() == 0  # unrecorded → retryable
+
         working = FakeSender()
-        send_budget_alerts(db.session, TODAY, cfg, sender=working)
+        send_daily_digest(db.session, TODAY, cfg, sender=working)
         assert len(working.sent) == 1
-        assert BudgetAlert.query.count() == 1
+        assert DailyDigest.query.count() == 1
+
+
+def test_one_recipient_failure_does_not_block_the_other(app):
+    with app.app_context():
+        _seed_inst('600.00')
+        sender = FakeSender(fail_for={'+1111'})
+        send_daily_digest(db.session, TODAY,
+                          {'BUDGET_ALERT_RECIPIENTS': '+1111,+1222'}, sender=sender)
+        assert [to for to, _ in sender.sent] == ['+1222']
+        assert [r.recipient for r in DailyDigest.query.all()] == ['+1222']
 
 
 class _FlakyCommitSession:
@@ -175,22 +268,21 @@ def test_commit_failure_after_send_is_swallowed_and_not_recorded(app):
     """A non-Integrity commit failure after a successful send must not propagate,
     must roll back, and must leave no dedup row (so it is retried, not lost)."""
     with app.app_context():
-        _seed_inst('600.00')  # 60% → threshold 50
+        _seed_inst('600.00')
         cfg = {'BUDGET_ALERT_RECIPIENTS': '+1111'}
         sender = FakeSender()
         flaky = _FlakyCommitSession(db.session, fail_times=1)
         # Must not raise despite the commit blowing up.
-        send_budget_alerts(flaky, TODAY, cfg, sender=sender)
+        send_daily_digest(flaky, TODAY, cfg, sender=sender)
         assert len(sender.sent) == 1          # the SMS did go out
-        assert BudgetAlert.query.count() == 0  # but nothing was recorded
+        assert DailyDigest.query.count() == 0  # but nothing was recorded
 
 
 def test_concurrent_calls_do_not_double_send(tmp_path):
-    """Two overlapping syncs must not double-text a threshold.
+    """Two overlapping dispatches must not double-text the day's digest.
 
     Uses a file-backed SQLite DB so the two threads share one database (the
-    module-level lock is what must serialize them). 600/1000 = 60% → only
-    threshold 50 should ever be sent, exactly once.
+    module-level lock is what must serialize them).
     """
     from app import create_app
     from app.models import db as _db
@@ -220,7 +312,7 @@ def test_concurrent_calls_do_not_double_send(tmp_path):
     def worker():
         with app.app_context():
             barrier.wait()  # maximize contention on the lock
-            send_budget_alerts(_db.session, TODAY, cfg, sender=sender)
+            send_daily_digest(_db.session, TODAY, cfg, sender=sender)
             _db.session.remove()
 
     threads = [threading.Thread(target=worker) for _ in range(2)]
@@ -231,4 +323,4 @@ def test_concurrent_calls_do_not_double_send(tmp_path):
 
     with app.app_context():
         assert len(sender.sent) == 1
-        assert BudgetAlert.query.filter_by(recipient='+1111').count() == 1
+        assert DailyDigest.query.filter_by(recipient='+1111').count() == 1

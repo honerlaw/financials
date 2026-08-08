@@ -58,25 +58,31 @@ def budget_line(spent, budget=WEEKLY_BUDGET):
     return f"Budget: ${spent:,.0f} of ${budget:,.0f} ({pct}%) — {tail}"
 
 
-def account_line(institution_name, account_name, mask, balance):
+def account_line(institution_name, account_name, mask, balance, stale=False):
     """``Truist · Checking ••3390: $4,880.02`` (balance ``—`` when unknown).
 
     The balance is printed exactly as the dashboard prints it — raw
     ``current_balance``, no sign flipping — so a card's number never reads one
     way in the app and another way in the text.
+
+    ``stale`` flags an institution that is no longer syncing (it needs a Plaid
+    reconnect). Its balance is frozen at the last successful sync, and a text is
+    a worse place than the dashboard to quietly show a wrong number — there is
+    no reconnect banner next to it.
     """
     label = f'{institution_name} · {account_name}'
     if mask:
         label += f' ••{mask}'
     amount = '—' if balance is None else f'${balance:,.2f}'
-    return f'{label}: {amount}'
+    suffix = ' (reconnect needed)' if stale else ''
+    return f'{label}: {amount}{suffix}'
 
 
 def digest_body(today, spent, accounts, budget=WEEKLY_BUDGET):
     """The full SMS text.
 
     ``accounts`` is an iterable of ``(institution_name, account_name, mask,
-    balance)`` tuples — plain data, not ORM rows, so this stays pure.
+    balance[, stale])`` tuples — plain data, not ORM rows, so this stays pure.
     """
     lines = [
         f"Good morning — {today.strftime('%a %b %-d')}",
@@ -138,21 +144,26 @@ def _week_spent(session, today):
 
 
 def _account_balances(session):
-    """``(institution, account, mask, balance)`` for every account.
+    """``(institution, account, mask, balance, stale)`` for every account.
 
     Ordered by institution then account name, matching the dashboard's account
     cards. Accounts with a null balance are still listed, so a freshly linked
-    account shows up in the digest immediately.
+    account shows up in the digest immediately. ``stale`` marks an institution
+    that ``sync_all_institutions`` skips (anything but ``active``), whose
+    balances stopped updating at its last successful sync.
     """
-    return (
+    rows = (
         session.query(
-            Institution.name, Account.name, Account.mask, Account.current_balance,
+            Institution.name, Account.name, Account.mask,
+            Account.current_balance, Institution.status,
         )
         .select_from(Account)
         .join(Institution, Institution.id == Account.institution_id)
         .order_by(Institution.name, Account.name)
         .all()
     )
+    return [(inst, acct, mask, balance, status != 'active')
+            for inst, acct, mask, balance, status in rows]
 
 
 def send_daily_digest(session, today, config, sender=None):

@@ -51,6 +51,13 @@ def test_account_line_null_balance_renders_dash():
     assert account_line('Citi', 'New Card', '8821', None) == 'Citi · New Card ••8821: —'
 
 
+def test_account_line_flags_a_bank_that_stopped_syncing():
+    """A non-active institution is skipped by the sync, so its balance is frozen —
+    the text must say so rather than present a stale number as current."""
+    assert account_line('Citi', 'Card', '8821', Decimal('10'), stale=True) == \
+        'Citi · Card ••8821: $10.00 (reconnect needed)'
+
+
 def test_digest_body_contains_budget_week_and_every_account():
     body = digest_body(TODAY, Decimal('750'), [
         ('Amex', 'Platinum', '1004', Decimal('2143.19')),
@@ -83,10 +90,11 @@ class FakeSender:
         self.sent.append((to, body))
 
 
-def _seed_inst(week_total=None, txn_date=None, name='B', accounts=()):
+def _seed_inst(week_total=None, txn_date=None, name='B', accounts=(),
+               status='active'):
     """Insert an institution, optionally one current-week txn and some accounts."""
     inst = Institution(name=name, slug=name.lower(), access_token='a',
-                       item_id=f'i-{name}')
+                       item_id=f'i-{name}', status=status)
     db.session.add(inst)
     db.session.commit()
     if week_total is not None:
@@ -136,6 +144,24 @@ def test_digest_lists_every_account_ordered_by_institution(app):
         assert 'Alpha · Brokerage ••3333: —' in body
         assert body.index('Alpha · Brokerage') < body.index('Alpha · Checking') \
             < body.index('Zeta · Savings')
+
+
+def test_digest_flags_accounts_of_a_bank_needing_reconnect(app):
+    """sync_all_institutions only syncs status='active', so a login_required
+    bank's balance is frozen at its last good sync — the digest must not present
+    it as current."""
+    with app.app_context():
+        _seed_inst('0.00', name='Stale', status='login_required',
+                   accounts=[('Card', '9999', Decimal('42'))])
+        _seed_inst(None, name='Fresh', accounts=[('Checking', '1111', Decimal('7'))])
+        sender = FakeSender()
+        send_daily_digest(db.session, TODAY,
+                          {'BUDGET_ALERT_RECIPIENTS': '+1111'}, sender=sender)
+
+        body = sender.sent[0][1]
+        assert 'Stale · Card ••9999: $42.00 (reconnect needed)' in body
+        assert 'Fresh · Checking ••1111: $7.00' in body
+        assert 'Fresh · Checking ••1111: $7.00 (reconnect' not in body
 
 
 def test_over_budget_digest_reports_overage(app):

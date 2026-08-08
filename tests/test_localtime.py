@@ -1,3 +1,4 @@
+import logging
 from datetime import date
 
 from freezegun import freeze_time
@@ -16,7 +17,9 @@ def test_app_timezone_defaults_when_unset():
 def test_unknown_timezone_falls_back_to_default_not_utc(caplog):
     """A typo must not take the app down — nor silently degrade to UTC, which is
     exactly the wrong answer for a 'send this at 7am' job."""
-    assert str(app_timezone({'APP_TIMEZONE': 'Mars/Olympus_Mons'})) == DEFAULT_TIMEZONE
+    with caplog.at_level(logging.WARNING, logger='app.localtime'):
+        assert str(app_timezone({'APP_TIMEZONE': 'Mars/Olympus_Mons'})) == DEFAULT_TIMEZONE
+    assert 'Mars/Olympus_Mons' in caplog.text
 
 
 @freeze_time('2026-08-09 03:30:00')  # 11:30pm Aug 8 in New York

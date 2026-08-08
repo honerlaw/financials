@@ -28,3 +28,31 @@
 - Rendered digests end-to-end (4 accounts / 3 institutions): 248 chars under budget, 251 over.
   Body uses `—`, `·`, `••`, so it encodes as UCS-2 (70 chars/segment) — ~4 segments, a few cents
   a month. Kept for continuity with the unit-012 message voice; noted as a followup, not a bug.
+
+## Review triage 2026-08-08
+Inline review (minerva spec/knowledge audit + code review of `git diff main...HEAD`).
+No PR existed yet, so no `code-review:code-review` delegation.
+
+- **F1 (medium) → FIX.** `_account_balances` joined every institution regardless of
+  `Institution.status`, but `sync_all_institutions` only syncs `status='active'` — so a bank
+  in `login_required` keeps its last-good `current_balance` indefinitely and the digest would
+  have texted a frozen number as if current. The dashboard gets away with this because it
+  renders a reconnect banner beside the card; an SMS has no such context. Fixed: the query
+  carries `Institution.status`, and `account_line(..., stale=True)` appends
+  `(reconnect needed)`. Covered by `test_digest_flags_accounts_of_a_bank_needing_reconnect`
+  and a pure `account_line` test.
+- **F2 (low) → FIX.** `test_unknown_timezone_falls_back_to_default_not_utc` took a `caplog`
+  fixture it never used. Now asserts the warning actually names the bad zone.
+- **F3 (low) → followups.** `—`, `·`, `••` force UCS-2 (70 chars/segment), so a ~250-char
+  digest bills ~4 segments instead of 2.
+- **F4 (low) → followups.** No catch-up: the digest is dispatched only by the 7am job, so a
+  container down at 7:00 skips that day silently.
+- **F5 (low) → followups.** No length cap; Twilio rejects bodies over 1600 chars, which ~30+
+  accounts would reach.
+- **Spec fidelity: clean.** Every `## Success criteria` item is met by the diff; the only
+  structural addition beyond the written approach is `app/scheduler.py`, logged above.
+- **Knowledge compliance: clean, with one promote obligation.** The non-fatal-side-effect
+  contract from [[007-decision-plaid-reconnect-update-mode]] is preserved by
+  `_send_daily_digest_safe`; the single-worker invariant from
+  [[010-decision-budget-alert-notifier]] still holds and is still documented. Entry 010 itself
+  now describes a retired design and must be superseded during promote.

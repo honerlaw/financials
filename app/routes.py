@@ -214,7 +214,24 @@ def index():
         window_active=window_active,
         window_label=window_label,
         selected_start=request.args.get('start') if window_active else None,
+        sms_configured=_sms_configured(),
         **spending,
+    )
+
+
+def _sms_configured():
+    """True when the digest could actually be texted right now.
+
+    Mirrors app.notifications' soft-disable gate (recipients AND all three
+    Twilio credentials) so the button renders disabled up front instead of only
+    failing on press.
+    """
+    cfg = current_app.config
+    return bool(
+        (cfg.get('BUDGET_ALERT_RECIPIENTS') or '').strip()
+        and cfg.get('TWILIO_ACCOUNT_SID')
+        and cfg.get('TWILIO_AUTH_TOKEN')
+        and cfg.get('TWILIO_FROM_NUMBER')
     )
 
 
@@ -496,6 +513,30 @@ def trigger_sync():
 
     threading.Thread(target=run, daemon=True).start()
     return jsonify({'status': 'started'})
+
+
+@bp.route('/api/digest/send', methods=['POST'])
+@login_required
+def send_digest():
+    """Text the daily digest right now, on top of (never instead of) the 7am job.
+
+    Synchronous, unlike /api/sync: the caller wants the outcome, and the Twilio
+    call is already bounded at 10s. Writes no DailyDigest row, so this neither
+    consumes nor suppresses the scheduled digest.
+    """
+    from app.localtime import local_today
+    from app.notifications import send_digest_now
+
+    result = send_digest_now(
+        db.session, local_today(current_app.config), current_app.config,
+    )
+    if not result['configured']:
+        return jsonify({'error': 'SMS is not configured — set the Twilio '
+                                 'credentials and BUDGET_ALERT_RECIPIENTS.'}), 400
+    if result['failed'] and not result['sent']:
+        return jsonify({'error': 'Every send failed — check the logs.',
+                        'failed': result['failed']}), 502
+    return jsonify(result)
 
 
 @bp.route('/api/sync/full', methods=['POST'])

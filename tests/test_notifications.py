@@ -6,7 +6,7 @@ from sqlalchemy.exc import OperationalError
 
 from app.models import db, Account, Institution, Transaction, DailyDigest
 from app.notifications import (
-    account_line, budget_line, digest_body, send_daily_digest,
+    account_line, budget_line, digest_body, send_daily_digest, send_digest_now,
 )
 
 
@@ -350,3 +350,92 @@ def test_concurrent_calls_do_not_double_send(tmp_path):
     with app.app_context():
         assert len(sender.sent) == 1
         assert DailyDigest.query.filter_by(recipient='+1111').count() == 1
+
+
+# ── send_digest_now (manual trigger) ──────────────────────────────────────────
+
+def test_manual_send_texts_every_recipient_the_same_message(app):
+    with app.app_context():
+        _seed_inst('750.00', accounts=[('Checking', '3390', Decimal('4880.02'))])
+        sender = FakeSender()
+        result = send_digest_now(db.session, TODAY,
+                                 {'BUDGET_ALERT_RECIPIENTS': '+1111,+1222'},
+                                 sender=sender)
+        assert result == {'configured': True, 'sent': ['+1111', '+1222'], 'failed': []}
+        assert len(sender.sent) == 2
+        body = sender.sent[0][1]
+        assert '75%' in body
+        assert 'B · Checking ••3390: $4,880.02' in body
+        # Identical to what the scheduled path would send for the same data.
+        scheduled = FakeSender()
+        send_daily_digest(db.session, TODAY,
+                          {'BUDGET_ALERT_RECIPIENTS': '+1111'}, sender=scheduled)
+        assert scheduled.sent[0][1] == body
+
+
+def test_manual_send_writes_no_dedup_row(app):
+    """A press must not claim the day — tomorrow's 7am digest is unaffected."""
+    with app.app_context():
+        _seed_inst('600.00')
+        cfg = {'BUDGET_ALERT_RECIPIENTS': '+1111'}
+        send_digest_now(db.session, TODAY, cfg, sender=FakeSender())
+        assert DailyDigest.query.count() == 0
+
+
+def test_manual_send_works_after_the_scheduled_digest_already_went_out(app):
+    """The dedup row blocks the scheduled path, never the button."""
+    with app.app_context():
+        _seed_inst('600.00')
+        cfg = {'BUDGET_ALERT_RECIPIENTS': '+1111'}
+        send_daily_digest(db.session, TODAY, cfg, sender=FakeSender())
+        assert DailyDigest.query.count() == 1
+
+        manual = FakeSender()
+        result = send_digest_now(db.session, TODAY, cfg, sender=manual)
+        assert result['sent'] == ['+1111']
+        assert len(manual.sent) == 1
+
+
+def test_manual_send_does_not_suppress_the_scheduled_digest(app):
+    """The other direction: pressing early must not cancel the morning text."""
+    with app.app_context():
+        _seed_inst('600.00')
+        cfg = {'BUDGET_ALERT_RECIPIENTS': '+1111'}
+        send_digest_now(db.session, TODAY, cfg, sender=FakeSender())
+
+        scheduled = FakeSender()
+        send_daily_digest(db.session, TODAY, cfg, sender=scheduled)
+        assert len(scheduled.sent) == 1
+        assert DailyDigest.query.count() == 1
+
+
+def test_manual_send_is_repeatable(app):
+    with app.app_context():
+        _seed_inst('600.00')
+        cfg = {'BUDGET_ALERT_RECIPIENTS': '+1111'}
+        first = FakeSender()
+        second = FakeSender()
+        send_digest_now(db.session, TODAY, cfg, sender=first)
+        send_digest_now(db.session, TODAY, cfg, sender=second)
+        assert len(first.sent) == 1 and len(second.sent) == 1
+
+
+def test_manual_send_reports_unconfigured_rather_than_silently_succeeding(app):
+    with app.app_context():
+        _seed_inst('600.00')
+        assert send_digest_now(db.session, TODAY, {'BUDGET_ALERT_RECIPIENTS': ''}) == \
+            {'configured': False, 'sent': [], 'failed': []}
+        # Recipients set but no credentials and no injected sender.
+        assert send_digest_now(db.session, TODAY,
+                               {'BUDGET_ALERT_RECIPIENTS': '+1111'})['configured'] is False
+
+
+def test_manual_send_reports_partial_failure(app):
+    with app.app_context():
+        _seed_inst('600.00')
+        sender = FakeSender(fail_for={'+1111'})
+        result = send_digest_now(db.session, TODAY,
+                                 {'BUDGET_ALERT_RECIPIENTS': '+1111,+1222'},
+                                 sender=sender)
+        assert result['sent'] == ['+1222']
+        assert result['failed'] == ['+1111']

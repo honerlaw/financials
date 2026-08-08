@@ -5,6 +5,9 @@
 **Summary**: Weekly-budget SMS alerts fire from the sync path — per-recipient dedup via BudgetAlert, in-process lock + unique constraint for no-double-send (relies on --workers 1), record-after-send retry, soft-disabled unless all Twilio config is set
 **Context**: .minerva/work/012-weekly-budget-sms-alerts
 
+<!-- superseded-by: 016 -->
+> **Superseded by [[016-decision-daily-digest-notifier]]** (2026-08-08)
+
 ## Context
 
 Work unit 012 added proactive SMS alerts on top of the existing weekly-budget
@@ -16,10 +19,9 @@ the `TwilioSender` SDK wrapper, and the `send_budget_alerts` shell), with
 `spending.week_spend` supplying the current-week total and a `BudgetAlert` model
 providing dedup.
 
-> **Superseded (2026-08-08) by [[016-decision-daily-digest-notifier]].** The
-> threshold cadence described below no longer exists: `newly_crossed`,
-> `THRESHOLDS` and the `BudgetAlert` model were removed in unit 016 in favour of
-> one daily 7am digest. What still holds is the *shape* of the notifier —
+> **What of this still applies.** The threshold cadence below is gone —
+> `newly_crossed`, `THRESHOLDS` and the `BudgetAlert` model were removed in unit
+> 016 in favour of one daily 7am digest. The *shape* of the notifier survives it:
 > soft-disable on missing config, per-recipient dedup, record-after-send, the
 > module lock plus unique-constraint backstop, and the non-fatal sync hook. Read
 > decisions 2, 3, 4 and 5 as live rationale; read decision 1 and the spend
@@ -95,3 +97,4 @@ excluding `TRANSFER`/`LOAN_PAYMENTS`, Sun–Sat weeks). It is a **household tota
 - [[004-pattern-seed-relative-dates-in-time-sensitive-tests]] — see also
   why `week_spend` and `newly_crossed` take the reference date / state as parameters.
 - [[011-decision-doppler-hybrid-config]] — see also
+- [[016-decision-daily-digest-notifier]] — superseded by

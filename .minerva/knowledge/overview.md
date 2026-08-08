@@ -1,6 +1,6 @@
 # Knowledge overview
 
-<!-- synthesis-watermark: 015 -->
+<!-- synthesis-watermark: 017 -->
 
 ## Plaid data flow: piggyback, then refresh
 
@@ -97,23 +97,46 @@ infinite-scroll pages, and the account-totals strip (via
 month-scoped so it remains a stable picker. A day-bar click filters to *all*
 transactions that day, not only spend-classified ones.
 
-## Acting on synced data: proactive alerts
+## Acting on synced data: the daily digest
 
-Beyond deriving views, the sync path now fires an outbound side-effect.
-[[010-decision-budget-alert-notifier]] records the design of the weekly-budget
-SMS alerts: after every sync, each configured recipient is texted once per
-Sun–Sat week for each newly-crossed 50/75/100% threshold of the current week's
-household spend (reusing `week_spend` over the same `is_spend` definition as the
-dashboard). Load-bearing decisions: dedup is **per-recipient**
-(`BudgetAlert` unique on week+threshold+recipient); no-double-send comes from a
-module-level lock **plus** that unique constraint, correct only under the
-`--workers 1` invariant the APScheduler already assumes (a gap that is *not*
-runtime-enforced — see the unit's followups); the row is written **after** a
-successful send so a failure retries rather than silently dropping a milestone
-(duplicate > miss, for a budget alert); and the whole feature is **soft-disabled**
-(a clean no-op, `twilio` never imported) unless all four Twilio/recipient env
-vars are set, so it ships inert. The hook is non-fatal, mirroring
-`_refresh_balances` — a notifier failure never aborts a sync.
+Beyond deriving views, the app sends outbound SMS. The shape of that notifier has
+changed once already, and the two entries should be read in order.
+
+[[010-decision-budget-alert-notifier]] built it as a *reactive* alert: after
+every sync, each recipient was texted once per Sun–Sat week for each
+newly-crossed 50/75/100% threshold of the week's household spend.
+[[016-decision-daily-digest-notifier]] supersedes that cadence. Threshold
+alerting had two properties nobody wanted — a quiet week produced **zero**
+texts, so there was no "where do we stand" signal unless spending was already
+high; and the send landed on whichever sync first observed the crossing,
+including the background sync `/api/sync` fires on every dashboard page load, so
+the arrival time was unpredictable. It is now one digest per recipient per day —
+budget status *and* every account's balance — and `newly_crossed`, `THRESHOLDS`
+and the `BudgetAlert` model are gone.
+
+What survived the rewrite is the notifier's *shape*, and that part of 010 is
+still live rationale: per-recipient dedup, no-double-send from a module-level
+lock **plus** a unique constraint (correct only under the `--workers 1`
+invariant the APScheduler already assumes, and still not runtime-enforced),
+record-after-send so a failed send retries rather than silently dropping a
+milestone (duplicate > miss), soft-disable to a clean no-op unless every Twilio
+var is set, and a non-fatal hook that can never abort a sync.
+
+Three things 016 adds are worth carrying forward. **Only the scheduled job
+notifies** — `sync_all_institutions()` (what page loads call) is now silent and
+`run_daily_sync()` is the single notifying path, which is what buys predictable
+timing. **A wall-clock schedule needs an explicit timezone**: the container sets
+no `TZ`, so the pre-existing `hour=7` cron had been firing at 07:00 UTC — 3am
+Eastern — and both the scheduler and the digest's notion of "today" now resolve
+through `APP_TIMEZONE`, falling back to the configured default rather than to
+UTC when the name is junk. **Stale data must be labelled when it leaves the
+app**: sync skips institutions that are not `status='active'`
+([[007-decision-plaid-reconnect-update-mode]]), so their balances are frozen at
+the last good sync, and the dashboard gets away with showing that number only
+because a reconnect banner sits beside it. An SMS has no such context, so those
+lines are suffixed `(reconnect needed)`. Balance freshness is bounded by sync
+cadence in the first place — see
+[[002-decision-plaid-balance-refresh-via-dedicated-endpoint]].
 
 ## Configuration and secrets
 
@@ -137,7 +160,7 @@ with an HTML body, `r.json()` throws, and an infinite-scroll observer retries
 the same broken request forever. Check the response `Content-Type` for
 `application/json` *before* parsing, and redirect to `/login` when it isn't.
 
-## Testing time-dependent code
+## Testing and local verification
 
 [[004-pattern-seed-relative-dates-in-time-sensitive-tests]] is the
 cross-cutting testing rule: any test exercising a code path that calls
@@ -145,7 +168,15 @@ cross-cutting testing rule: any test exercising a code path that calls
 fixed calendar dates drift across behavioral boundaries and turn green tests
 into delayed-fuse failures. Pure functions sidestep this by taking the
 reference date as a parameter — the stance `spending.py`, `bills.py`, and
-`subscriptions.py` all follow.
+`subscriptions.py` all follow, and which the digest's message builders extend.
+
+[[017-pattern-migration-chain-is-postgres-only]] covers the blind spot the test
+suite leaves. `conftest.py` builds its schema with `db.create_all()` from the
+models, never through Alembic, and the chain cannot be replayed on SQLite anyway
+because an early revision issues Postgres `GRANT`s — so **a migration can be
+wrong in a way no test catches**. The workaround is to exercise a new revision
+in isolation: stamp its parent, hand-create the tables it touches, upgrade,
+assert the schema, downgrade, assert the inverse. Good for portable DDL only.
 
 ## Limitations
 

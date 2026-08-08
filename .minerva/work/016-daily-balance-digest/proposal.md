@@ -168,7 +168,7 @@ None blocking. `APP_TIMEZONE`'s default is inferred from commit offsets
 
 `pytest`: 209 passed. Migration `d5a1c9e37b48` round-tripped by hand — the full
 chain cannot replay on SQLite (see
-[[016-pattern-migration-chain-is-postgres-only]]), so it was stamped, upgraded
+[[017-pattern-migration-chain-is-postgres-only]]), so it was stamped, upgraded
 and downgraded in isolation. Digest bodies were rendered end-to-end against a
 seeded 3-institution / 4-account database, under and over budget.
 

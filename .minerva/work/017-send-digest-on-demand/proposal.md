@@ -1,7 +1,7 @@
 # Proposal: send-digest-on-demand
 
 **Date**: 2026-08-08
-**Status**: Draft
+**Status**: Shipped (2026-08-08)
 
 ## Goal
 
@@ -18,7 +18,7 @@ is already exactly what you'd want on demand — week's spend against the cap pl
 every account balance — so this is a second trigger for an existing artifact,
 not a new one.
 
-## Approach
+## Approach (as shipped)
 
 ### 1. A manual send that ignores the daily dedup — `app/notifications.py`
 
@@ -76,6 +76,15 @@ The settings route passes nothing new; the dashboard route passes
 `sms_configured` so the button renders disabled with a "not configured" hint
 when the feature is off, instead of failing only on press.
 
+That value comes from a new `notifications.is_configured(config)` — **not** a
+re-derivation in `routes.py`. The first cut did re-derive it, approximating
+`_recipients()` with a bare `.strip()`, and the two could disagree: `","` is
+truthy after stripping (button enabled) but parses to zero recipients (press →
+400). `is_configured` is now the single gate, sharing `_recipients` with the
+send paths plus a `_has_credentials` helper that `_sender_from_config` also
+uses. It constructs no `TwilioSender`, so the lazy `twilio` import survives on
+page loads. (Found in review — finding F1.)
+
 ### Rejected alternatives
 
 - **Write a `DailyDigest` row on manual send.** Makes the button a way to
@@ -108,3 +117,16 @@ when the feature is off, instead of failing only on press.
 ## Open Questions
 
 None blocking.
+
+## Verification
+
+`pytest`: 226 passed (+17). New coverage spans the manual-send semantics
+(byte-identical message to the scheduled path, dedup independence in both
+directions, repeatability), the soft-disable path, partial failure, all four
+endpoint response shapes, the button's rendered enabled/disabled state, and the
+`","`-parses-to-nothing regression. The dashboard header was also rendered
+end-to-end through the test client in both configured and unconfigured states.
+
+Accepted limitation, recorded in [[018-decision-on-demand-digest-trigger]]: the
+endpoint is synchronous under `--workers 1`, so a hung Twilio call blocks the
+single worker for up to 10s per recipient.

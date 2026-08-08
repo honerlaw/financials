@@ -1,14 +1,8 @@
----
-name: migration-chain-is-postgres-only
-description: The Alembic chain cannot be replayed on SQLite (00a2889ed2af issues Postgres GRANTs), so a new migration is verified in isolation — stamp the parent, hand-create the tables it touches, upgrade, downgrade
-metadata:
-  type: pattern
----
-
 # Verifying a migration without Postgres
 
 **Date**: 2026-08-08
 **Type**: pattern
+**Summary**: The Alembic chain cannot be replayed on SQLite (00a2889ed2af issues Postgres GRANTs), so a new migration is verified in isolation — stamp the parent, hand-create the tables it touches, upgrade, downgrade.
 **Context**: .minerva/work/016-daily-balance-digest
 
 ## Finding
@@ -43,7 +37,7 @@ builds still needs a real Postgres.
 
 ## Related
 
-- [[016-decision-daily-digest-notifier]] — the unit whose migration
-  (`d5a1c9e37b48`) was verified this way.
-- [[011-decision-doppler-hybrid-config]] — `DATABASE_ADMIN_URL`, the privileged
-  URL the production `flask db upgrade` runs under.
+- [[016-decision-daily-digest-notifier]] — builds on
+  the unit whose migration (`d5a1c9e37b48`) was verified this way.
+- [[011-decision-doppler-hybrid-config]] — see also
+  `DATABASE_ADMIN_URL`, the privileged URL the production `flask db upgrade` runs under.

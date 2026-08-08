@@ -1,14 +1,8 @@
----
-name: daily-digest-notifier
-description: Threshold budget alerts replaced by one 7am daily digest (budget status + every account balance) — dispatched only from run_daily_sync so page-load syncs never text, deduped per (sent_date, recipient), and scheduled in APP_TIMEZONE because the container is UTC
-metadata:
-  type: decision
----
-
 # Daily digest SMS: one morning text, not threshold alerts
 
 **Date**: 2026-08-08
 **Type**: decision
+**Summary**: Threshold budget alerts replaced by one 7am daily digest (budget status + every account balance) — dispatched only from run_daily_sync so page-load syncs never text, deduped per (sent_date, recipient), and scheduled in APP_TIMEZONE because the container is UTC.
 **Context**: .minerva/work/016-daily-balance-digest
 
 ## Context
@@ -88,14 +82,15 @@ morning, carrying account balances as well as budget status.
 
 ## Related
 
-- [[010-decision-budget-alert-notifier]] — the threshold design this supersedes;
-  its dedup/failure-mode reasoning carries over, its cadence does not.
-- [[008-decision-dashboard-spend-and-weekly-budget]] — the spend definition and
-  `WEEKLY_BUDGET` the digest reports against.
-- [[007-decision-plaid-reconnect-update-mode]] — both the non-fatal side-effect
-  contract and the reconnect state that makes a balance stale.
-- [[002-decision-plaid-balance-refresh-via-dedicated-endpoint]] — why
-  `Account.current_balance` is authoritative only as of the last sync.
-- [[011-decision-doppler-hybrid-config]] — why the recipients var was not renamed.
-- [[016-pattern-migration-chain-is-postgres-only]] — how this unit's migration
-  had to be verified.
+- [[010-decision-budget-alert-notifier]] — supersedes
+  the threshold design; its dedup and failure-mode reasoning carry over, its cadence does not.
+- [[008-decision-dashboard-spend-and-weekly-budget]] — builds on
+  the spend definition and `WEEKLY_BUDGET` the digest reports against.
+- [[007-decision-plaid-reconnect-update-mode]] — builds on
+  both the non-fatal side-effect contract and the reconnect state that makes a balance stale.
+- [[002-decision-plaid-balance-refresh-via-dedicated-endpoint]] — see also
+  why `Account.current_balance` is authoritative only as of the last sync.
+- [[011-decision-doppler-hybrid-config]] — see also
+  why the recipients variable was not renamed.
+- [[016-pattern-migration-chain-is-postgres-only]] — see also
+  how this unit's migration had to be verified.

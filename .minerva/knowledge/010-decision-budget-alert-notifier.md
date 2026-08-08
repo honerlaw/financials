@@ -1,14 +1,8 @@
----
-name: budget-alert-notifier
-description: Weekly-budget SMS alerts fire from the sync path — per-recipient dedup via BudgetAlert, in-process lock + unique constraint for no-double-send (relies on --workers 1), record-after-send retry, soft-disabled unless all Twilio config is set
-metadata:
-  type: decision
----
-
 # Weekly-budget SMS alerts: notifier design
 
 **Date**: 2026-07-05
 **Type**: decision
+**Summary**: Weekly-budget SMS alerts fire from the sync path — per-recipient dedup via BudgetAlert, in-process lock + unique constraint for no-double-send (relies on --workers 1), record-after-send retry, soft-disabled unless all Twilio config is set
 **Context**: .minerva/work/012-weekly-budget-sms-alerts
 
 > **Superseded (2026-08-08) by [[016-decision-daily-digest-notifier]].** The
@@ -94,11 +88,12 @@ excluding `TRANSFER`/`LOAN_PAYMENTS`, Sun–Sat weeks). It is a **household tota
 
 ## Related
 
-- [[008-decision-dashboard-spend-and-weekly-budget]] — the weekly-budget math and
-  spend definition this reuses (`is_spend`, `week_start`, `WEEKLY_BUDGET`).
-- [[007-decision-plaid-reconnect-update-mode]] — the sibling non-fatal
-  side-effect (`_refresh_balances`) inside the sync path that this hook mirrors.
-- [[004-pattern-seed-relative-dates-in-time-sensitive-tests]] — why `week_spend`
-  and `newly_crossed` take the reference date / state as parameters.
-- [[016-decision-daily-digest-notifier]] — the daily-digest design that replaced
-  this one, and what it kept.
+- [[008-decision-dashboard-spend-and-weekly-budget]] — builds on
+  the weekly-budget math and spend definition this reuses (`is_spend`, `week_start`, `WEEKLY_BUDGET`).
+- [[002-decision-plaid-balance-refresh-via-dedicated-endpoint]] — see also
+  the sibling non-fatal side-effect (`_refresh_balances`) inside the sync path that this hook mirrors.
+- [[004-pattern-seed-relative-dates-in-time-sensitive-tests]] — see also
+  why `week_spend` and `newly_crossed` take the reference date / state as parameters.
+- [[011-decision-doppler-hybrid-config]] — see also
+- [[016-decision-daily-digest-notifier]] — superseded by
+  the daily-digest design that replaced this one, and what it kept.

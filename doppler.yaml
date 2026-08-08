@@ -1,6 +1,11 @@
 # Doppler project/config mapping for this repo. `doppler setup` reads this so a
 # developer running locally is auto-linked to the right project/config without
 # an interactive prompt. See docs/doppler-migration.md.
+#
+# `onerlaw` is a shared catch-all project spanning several repos that reuse the
+# same secrets — it is NOT financials-specific. Treat its configs as shared
+# state: adding a var here exposes it to every app reading this project, and
+# renaming/removing one can break a sibling repo.
 setup:
-  project: financials
+  project: onerlaw
   config: dev

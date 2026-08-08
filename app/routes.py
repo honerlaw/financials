@@ -521,9 +521,19 @@ def send_digest():
     from app.localtime import local_today
     from app.notifications import send_digest_now
 
-    result = send_digest_now(
-        db.session, local_today(current_app.config), current_app.config,
-    )
+    # Anything raised in here would otherwise escape as Flask's HTML 500 page,
+    # which the caller cannot tell apart from the login redirect — that is what
+    # made this button report a phantom logout. Fail as JSON, and name the
+    # exception: this app has one password-protected user, and an unnamed error
+    # leaves them exactly as stuck as a fake logout did.
+    try:
+        result = send_digest_now(
+            db.session, local_today(current_app.config), current_app.config,
+        )
+    except Exception as exc:
+        current_app.logger.exception('manual digest dispatch failed')
+        return jsonify({'error': f'{type(exc).__name__}: {exc}'[:300]}), 500
+
     if not result['configured']:
         return jsonify({'error': 'SMS is not configured — set the Twilio '
                                  'credentials and BUDGET_ALERT_RECIPIENTS.'}), 400

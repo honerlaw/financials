@@ -19,6 +19,19 @@ def _utcnow():
     return datetime.now(timezone.utc)
 
 
+def run_daily_sync():
+    """The 7am scheduled job: sync everything, then text the daily digest.
+
+    This is the ONLY path that notifies. The sync `/api/sync` kicks off on every
+    dashboard page load calls ``sync_all_institutions`` directly and stays
+    silent, so the digest lands at a predictable hour instead of whenever the
+    dashboard is next opened. Syncing first means the balances in the text are
+    as fresh as Plaid can make them.
+    """
+    sync_all_institutions()
+    _send_daily_digest_safe()
+
+
 def sync_all_institutions():
     """Sync all active institutions. Must be called within an app context."""
     config = current_app.config
@@ -26,11 +39,10 @@ def sync_all_institutions():
     institutions = Institution.query.filter_by(status='active').all()
     for institution in institutions:
         _sync_institution(client, institution)
-    _send_budget_alerts_safe()
 
 
-def _send_budget_alerts_safe():
-    """Fire weekly-budget SMS alerts after a sync, non-fatally.
+def _send_daily_digest_safe():
+    """Send the daily digest SMS, non-fatally.
 
     A notification failure must never abort the sync (mirrors the non-fatal
     _refresh_balances contract). The notifier already swallows per-send errors;
@@ -40,10 +52,13 @@ def _send_budget_alerts_safe():
     try:
         # Imported inside the try so even an import-time failure in the
         # notification path (or its transitive imports) is non-fatal.
-        from app.notifications import send_budget_alerts
-        send_budget_alerts(db.session, date.today(), current_app.config)
+        from app.localtime import local_today
+        from app.notifications import send_daily_digest
+        send_daily_digest(
+            db.session, local_today(current_app.config), current_app.config,
+        )
     except Exception:
-        current_app.logger.exception('budget alert dispatch failed')
+        current_app.logger.exception('daily digest dispatch failed')
 
 
 def _sync_institution(client, institution):

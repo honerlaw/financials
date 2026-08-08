@@ -16,6 +16,15 @@ the `TwilioSender` SDK wrapper, and the `send_budget_alerts` shell), with
 `spending.week_spend` supplying the current-week total and a `BudgetAlert` model
 providing dedup.
 
+> **Superseded (2026-08-08) by [[016-decision-daily-digest-notifier]].** The
+> threshold cadence described below no longer exists: `newly_crossed`,
+> `THRESHOLDS` and the `BudgetAlert` model were removed in unit 016 in favour of
+> one daily 7am digest. What still holds is the *shape* of the notifier —
+> soft-disable on missing config, per-recipient dedup, record-after-send, the
+> module lock plus unique-constraint backstop, and the non-fatal sync hook. Read
+> decisions 2, 3, 4 and 5 as live rationale; read decision 1 and the spend
+> semantics as history.
+
 ## Decisions
 
 1. **Fires from the sync path, every sync.** `send_budget_alerts` is hooked at

@@ -35,8 +35,11 @@ def create_app(config=None):
                 'google/gemini-2.5-pro,x-ai/grok-4.3',
             ).split(',') if m.strip()
         ],
-        # Weekly-budget SMS alerts (app/notifications.py). All four must be set
-        # for alerting to activate; missing config soft-disables the feature.
+        # Wall-clock timezone for the 7am daily job and the digest's notion of
+        # "today" (app/localtime.py). Unset would mean UTC, i.e. a 3am text.
+        APP_TIMEZONE=os.getenv('APP_TIMEZONE', 'America/New_York'),
+        # Daily digest SMS (app/notifications.py). All four must be set for the
+        # digest to activate; missing config soft-disables the feature.
         TWILIO_ACCOUNT_SID=os.getenv('TWILIO_ACCOUNT_SID', ''),
         TWILIO_AUTH_TOKEN=os.getenv('TWILIO_AUTH_TOKEN', ''),
         TWILIO_FROM_NUMBER=os.getenv('TWILIO_FROM_NUMBER', ''),

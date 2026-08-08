@@ -1,5 +1,5 @@
 # Knowledge index
-<!-- index-watermark: 015 -->
+<!-- index-watermark: 017 -->
 
 ## Decisions
 
@@ -15,6 +15,7 @@
 - [[011-decision-doppler-hybrid-config]] — Config/secrets managed via Doppler with a backward-compatible entrypoint — doppler run only when DOPPLER_TOKEN is set (else plain env); DB URLs stay from DO's managed binding, protected by --preserve-env; CLI pinned; fail-closed
 - [[014-decision-plaid-liabilities-piggyback-on-sync]] — Liability due dates and statement balances come from a dedicated `/liabilities/get` call after the balance refresh, written to three nullable `Account` columns, non-fatally.
 - [[015-decision-liability-consent-requires-update-mode]] — Plaid consent is fixed at link time: Items linked before a product was consented return `ADDITIONAL_CONSENT_REQUIRED` and can only be re-consented through update mode.
+- [[016-decision-daily-digest-notifier]] — Threshold budget alerts replaced by one 7am daily digest (budget status + every account balance) — dispatched only from run_daily_sync so page-load syncs never text, deduped per (sent_date, recipient), and scheduled in APP_TIMEZONE because the container is UTC.
 
 ## Bugs
 
@@ -22,5 +23,6 @@
 
 - [[004-pattern-seed-relative-dates-in-time-sensitive-tests]] — Any test exercising code that calls `date.today()` must seed fixtures relative to today (or freeze the clock) — fixed calendar dates drift across behavioral boundaries into delayed-fuse failures.
 - [[012-pattern-fetch-content-type-session-detection]] — A `fetch()` against a Flask `@login_required` route cannot detect session expiry with `!r.ok` — the browser follows the 302 to `/login` transparently, so check the response Content-Type before parsing.
+- [[017-pattern-migration-chain-is-postgres-only]] — The Alembic chain cannot be replayed on SQLite (00a2889ed2af issues Postgres GRANTs), so a new migration is verified in isolation — stamp the parent, hand-create the tables it touches, upgrade, downgrade.
 
 ## Constraints

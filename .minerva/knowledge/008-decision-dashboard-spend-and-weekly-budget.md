@@ -77,3 +77,4 @@ CDN approach for exactly this reason).
   why `spending.py` takes the reference date as a parameter.
 - [[009-decision-chart-click-window-filter]] — see also
 - [[010-decision-budget-alert-notifier]] — see also
+- [[016-decision-daily-digest-notifier]] — see also

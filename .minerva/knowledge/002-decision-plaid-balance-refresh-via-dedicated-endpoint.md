@@ -68,3 +68,4 @@ non-empty.
   the piggybacked accounts payload whose cached balances this refresh overwrites.
 - [[010-decision-budget-alert-notifier]] — see also
 - [[014-decision-plaid-liabilities-piggyback-on-sync]] — see also
+- [[016-decision-daily-digest-notifier]] — see also

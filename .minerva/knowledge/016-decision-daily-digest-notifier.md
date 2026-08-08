@@ -92,5 +92,5 @@ morning, carrying account balances as well as budget status.
   why `Account.current_balance` is authoritative only as of the last sync.
 - [[011-decision-doppler-hybrid-config]] — see also
   why the recipients variable was not renamed.
-- [[016-pattern-migration-chain-is-postgres-only]] — see also
+- [[017-pattern-migration-chain-is-postgres-only]] — see also
   how this unit's migration had to be verified.

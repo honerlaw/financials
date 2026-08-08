@@ -66,3 +66,4 @@ authenticated page.
 
 ## Related
 - [[015-decision-liability-consent-requires-update-mode]] — see also
+- [[016-decision-daily-digest-notifier]] — see also

@@ -4,7 +4,19 @@
   <div class="card-body">
     <div class="d-flex justify-content-between align-items-baseline mb-3 flex-wrap gap-2">
       <h2 class="h6 fw-bold mb-0">Spending · {{ spending_month_label }}</h2>
-      <span class="text-muted small">Weekly budget ${{ "%.0f"|format(weekly_budget) }}</span>
+      <div class="d-flex align-items-center gap-2">
+        <span class="text-muted small">Weekly budget ${{ "%.0f"|format(weekly_budget) }}</span>
+        {# Sends the same message the 7am job sends. Disabled up front when the
+           Twilio config is incomplete, rather than only failing on press. #}
+        <button id="digest-btn" class="btn btn-sm btn-outline-secondary"
+                onclick="sendDigest(this)"
+                {% if not sms_configured %}disabled
+                title="Set the Twilio credentials and BUDGET_ALERT_RECIPIENTS to enable"
+                {% else %}title="Text me the daily digest now"{% endif %}>
+          Text me this
+        </button>
+        <span id="digest-status" class="small text-muted"></span>
+      </div>
     </div>
 
     <div class="row row-cols-2 row-cols-md-3 row-cols-xl-5 g-2 mb-3">
@@ -177,6 +189,42 @@
 {% endblock %}
 
 {% block scripts %}
+<script>
+async function sendDigest(btn) {
+  const status = document.getElementById('digest-status');
+  const label = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Sending…';
+  status.textContent = '';
+  status.className = 'small text-muted';
+  try {
+    const res = await fetch('/api/digest/send', { method: 'POST' });
+    // An expired session 302s to /login and the browser follows it
+    // transparently, so this arrives as a 200 of HTML — check the type before
+    // parsing (see .minerva/knowledge 012-pattern-fetch-content-type-session-detection).
+    if (!(res.headers.get('content-type') || '').includes('application/json')) {
+      window.location.href = '/login';
+      return;
+    }
+    const data = await res.json();
+    if (!res.ok) {
+      status.className = 'small text-danger';
+      status.textContent = data.error || 'Send failed.';
+      return;
+    }
+    const n = data.sent.length;
+    status.className = data.failed.length ? 'small text-warning' : 'small text-success';
+    status.textContent = `Sent to ${n} ${n === 1 ? 'number' : 'numbers'}`
+      + (data.failed.length ? ` · ${data.failed.length} failed` : '');
+  } catch (e) {
+    status.className = 'small text-danger';
+    status.textContent = 'Send failed — try again.';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = label;
+  }
+}
+</script>
 <script>
 function applyFilter() {
   const inst = document.getElementById('inst-filter').value;

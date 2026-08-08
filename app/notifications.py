@@ -12,6 +12,11 @@ Cadence: exactly one text per recipient per calendar day, deduped on
 still produces a morning text, which is the point. "Today" is the date in
 ``APP_TIMEZONE`` (see ``app/localtime.py``), not UTC's date.
 
+There is a second, manual trigger: ``send_digest_now`` builds the identical
+message on demand (the dashboard's "Text me this" button). It deliberately
+neither reads nor writes ``DailyDigest``, so a press always sends and never
+interacts with the scheduled digest in either direction.
+
 Feature gating (soft-disable): the notifier is a clean no-op unless all four of
 ``TWILIO_ACCOUNT_SID`` / ``TWILIO_AUTH_TOKEN`` / ``TWILIO_FROM_NUMBER`` /
 ``BUDGET_ALERT_RECIPIENTS`` are set. Missing config never raises — the app can
@@ -121,14 +126,34 @@ def _recipients(config):
     return [r.strip() for r in raw.split(',') if r.strip()]
 
 
+def _has_credentials(config):
+    """True when all three Twilio credentials are present."""
+    return bool(config.get('TWILIO_ACCOUNT_SID')
+                and config.get('TWILIO_AUTH_TOKEN')
+                and config.get('TWILIO_FROM_NUMBER'))
+
+
+def is_configured(config):
+    """True when a digest could actually be sent right now.
+
+    The single source of truth for the soft-disable gate — recipients that
+    actually parse, AND complete credentials. The dashboard asks this to decide
+    whether to render its button enabled, so it must agree exactly with what
+    the send paths do; a caller re-deriving it (say, a bare truthiness check on
+    the raw recipients string) would enable the button for a value like ``","``
+    that parses to no recipients at all.
+
+    Constructs nothing, so the lazy ``twilio`` import stays lazy on a page load.
+    """
+    return bool(_recipients(config)) and _has_credentials(config)
+
+
 def _sender_from_config(config):
     """Build a TwilioSender when fully configured, else None (feature disabled)."""
-    sid = config.get('TWILIO_ACCOUNT_SID')
-    token = config.get('TWILIO_AUTH_TOKEN')
-    from_number = config.get('TWILIO_FROM_NUMBER')
-    if not (sid and token and from_number):
+    if not _has_credentials(config):
         return None
-    return TwilioSender(sid, token, from_number)
+    return TwilioSender(config['TWILIO_ACCOUNT_SID'], config['TWILIO_AUTH_TOKEN'],
+                        config['TWILIO_FROM_NUMBER'])
 
 
 def _week_spent(session, today):
@@ -223,3 +248,47 @@ def send_daily_digest(session, today, config, sender=None):
                     'daily digest recorded-send failed to persist '
                     '(recipient=%s)', recipient,
                 )
+
+
+def send_digest_now(session, today, config, sender=None):
+    """Send the digest immediately to every recipient, ignoring the daily dedup.
+
+    The on-demand counterpart to ``send_daily_digest``: same recipients, same
+    message, but a press always sends. It reads no ``DailyDigest`` row (so it
+    works after today's scheduled digest already went out) and writes none (so
+    it never suppresses tomorrow's). The lock is shared with the scheduled path
+    so a press cannot interleave with a concurrent 7am dispatch.
+
+    Unlike the scheduled path — a fire-and-forget side-effect that only logs —
+    this reports back, because a button has to say what happened::
+
+        {'configured': bool, 'sent': [recipient, ...], 'failed': [recipient, ...]}
+
+    ``configured`` is False when the feature is soft-disabled (no recipients, or
+    incomplete Twilio credentials); the caller surfaces that as a real message
+    rather than a silent success.
+    """
+    recipients = _recipients(config)
+    if not recipients:
+        return {'configured': False, 'sent': [], 'failed': []}
+    if sender is None:
+        sender = _sender_from_config(config)
+    if sender is None:
+        return {'configured': False, 'sent': [], 'failed': []}
+
+    with _send_lock:
+        body = digest_body(
+            today, _week_spent(session, today), _account_balances(session),
+        )
+        sent, failed = [], []
+        for recipient in recipients:
+            try:
+                sender.send(recipient, body)
+            except Exception:
+                current_app.logger.exception(
+                    'manual digest send failed (recipient=%s)', recipient,
+                )
+                failed.append(recipient)
+                continue  # one recipient's failure must not stop the rest
+            sent.append(recipient)
+        return {'configured': True, 'sent': sent, 'failed': failed}

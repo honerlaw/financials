@@ -621,3 +621,82 @@ def test_transactions_json_item_shape(auth_client, app):
     assert 'amount' in item
     assert 'amount_sign' in item
     assert 'amount_class' in item
+
+
+# ── POST /api/digest/send ─────────────────────────────────────────────────────
+
+_SMS_CFG = {
+    'BUDGET_ALERT_RECIPIENTS': '+15551112222',
+    'TWILIO_ACCOUNT_SID': 'sid',
+    'TWILIO_AUTH_TOKEN': 'tok',
+    'TWILIO_FROM_NUMBER': '+15550000000',
+}
+
+
+def test_send_digest_requires_login(client):
+    res = client.post('/api/digest/send')
+    assert res.status_code in (302, 401)
+
+
+def test_send_digest_returns_recipients_on_success(auth_client, app):
+    app.config.update(_SMS_CFG)
+    with patch('app.notifications.send_digest_now',
+               return_value={'configured': True, 'sent': ['+15551112222'],
+                             'failed': []}) as mock_send:
+        res = auth_client.post('/api/digest/send')
+    assert res.status_code == 200
+    assert res.json == {'configured': True, 'sent': ['+15551112222'], 'failed': []}
+    assert mock_send.called
+
+
+def test_send_digest_400s_when_sms_not_configured(auth_client, app):
+    """Soft-disable must surface as a real message, not a silent success."""
+    app.config.update({'BUDGET_ALERT_RECIPIENTS': '', 'TWILIO_ACCOUNT_SID': '',
+                       'TWILIO_AUTH_TOKEN': '', 'TWILIO_FROM_NUMBER': ''})
+    res = auth_client.post('/api/digest/send')
+    assert res.status_code == 400
+    assert 'not configured' in res.json['error']
+
+
+def test_send_digest_502s_when_every_send_fails(auth_client, app):
+    app.config.update(_SMS_CFG)
+    with patch('app.notifications.send_digest_now',
+               return_value={'configured': True, 'sent': [],
+                             'failed': ['+15551112222']}):
+        res = auth_client.post('/api/digest/send')
+    assert res.status_code == 502
+    assert res.json['failed'] == ['+15551112222']
+
+
+def test_send_digest_200s_on_partial_failure(auth_client, app):
+    """Some got the text — that is a success with a caveat, not a 502."""
+    app.config.update(_SMS_CFG)
+    with patch('app.notifications.send_digest_now',
+               return_value={'configured': True, 'sent': ['+1222'],
+                             'failed': ['+1111']}):
+        res = auth_client.post('/api/digest/send')
+    assert res.status_code == 200
+    assert res.json['sent'] == ['+1222'] and res.json['failed'] == ['+1111']
+
+
+def test_dashboard_button_disabled_when_sms_unconfigured(auth_client, app):
+    app.config.update({'BUDGET_ALERT_RECIPIENTS': '', 'TWILIO_ACCOUNT_SID': '',
+                       'TWILIO_AUTH_TOKEN': '', 'TWILIO_FROM_NUMBER': ''})
+    html = auth_client.get('/').get_data(as_text=True)
+    assert 'id="digest-btn"' in html
+    assert 'disabled' in html.split('id="digest-btn"')[1][:300]
+
+
+def test_dashboard_button_enabled_when_sms_configured(auth_client, app):
+    app.config.update(_SMS_CFG)
+    html = auth_client.get('/').get_data(as_text=True)
+    assert 'disabled' not in html.split('id="digest-btn"')[1][:300]
+
+
+def test_button_disabled_for_recipients_that_parse_to_nothing(auth_client, app):
+    """A value like "," is truthy but yields no recipients — the button must not
+    claim to be usable when a press would 400."""
+    app.config.update(dict(_SMS_CFG, BUDGET_ALERT_RECIPIENTS=' , '))
+    html = auth_client.get('/').get_data(as_text=True)
+    assert 'disabled' in html.split('id="digest-btn"')[1][:300]
+    assert auth_client.post('/api/digest/send').status_code == 400

@@ -72,3 +72,4 @@ Spending card header.
   the soft-disable gate and lazy `twilio` import that `is_configured` preserves.
 - [[012-pattern-fetch-content-type-session-detection]] — see also
   the Content-Type check the button's `fetch` needs against a `@login_required` route.
+- [[019-bug-non-json-response-conflated-with-session-expiry]] — see also

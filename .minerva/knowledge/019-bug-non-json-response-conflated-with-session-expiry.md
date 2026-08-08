@@ -56,7 +56,7 @@ logging in again.
 
 ## Related
 
-- [[012-pattern-fetch-content-type-session-detection]] — refines
+- [[012-pattern-fetch-content-type-session-detection]] — builds on
   the Content-Type check, which remains necessary as a parse guard but is not sufficient to identify expiry.
 - [[018-decision-on-demand-digest-trigger]] — builds on
   the button and endpoint this bug was found in.

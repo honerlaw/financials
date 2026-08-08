@@ -1,6 +1,6 @@
 # Knowledge overview
 
-<!-- synthesis-watermark: 017 -->
+<!-- synthesis-watermark: 020 -->
 
 ## Plaid data flow: piggyback, then refresh
 
@@ -138,6 +138,17 @@ lines are suffixed `(reconnect needed)`. Balance freshness is bounded by sync
 cadence in the first place — see
 [[002-decision-plaid-balance-refresh-via-dedicated-endpoint]].
 
+[[018-decision-on-demand-digest-trigger]] adds a second *trigger* for that same
+artifact — a dashboard button that texts the digest now — and its load-bearing
+choice is that the manual path neither reads nor writes `DailyDigest`. It is
+dedup-independent in both directions: a press works after the morning digest
+already went out, and never suppresses tomorrow's. Recording a row would have
+made the button quietly "claim" the day, giving a control labelled *send now* an
+invisible second effect. The scheduled path was left untouched — the two share
+only the pure message builders, so both texts are byte-identical for the same
+data. `is_configured` is the single soft-disable predicate both the button's
+rendered state and the endpoint must consult; re-deriving it is how they drift.
+
 ## Configuration and secrets
 
 All config is read through `os.getenv` in `app/__init__.py`, which made moving to
@@ -160,6 +171,19 @@ with an HTML body, `r.json()` throws, and an infinite-scroll observer retries
 the same broken request forever. Check the response `Content-Type` for
 `application/json` *before* parsing, and redirect to `/login` when it isn't.
 
+[[019-bug-non-json-response-conflated-with-session-expiry]] is the correction to
+the *other half* of that rule, learned the hard way when the digest button
+redirected to `/login` on every press with the session perfectly valid. The
+Content-Type check is a **parsing-safety** rule, not an **identification** rule:
+it tells you not to hand HTML to `r.json()`, but it cannot tell you *why* the
+body is HTML — and a crashed endpoint is non-JSON exactly like a login redirect.
+Treating every non-JSON response as expiry turns each server error into a
+phantom logout, the worst possible disguise: it blames the user's session and
+destroys the message that would have explained the failure. The precise signal
+is `res.redirected` plus a final URL of `/login`; everything else non-JSON is an
+error to display. The server side of the same rule: an API endpoint must fail as
+JSON, naming the exception, rather than letting Flask's HTML 500 page escape.
+
 ## Testing and local verification
 
 [[004-pattern-seed-relative-dates-in-time-sensitive-tests]] is the
@@ -177,6 +201,17 @@ because an early revision issues Postgres `GRANT`s — so **a migration can be
 wrong in a way no test catches**. The workaround is to exercise a new revision
 in isolation: stamp its parent, hand-create the tables it touches, upgrade,
 assert the schema, downgrade, assert the inverse. Good for portable DDL only.
+
+[[020-pattern-injected-fakes-hide-construction-failures]] is the third blind
+spot, and the one that let a real bug ship. Dependency injection makes the
+notifier testable, but every test passed a fake sender, so the factory that
+builds the *real* client never ran — the whole suite passed on a machine with
+`twilio` not installed, and production failed on exactly that line. The seam
+that makes code testable is the seam the tests never cross: injection proves
+behaviour *given* a working dependency, never that one can be built. Stub the
+third-party module in `sys.modules` and assert both halves — construction
+succeeds with complete config, and a construction failure propagates to the
+caller.
 
 ## Limitations
 

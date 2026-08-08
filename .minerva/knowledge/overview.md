@@ -1,6 +1,6 @@
 # Knowledge overview
 
-<!-- synthesis-watermark: 011 -->
+<!-- synthesis-watermark: 015 -->
 
 ## Plaid data flow: piggyback, then refresh
 
@@ -14,7 +14,17 @@ dedicated `/accounts/balance/get` call after sync to overwrite balance
 fields with authoritative values. Together: metadata freshness is bounded by
 the sync schedule; balance freshness is not.
 
-## Recovering a disconnected Item
+[[014-decision-plaid-liabilities-piggyback-on-sync]] extends the same shape a
+third time: due dates and statement balances are liability attributes that
+exist on no other payload, so a `/liabilities/get` call follows the balance
+refresh and writes three nullable `Account` columns. The recurring contract
+across all three layers is that **a post-sync refresh is never fatal** — a
+Plaid `ApiException` annotates `SyncLog.error` and the transactions still
+land. The corollary is a noise problem: an error that recurs on every sync for
+a structural reason buries the real ones, so "this Item has no liabilities"
+responses are classified benign and dropped.
+
+## Plaid product consent, and update mode as the tool for both
 
 When Plaid returns `ITEM_LOGIN_REQUIRED`, sync flips the institution to
 `status='login_required'` and stops importing. [[007-decision-plaid-reconnect-update-mode]]
@@ -28,6 +38,20 @@ structurally incapable of reconnecting. Update mode keeps the access token, so
 still-invalid Item simply re-trips `ITEM_LOGIN_REQUIRED` and flips back —
 self-healing. Visibility is a context processor injecting a warning banner on
 every authenticated page.
+
+[[015-decision-liability-consent-requires-update-mode]] found update mode's
+second job, and with it the general rule for adding a Plaid product to a live
+integration. Consent is fixed at link time, so making `liabilities` an
+additional consented product only helped Items linked *afterwards*; every
+older Item returned `ADDITIONAL_CONSENT_REQUIRED` on every sync. There is no
+server-side way to grant it — the user must re-consent through update mode,
+which is why `create_update_link_token` now carries
+`additional_consented_products` and why "Re-connect" is offered for healthy
+institutions rather than only failed ones. Budget for that per-Item migration
+whenever a new product is consented. The entry also corrects 014's guess at
+which error code the never-consented case returns, and notes the cost of
+suppressing it: nothing now signals *which* institutions still lack consent,
+only that their liability columns stay null.
 
 ## Deriving views from stored transactions
 
@@ -103,6 +127,15 @@ a bad token aborts boot). It is a **hybrid**: `DATABASE_URL`/`DATABASE_ADMIN_URL
 stay injected by DigitalOcean's managed-database binding rather than Doppler, and
 the entrypoint passes `--preserve-env` for exactly those so the DO values always
 win. Application code did not change — Doppler only populates the environment.
+
+## Client-side gotchas
+
+[[005-pattern-fetch-content-type-session-detection]] records why `fetch()`
+against a `@login_required` route cannot detect session expiry with `!r.ok`:
+the browser follows the 302 to `/login` transparently, so the JS sees a 200
+with an HTML body, `r.json()` throws, and an infinite-scroll observer retries
+the same broken request forever. Check the response `Content-Type` for
+`application/json` *before* parsing, and redirect to `/login` when it isn't.
 
 ## Testing time-dependent code
 

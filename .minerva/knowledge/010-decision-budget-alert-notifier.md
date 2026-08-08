@@ -98,3 +98,4 @@ excluding `TRANSFER`/`LOAN_PAYMENTS`, Sun–Sat weeks). It is a **household tota
   why `week_spend` and `newly_crossed` take the reference date / state as parameters.
 - [[011-decision-doppler-hybrid-config]] — see also
 - [[016-decision-daily-digest-notifier]] — superseded by
+- [[018-decision-on-demand-digest-trigger]] — see also

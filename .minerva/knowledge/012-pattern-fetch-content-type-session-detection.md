@@ -48,3 +48,4 @@ The Content-Type check catches the redirect-to-login case (HTML body) regardless
 ## Related
 
 - [[004-pattern-seed-relative-dates-in-time-sensitive-tests]] — see also
+- [[018-decision-on-demand-digest-trigger]] — see also

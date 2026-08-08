@@ -2,6 +2,7 @@
 
 **Date**: 2026-06-07
 **Type**: decision
+**Summary**: Recurring-stream detection gates on cadence regularity alone — amount similarity must never gate, or card payments and utilities disappear from `/subscriptions`.
 **Context**: .minerva/work/004-subscriptions-view (see git history if the worktree has been cleaned up)
 
 ## Context
@@ -52,3 +53,10 @@ Three interlocking decisions, validated by `tests/test_subscriptions.py`:
 - There is deliberately no bimonthly (~60-day) bucket: buckets are disjoint
   (monthly caps at 36d, quarterly starts at 79d), so true every-two-months
   charges are silently not detected. Recorded as an Open Question.
+
+## Related
+
+- [[004-pattern-seed-relative-dates-in-time-sensitive-tests]] — see also
+  why the detector takes its reference date as a parameter instead of calling `date.today()`.
+- [[006-decision-bills-payment-status-algorithm]] — see also
+- [[008-decision-dashboard-spend-and-weekly-budget]] — see also

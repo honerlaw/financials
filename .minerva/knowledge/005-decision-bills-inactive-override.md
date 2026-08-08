@@ -1,14 +1,8 @@
----
-name: bills-inactive-override
-description: Inactive recurring outflows get payment_status='inactive' in detect_bills(), not 'unpaid' — prevents false alarms for cancelled/lapsed streams
-metadata:
-  type: decision
----
-
 # Bills view: inactive streams get 'inactive' status, not 'unpaid'
 
 **Date**: 2026-06-13
 **Type**: decision
+**Summary**: Inactive recurring outflows get payment_status='inactive' in detect_bills(), not 'unpaid' — prevents false alarms for cancelled/lapsed streams
 **Context**: .minerva/work/006-bills-view
 
 ## Context
@@ -47,3 +41,6 @@ in the codebase.
   genuine obligations surface at the top.
 - See [[003-decision-subscriptions-cadence-only-detection]] for the `active`
   flag's definition and the INACTIVE_MULTIPLIER constant.
+
+## Related
+- [[006-decision-bills-payment-status-algorithm]] — see also

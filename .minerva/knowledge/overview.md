@@ -130,7 +130,7 @@ win. Application code did not change — Doppler only populates the environment.
 
 ## Client-side gotchas
 
-[[005-pattern-fetch-content-type-session-detection]] records why `fetch()`
+[[012-pattern-fetch-content-type-session-detection]] records why `fetch()`
 against a `@login_required` route cannot detect session expiry with `!r.ok`:
 the browser follows the 302 to `/login` transparently, so the JS sees a 200
 with an HTML body, `r.json()` throws, and an infinite-scroll observer retries

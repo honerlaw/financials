@@ -2,6 +2,7 @@
 
 **Date**: 2026-08-08
 **Type**: decision
+**Summary**: Plaid consent is fixed at link time: Items linked before a product was consented return `ADDITIONAL_CONSENT_REQUIRED` and can only be re-consented through update mode.
 **Context**: .minerva/work/015-fix-liability-additional-consent (see git history if the worktree has been cleaned up)
 
 ## Context
@@ -59,3 +60,10 @@ Item was never consented to it. It was absent from
   `needs_liability_consent` flag driving a targeted banner (mirroring the
   `login_required` context processor) is the recorded follow-up if that becomes
   annoying.
+
+## Related
+
+- [[014-decision-plaid-liabilities-piggyback-on-sync]] — builds on
+  the liabilities feature whose error-code assumption this corrects.
+- [[007-decision-plaid-reconnect-update-mode]] — builds on
+  update mode itself — the same mechanism, used here to grant consent rather than re-authenticate.

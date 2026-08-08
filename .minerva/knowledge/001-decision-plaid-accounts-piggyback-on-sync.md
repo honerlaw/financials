@@ -2,6 +2,7 @@
 
 **Date**: 2026-05-20
 **Type**: decision
+**Summary**: Account metadata is upserted from the accounts array `transactions/sync` already returns, instead of a separate `accounts/get` round-trip — so metadata freshness is bounded by the sync schedule.
 **Context**: .minerva/work/001-transactions-totals-and-nav-link (see git history if the worktree has been cleaned up)
 
 ## Context
@@ -44,3 +45,7 @@ snapshot.
   the piggyback completes — the piggyback's balance values are treated as
   cached snapshots, not authoritative. See
   `002-decision-plaid-balance-refresh-via-dedicated-endpoint.md`.
+
+## Related
+- [[002-decision-plaid-balance-refresh-via-dedicated-endpoint]] — see also
+- [[014-decision-plaid-liabilities-piggyback-on-sync]] — see also

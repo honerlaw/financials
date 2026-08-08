@@ -2,6 +2,7 @@
 
 **Date**: 2026-07-12
 **Type**: decision
+**Summary**: Liability due dates and statement balances come from a dedicated `/liabilities/get` call after the balance refresh, written to three nullable `Account` columns, non-fatally.
 **Context**: .minerva/work/014-account-due-date-and-balance (see git history if the worktree has been cleaned up)
 
 ## Context
@@ -52,3 +53,11 @@ dedicated `/liabilities/get` endpoint (analogous to how live balances come from
 - Any future "what's owed / when" use case should read these `Account` columns
   or call `/liabilities/get` directly — the values are not reconstructable from
   transactions.
+
+## Related
+
+- [[002-decision-plaid-balance-refresh-via-dedicated-endpoint]] — builds on
+  the balance refresh this mirrors — same post-sync, dedicated-endpoint, non-fatal shape.
+- [[001-decision-plaid-accounts-piggyback-on-sync]] — see also
+  the piggyback rule these liability columns sit alongside on `Account`.
+- [[015-decision-liability-consent-requires-update-mode]] — see also

@@ -1,14 +1,8 @@
----
-name: doppler-hybrid-config
-description: Config/secrets managed via Doppler with a backward-compatible entrypoint — doppler run only when DOPPLER_TOKEN is set (else plain env); DB URLs stay from DO's managed binding, protected by --preserve-env; CLI pinned; fail-closed
-metadata:
-  type: decision
----
-
 # Configuration via Doppler: hybrid + backward-compatible entrypoint
 
 **Date**: 2026-07-05
 **Type**: decision
+**Summary**: Config/secrets managed via Doppler with a backward-compatible entrypoint — doppler run only when DOPPLER_TOKEN is set (else plain env); DB URLs stay from DO's managed binding, protected by --preserve-env; CLI pinned; fail-closed
 **Context**: .minerva/work/013-move-to-doppler
 
 ## Context
@@ -75,6 +69,5 @@ everything through `os.getenv`, Doppler only has to *populate the environment* �
 
 ## Related
 
-- [[budget-alert-notifier]] — contributed the `TWILIO_*` / `BUDGET_ALERT_RECIPIENTS`
-  config now routed through Doppler; shares the `os.getenv` + `--workers 1` deploy
-  shape.
+- [[010-decision-budget-alert-notifier]] — see also
+  contributed the `TWILIO_*` / `BUDGET_ALERT_RECIPIENTS` config now routed through Doppler; shares the `os.getenv` + `--workers 1` deploy shape.

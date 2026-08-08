@@ -40,13 +40,15 @@ the app never starts on empty config).
 
 ## One-time Doppler setup
 
-1. Create a Doppler project named `financials` with configs `dev` and `prd`.
+1. Use the Doppler project `onerlaw` with configs `dev` and `prd` (create it if
+   it does not exist yet). This project is a **shared catch-all** across several
+   repos that use overlapping secrets — it is not specific to this app.
 2. Populate each config with the values from `.env.example` (everything except the
    database URLs and `DOPPLER_TOKEN`).
 3. Local dev:
    ```sh
    doppler login
-   doppler setup           # reads doppler.yaml → project=financials, config=dev
+   doppler setup           # reads doppler.yaml → project=onerlaw, config=dev
    doppler run -- flask --app wsgi run
    ```
    (Plain `.env` still works too — see `.env.example`.)
@@ -60,7 +62,7 @@ except the `--preserve-env`'d database URLs. Order matters:
 1. **Populate Doppler `prd`** with the exact current production values first.
    (If a value is wrong here, it will override the DO dashboard value once the
    token is set.)
-2. **Mint a service token**: Doppler → project `financials` → config `prd` →
+2. **Mint a service token**: Doppler → project `onerlaw` → config `prd` →
    Access → generate a **read-only** service token.
 3. **Deploy the new image** (with the Doppler CLI baked in) *without* setting
    `DOPPLER_TOKEN`. It boots on the existing DO env vars — no behavior change.

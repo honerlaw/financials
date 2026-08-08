@@ -2,6 +2,7 @@
 
 **Date**: 2026-06-07
 **Type**: pattern
+**Summary**: Any test exercising code that calls `date.today()` must seed fixtures relative to today (or freeze the clock) — fixed calendar dates drift across behavioral boundaries into delayed-fuse failures.
 **Context**: .minerva/work/004-subscriptions-view (see git history if the worktree has been cleaned up)
 
 ## Context
@@ -37,3 +38,9 @@ pattern.
   the reference date as an argument.
 - When a previously-green test fails with no related diff, check for this
   pattern before bisecting.
+
+## Related
+- [[003-decision-subscriptions-cadence-only-detection]] — see also
+- [[008-decision-dashboard-spend-and-weekly-budget]] — see also
+- [[010-decision-budget-alert-notifier]] — see also
+- [[012-pattern-fetch-content-type-session-detection]] — see also

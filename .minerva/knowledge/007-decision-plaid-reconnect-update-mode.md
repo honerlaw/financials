@@ -2,6 +2,7 @@
 
 **Date**: 2026-06-30
 **Type**: decision
+**Summary**: Reconnecting an existing Plaid Item requires update mode (`create_update_link_token` with `access_token`, without `products`/`transactions`); the new-connection flow mints a new Item and always trips the slug guard.
 **Context**: .minerva/work/008-account-reconnect-flow (see git history if the worktree has been cleaned up)
 
 ## Context
@@ -62,3 +63,6 @@ authenticated page.
   authenticated page** (moved to `base.html`); `settings.html` dropped its
   duplicate `<script src>`. This is the accepted tradeoff for a shared helper
   used by both the banner and the settings button.
+
+## Related
+- [[015-decision-liability-consent-requires-update-mode]] — see also

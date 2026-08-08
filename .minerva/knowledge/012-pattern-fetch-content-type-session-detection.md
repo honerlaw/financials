@@ -1,9 +1,9 @@
----
-name: fetch-content-type-session-detection
-description: When using fetch() against Flask @login_required routes, check Content-Type not r.ok to detect session expiry — the browser follows 302 redirects transparently, making the login page appear as a 200 response.
-metadata:
-  type: pattern
----
+# `fetch()` session-expiry detection needs a Content-Type check, not `r.ok`
+
+**Date**: 2026-06-13
+**Type**: pattern
+**Summary**: A `fetch()` against a Flask `@login_required` route cannot detect session expiry with `!r.ok` — the browser follows the 302 to `/login` transparently, so check the response Content-Type before parsing.
+**Context**: .minerva/work/007-infinite-scroll-transactions (see git history if the worktree has been cleaned up)
 
 ## Context
 
@@ -47,4 +47,4 @@ The Content-Type check catches the redirect-to-login case (HTML body) regardless
 
 ## Related
 
-- [[004-pattern-seed-relative-dates-in-time-sensitive-tests]]
+- [[004-pattern-seed-relative-dates-in-time-sensitive-tests]] — see also

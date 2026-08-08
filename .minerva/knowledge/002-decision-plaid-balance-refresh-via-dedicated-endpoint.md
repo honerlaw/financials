@@ -2,6 +2,7 @@
 
 **Date**: 2026-05-20
 **Type**: decision
+**Summary**: Balances carried by `transactions/sync` are cached snapshots; a dedicated `/accounts/balance/get` call after each sync overwrites them with authoritative real-time values.
 **Context**: .minerva/work/003-display-account-balances (see git history if the worktree has been cleaned up)
 
 ## Context
@@ -60,3 +61,10 @@ non-empty.
   call `/accounts/balance/get` directly; reading `Account.current_balance`
   only returns the freshest value we've written, which is bounded by sync
   cadence.
+
+## Related
+
+- [[001-decision-plaid-accounts-piggyback-on-sync]] — builds on
+  the piggybacked accounts payload whose cached balances this refresh overwrites.
+- [[010-decision-budget-alert-notifier]] — see also
+- [[014-decision-plaid-liabilities-piggyback-on-sync]] — see also

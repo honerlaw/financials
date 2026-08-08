@@ -1,14 +1,8 @@
----
-name: dashboard-spend-and-weekly-budget
-description: Dashboard spend chart + weekly $1000 budget tracker — spend = positive amount excluding transfer/loan-payment categories, weeks summed over full Sun–Sat boundaries, current-month default on a self-labeled section
-metadata:
-  type: decision
----
-
 # Dashboard spend chart + weekly budget: spend definition and boundary rules
 
 **Date**: 2026-07-05
 **Type**: decision
+**Summary**: Dashboard spend chart + weekly $1000 budget tracker — spend = positive amount excluding transfer/loan-payment categories, weeks summed over full Sun–Sat boundaries, current-month default on a self-labeled section
 **Context**: .minerva/work/010-dashboard-spend-and-budget
 
 ## Context
@@ -75,9 +69,11 @@ CDN approach for exactly this reason).
 
 ## Related
 
-- [[003-decision-subscriptions-cadence-only-detection]] — the analogous
-  "compute a view from stored transactions" pattern and category stance.
-- [[006-decision-bills-payment-status-algorithm]] — sibling monthly-overlay
-  view derived from transactions.
-- [[004-pattern-seed-relative-dates-in-time-sensitive-tests]] — why
-  `spending.py` takes the reference date as a parameter.
+- [[003-decision-subscriptions-cadence-only-detection]] — see also
+  the analogous "compute a view from stored transactions" pattern and category stance.
+- [[006-decision-bills-payment-status-algorithm]] — see also
+  sibling monthly-overlay view derived from transactions.
+- [[004-pattern-seed-relative-dates-in-time-sensitive-tests]] — see also
+  why `spending.py` takes the reference date as a parameter.
+- [[009-decision-chart-click-window-filter]] — see also
+- [[010-decision-budget-alert-notifier]] — see also

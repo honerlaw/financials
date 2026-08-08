@@ -1,14 +1,8 @@
----
-name: chart-click-window-filter
-description: Clicking a dashboard chart week/day filters the transactions table via ?start/?end date-window params, which take precedence over ?month; the spending chart stays month-scoped
-metadata:
-  type: decision
----
-
 # Chart-click date-window filter: precedence and scope
 
 **Date**: 2026-07-05
 **Type**: decision
+**Summary**: Clicking a dashboard chart week/day filters the transactions table via ?start/?end date-window params, which take precedence over ?month; the spending chart stays month-scoped
 **Context**: .minerva/work/011-chart-click-filters-transactions
 
 ## Context
@@ -50,5 +44,5 @@ window. Built on the existing URL-param + server-filter pattern used by
 
 ## Related
 
-- [[008-decision-dashboard-spend-and-weekly-budget]] — the spending chart /
-  weekly-budget section these clicks drive from.
+- [[008-decision-dashboard-spend-and-weekly-budget]] — builds on
+  the spending chart / weekly-budget section these clicks drive from.

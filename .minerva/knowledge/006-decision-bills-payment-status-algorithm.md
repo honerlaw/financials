@@ -1,14 +1,8 @@
----
-name: bills-payment-status-algorithm
-description: Monthly payment status for bills uses median day-of-month from history + ±PAYMENT_WINDOW (6 days) window check against current-month transactions
-metadata:
-  type: decision
----
-
 # Bills payment status: median day-of-month + ±6-day window
 
 **Date**: 2026-06-13
 **Type**: decision
+**Summary**: Monthly payment status for bills uses median day-of-month from history + ±PAYMENT_WINDOW (6 days) window check against current-month transactions
 **Context**: .minerva/work/006-bills-view
 
 ## Context
@@ -54,7 +48,8 @@ already used in `CADENCES` (`('monthly', 30, 6)`) in `subscriptions.py`.
 
 ## Related
 
-- [[005-decision-bills-inactive-override]] — inactive streams bypass this
-  algorithm entirely.
-- [[003-decision-subscriptions-cadence-only-detection]] — source of
-  `PAYMENT_WINDOW = 6` (monthly tolerance) and the `CADENCES` definition.
+- [[005-decision-bills-inactive-override]] — see also
+  inactive streams bypass this algorithm entirely.
+- [[003-decision-subscriptions-cadence-only-detection]] — builds on
+  source of `PAYMENT_WINDOW = 6` (monthly tolerance) and the `CADENCES` definition.
+- [[008-decision-dashboard-spend-and-weekly-budget]] — see also

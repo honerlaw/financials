@@ -35,13 +35,18 @@ dedicated `/liabilities/get` endpoint (analogous to how live balances come from
   contract). A `plaid.ApiException` from `/liabilities/get` never aborts the
   sync — transactions must keep importing. Balance and liability errors are
   accumulated and joined onto `SyncLog.error`.
-- **"No liabilities" is normal, not an error.** `PRODUCTS_NOT_SUPPORTED`,
-  `NO_LIABILITY_ACCOUNTS`, and `NO_ACCOUNTS` are treated as benign no-ops and
+- **"No liabilities" is normal, not an error.** `ADDITIONAL_CONSENT_REQUIRED`,
+  `PRODUCTS_NOT_SUPPORTED`, `NO_LIABILITY_ACCOUNTS`, and `NO_ACCOUNTS` are
+  treated as benign no-ops and
   are *not* written to the SyncLog. This matters because **every Item linked
   before this feature was never consented to `liabilities`**, so their calls
-  return `PRODUCTS_NOT_SUPPORTED` on every sync — annotating the log for them
-  would bury real errors in noise. Their liability fields stay null until the
-  user re-consents via update mode.
+  return `ADDITIONAL_CONSENT_REQUIRED` on every sync — annotating the log for
+  them would bury real errors in noise. Their liability fields stay null until
+  the user re-consents via update mode. (This entry originally named
+  `PRODUCTS_NOT_SUPPORTED` as that code; it was wrong, and the miss let the
+  real code through to the log — corrected in
+  [[015-decision-liability-consent-requires-update-mode]], which also records
+  how the consent is actually granted.)
 - **Freshness is bounded by sync cadence**, same as balances. The columns hold
   the freshest values written on the last successful `/liabilities/get`.
 - Any future "what's owed / when" use case should read these `Account` columns

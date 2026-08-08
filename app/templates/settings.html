@@ -29,11 +29,14 @@
       </div>
       {% if inst.status == 'login_required' %}
         <span class="badge bg-warning text-dark">Login required</span>
-        <button class="btn btn-sm btn-outline-primary"
-                onclick="reconnectInstitution({{ inst.id }}, this)">Re-connect</button>
       {% else %}
         <span class="badge bg-success">Active</span>
       {% endif %}
+      {# Available for healthy institutions too: re-connecting runs Plaid update
+         mode, which is how an Item linked before the `liabilities` consent
+         grants it and starts returning due dates / statement balances. #}
+      <button class="btn btn-sm btn-outline-primary"
+              onclick="reconnectInstitution({{ inst.id }}, this)">Re-connect</button>
       <button class="btn btn-sm btn-outline-danger"
               onclick="removeInstitution({{ inst.id }}, '{{ inst.name | e }}')">
         Disconnect

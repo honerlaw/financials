@@ -53,6 +53,10 @@ def test_create_update_link_token(MockApi):
     assert request.access_token == 'access-existing-123'
     assert not hasattr(request, 'products')
     assert not hasattr(request, 'transactions')
+    # ...but it must request the `liabilities` consent: update mode is the only
+    # way an Item linked before that consent existed can start returning
+    # liabilities data (Plaid's remedy for ADDITIONAL_CONSENT_REQUIRED).
+    assert 'liabilities' in [p.value for p in request.additional_consented_products]
 
 
 @patch('app.plaid_client.plaid_api.PlaidApi')

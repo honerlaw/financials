@@ -1,7 +1,7 @@
 # Proposal: fix-liability-additional-consent
 
 **Date**: 2026-08-08
-**Status**: Draft
+**Status**: Shipped (2026-08-08)
 
 ## Goal
 
@@ -39,7 +39,7 @@ user re-consents via update mode" — is not actually reachable today:
   `inst.status == 'login_required'`, so a healthy Item that merely needs extra
   consent has no button to press.
 
-## Approach
+## Approach (as shipped)
 
 Three coordinated edits; no schema change, no new endpoint.
 
@@ -88,17 +88,17 @@ and the next sync populates the liability columns.
 
 ## Success criteria
 
-- [ ] `ADDITIONAL_CONSENT_REQUIRED` from `/liabilities/get` no longer writes to
+- [x] `ADDITIONAL_CONSENT_REQUIRED` from `/liabilities/get` no longer writes to
       `SyncLog.error`; a covering test asserts the log records success.
-- [ ] Genuinely unexpected liability errors still annotate the log (existing
+- [x] Genuinely unexpected liability errors still annotate the log (existing
       test continues to pass).
-- [ ] `create_update_link_token` requests `liabilities` as an additional
+- [x] `create_update_link_token` requests `liabilities` as an additional
       consented product, still without `products` / `transactions`; a test
       asserts both halves.
-- [ ] `/settings` renders a "Re-connect" button for an `active` institution as
+- [x] `/settings` renders a "Re-connect" button for an `active` institution as
       well as a `login_required` one; the "Login required" badge stays gated on
       `login_required`.
-- [ ] Full test suite passes.
+- [x] Full test suite passes.
 
 ## Open Questions
 
@@ -109,3 +109,23 @@ and the next sync populates the liability columns.
   changes. If it does not work for an institution, the fallback is to
   disconnect and re-link it, which uses `create_link_token` and already
   consents to `liabilities`.
+
+## Outcome
+
+Shipped as proposed — no divergence, no replan. The three edits landed with
+four covering tests (`test_sync_ignores_additional_consent_required`, the
+extended `test_create_update_link_token`,
+`test_settings_offers_reconnect_for_active_institution`, plus the untouched
+`test_sync_logs_unexpected_liability_error` guarding the negative case). All
+three new assertions were verified to fail against the pre-fix code, and the
+reproduced failure string matched the reported sync-log line exactly. Full
+suite: 193 passed.
+
+Review added one comment-accuracy fix: the `reconnectInstitution` JS helper and
+both reconnect routes described re-connect as login-failure recovery only, and
+now also document its consent-granting role.
+
+Durable knowledge promoted to
+`.minerva/knowledge/015-decision-liability-consent-requires-update-mode.md`,
+which also corrects the wrong error code recorded in entry 014. The deferred
+`needs_liability_consent` UI signal is in `followups.md`.

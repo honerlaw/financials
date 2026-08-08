@@ -56,6 +56,19 @@ def test_settings_shows_institutions(auth_client, app):
     assert b'Test Bank' in res.data
 
 
+def test_settings_offers_reconnect_for_active_institution(auth_client, app):
+    """Re-connect is offered for healthy Items, not just login_required ones.
+
+    Update mode is how an Item linked before the `liabilities` consent grants
+    it, so an 'Active' institution still needs a way to trigger it.
+    """
+    inst_id = _make_institution(app)
+    res = auth_client.get('/settings')
+    assert b'Active' in res.data
+    assert b'Login required' not in res.data
+    assert f'reconnectInstitution({inst_id},'.encode() in res.data
+
+
 @patch('app.plaid_client.PlaidClient')
 def test_create_link_token(MockPlaidClient, auth_client):
     MockPlaidClient.return_value.create_link_token.return_value = 'link-test-token'

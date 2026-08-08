@@ -64,8 +64,10 @@ async function triggerSync(btn) {
 <script>
 // Shared reconnect helper: re-authenticate an existing Item via Plaid update
 // mode. Used by the reconnect banner (above) and the settings "Re-connect"
-// button. Update mode keeps the existing access_token, so onSuccess performs
-// NO token exchange — we just clear login_required server-side and reload.
+// button, which is offered for healthy Items too — update mode is also how an
+// Item grants a consent it was linked without (e.g. `liabilities`). Update
+// mode keeps the existing access_token, so onSuccess performs NO token
+// exchange — we just clear login_required server-side and reload.
 async function reconnectInstitution(id, btn) {
   const orig = btn ? btn.textContent : null;
   const reset = () => { if (btn) { btn.disabled = false; btn.textContent = orig; } };

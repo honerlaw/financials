@@ -66,6 +66,13 @@ class PlaidClient:
         ITEM_LOGIN_REQUIRED without creating a new Item. ``products`` and
         ``transactions`` are link-time-only parameters and are omitted — Plaid
         rejects them when ``access_token`` is present.
+
+        ``additional_consented_products`` *is* accepted alongside
+        ``access_token``, and update mode is Plaid's remedy for
+        ADDITIONAL_CONSENT_REQUIRED: an Item linked before `liabilities` was
+        consented can only start returning liabilities data once the user
+        re-consents here. Re-connecting is therefore useful for a healthy Item
+        too, not just after a login failure.
         """
         response = self._client.link_token_create(
             LinkTokenCreateRequest(
@@ -74,6 +81,7 @@ class PlaidClient:
                 language='en',
                 user=LinkTokenCreateRequestUser(client_user_id='local-user'),
                 access_token=access_token,
+                additional_consented_products=[Products('liabilities')],
             )
         )
         return response.link_token

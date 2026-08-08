@@ -1,5 +1,5 @@
 # Knowledge index
-<!-- index-watermark: 018 -->
+<!-- index-watermark: 020 -->
 
 ## Decisions
 
@@ -20,10 +20,13 @@
 
 ## Bugs
 
+- [[019-bug-non-json-response-conflated-with-session-expiry]] — The digest button redirected to `/login` on every press because its `fetch` treated any non-JSON response as session expiry, so an unhandled 500 rendered as a phantom logout; the precise expiry signal is `res.redirected` plus the final URL, and API endpoints must fail as JSON.
+
 ## Patterns
 
 - [[004-pattern-seed-relative-dates-in-time-sensitive-tests]] — Any test exercising code that calls `date.today()` must seed fixtures relative to today (or freeze the clock) — fixed calendar dates drift across behavioral boundaries into delayed-fuse failures.
 - [[012-pattern-fetch-content-type-session-detection]] — A `fetch()` against a Flask `@login_required` route cannot detect session expiry with `!r.ok` — the browser follows the 302 to `/login` transparently, so check the response Content-Type before parsing.
 - [[017-pattern-migration-chain-is-postgres-only]] — The Alembic chain cannot be replayed on SQLite (00a2889ed2af issues Postgres GRANTs), so a new migration is verified in isolation — stamp the parent, hand-create the tables it touches, upgrade, downgrade.
+- [[020-pattern-injected-fakes-hide-construction-failures]] — Every notifier test injected a fake sender, so `_sender_from_config` — the line that actually threw in production — was never executed and the whole suite passed with `twilio` uninstalled; a dependency built behind a seam needs at least one test that builds the real thing.
 
 ## Constraints

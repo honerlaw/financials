@@ -26,22 +26,25 @@ def app_timezone(config):
     for a "send this at 7am" job. It warns and uses the default instead.
     """
     name = config.get('APP_TIMEZONE') or DEFAULT_TIMEZONE
-    try:
-        return ZoneInfo(name)
-    except (ZoneInfoNotFoundError, ValueError):
-        log.warning('unknown APP_TIMEZONE %r — falling back to %s',
-                    name, DEFAULT_TIMEZONE)
-    try:
-        return ZoneInfo(DEFAULT_TIMEZONE)
-    except (ZoneInfoNotFoundError, ValueError):
-        # The recovery path used to raise the very error it was recovering from:
-        # with no tz database present at all, the default lookup fails too, and
-        # every caller (including a web request) died with it. UTC is the wrong
-        # *schedule* but a working *app*. Loud, because the New York default
-        # exists precisely so that a silent UTC fallback can't happen quietly.
-        log.error('no tz database available — degrading to UTC; the daily '
-                  'digest will fire on a UTC clock until tzdata is installed')
-        return timezone.utc
+    # Deduped so an unset (or already-default) APP_TIMEZONE isn't looked up
+    # twice and then reported as "unknown 'America/New_York' — falling back to
+    # America/New_York".
+    for candidate in dict.fromkeys((name, DEFAULT_TIMEZONE)):
+        try:
+            return ZoneInfo(candidate)
+        except (ZoneInfoNotFoundError, ValueError):
+            if candidate != DEFAULT_TIMEZONE:
+                log.warning('unknown APP_TIMEZONE %r — falling back to %s',
+                            candidate, DEFAULT_TIMEZONE)
+
+    # Reaching here means no tz database is present at all. This used to raise
+    # the very error it was recovering from, killing every caller including a
+    # web request. UTC is the wrong *schedule* but a working *app*. Loud,
+    # because the New York default exists precisely so a silent UTC fallback
+    # can't happen quietly.
+    log.error('no tz database available — degrading to UTC; the daily '
+              'digest will fire on a UTC clock until tzdata is installed')
+    return timezone.utc
 
 
 def local_now(config):

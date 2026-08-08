@@ -1,7 +1,7 @@
 # Proposal: fix-digest-button-error-masking
 
 **Date**: 2026-08-08
-**Status**: Draft
+**Status**: Shipped (2026-08-08)
 
 ## Goal
 
@@ -39,7 +39,7 @@ equivalent. Two contributing defects surfaced with it:
 The real production exception is still unknown — there are no logs to hand. Fix
 1 is what makes the next press name it.
 
-## Approach
+## Approach (as shipped)
 
 ### 1. The endpoint reports failures as JSON — `app/routes.py`
 
@@ -74,6 +74,12 @@ Guard the fallback. If `ZoneInfo(DEFAULT_TIMEZONE)` also fails, the tz database
 is missing entirely; log an error and return `timezone.utc`. UTC is the wrong
 *schedule* but a working *app* — and unit 016 chose the New York default
 precisely to avoid silently landing on UTC, so this path logs loudly at ERROR.
+
+Shipped as a deduped candidate loop rather than two stacked `try` blocks: the
+first cut re-attempted the identical lookup when `APP_TIMEZONE` was unset, and
+logged `unknown APP_TIMEZONE 'America/New_York' — falling back to
+America/New_York`. Misleading diagnostics in a unit about trustworthy
+diagnostics. (Found in review — finding F1.)
 
 ### 4. Close the test gap — `tests/test_notifications.py`
 
@@ -113,3 +119,26 @@ The production exception is still unidentified — this change is what surfaces
 it. If it turns out to be invalid Twilio credentials, a follow-up may want
 `is_configured` to distinguish "present" from "valid", which cannot be done
 without a network call.
+
+## Verification
+
+`pytest`: 232 passed (+6).
+
+The original repro, before and after:
+
+```
+BEFORE  500 | text/html; charset=utf-8      | <!doctype html> … 500 Internal Server Error
+AFTER   500 | application/json              | {"error":"ModuleNotFoundError: No module named 'twilio'"}
+```
+
+(The local venv lacks `twilio`; in production that string will name whatever
+actually throws there — which is the point of the change.)
+
+All four `app_timezone` paths exercised with logging enabled: valid override
+silent, bad override one WARNING, unset silent, no tz database one ERROR
+returning UTC.
+
+Accepted and recorded in [[019-bug-non-json-response-conflated-with-session-expiry]]:
+the JSON error echoes the exception message, which for a Twilio failure could
+include the account SID. Single-user password-protected app, and an unnamed
+error is the state this unit exists to escape.

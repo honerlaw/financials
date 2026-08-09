@@ -65,7 +65,7 @@ def test_digest_body_contains_budget_week_and_every_account():
         ('Amex', 'Platinum', '1004', Decimal('2143.19')),
         ('Truist', 'Checking', '3390', Decimal('4880.02')),
     ])
-    assert body.startswith('Onerlaw\nGood morning — Sat Aug 8')
+    assert body.startswith('Onerlaw LLC\nGood morning — Sat Aug 8')
     assert 'Budget: $750 of $1,000 (75%) — $250 left' in body
     assert 'Week of Aug 2' in body
     assert 'Amex · Platinum ••1004: $2,143.19' in body
@@ -86,7 +86,7 @@ def test_digest_body_is_branded_and_carries_opt_out(accounts):
     the body, and carrier traffic has to match the samples filed with the
     campaign — so this holds whether or not any account is linked."""
     body = digest_body(TODAY, Decimal('750'), accounts)
-    assert body.startswith('Onerlaw\n')
+    assert body.startswith('Onerlaw LLC\n')
     assert body.endswith('\nReply STOP to unsubscribe.')
 
 

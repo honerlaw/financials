@@ -48,7 +48,11 @@ from app.spending import WEEKLY_BUDGET, week_spend, week_start
 # carrier traffic must match the sample messages filed with the campaign — so
 # changing either constant below means re-filing those samples. See
 # docs/twilio-a2p-campaign-resubmission.md.
-BRAND = 'Onerlaw'
+#
+# Use the legal business name exactly, not `Onerlaw`. Two registration attempts
+# were rejected over names that did not match the brand on file, so brand name,
+# campaign title and this constant are deliberately the same string.
+BRAND = 'Onerlaw LLC'
 OPT_OUT_LINE = 'Reply STOP to unsubscribe.'
 
 # Serializes send_daily_digest across any concurrent callers. Correct only

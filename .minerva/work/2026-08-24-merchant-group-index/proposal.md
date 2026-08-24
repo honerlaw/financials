@@ -1,7 +1,7 @@
 # Proposal: merchant-group-index
 
 **Date**: 2026-08-24
-**Status**: Draft
+**Status**: Shipped (2026-08-24)
 
 ## Goal
 
@@ -42,55 +42,58 @@ this user's data is inferred.
 
 ## Approach
 
-1. **Schema.** `transactions.merchant_key` (nullable, indexed); `merchant_groups`
-   (id, `canonical_key`, `algo_version`); `merchant_group_keys` (`key` unique →
-   `group_id`).
+*(Rewritten at promote to describe what shipped.)*
 
-   `transactions.merchant_key` stores the *grouping key*, not the normalized name:
-   it is `entity:<merchant_entity_id>` when Plaid supplied an entity id, and the
-   output of `normalize_merchant(merchant_name or description)` otherwise. The same
-   value is what `merchant_group_keys.key` holds, so the read path is a single
-   indexed join with no normalization at render time.
+1. **Schema.** `transactions.merchant_key` (nullable, indexed) holds the grouping
+   key: `entity:<merchant_entity_id>` when Plaid supplied one, else
+   `normalize_merchant(merchant_name or description)`, and `''` when the row has
+   no groupable merchant at all. `merchant_groups` carries `canonical_key`,
+   `algo_version` and `from_entity`; `merchant_group_keys` maps each key to its
+   group.
 
-   `merchant_groups.canonical_key` is frozen at group creation rather than
-   recomputed from the group's name distribution on each load — that freeze is what
-   makes incremental matching stable.
+   `canonical_key` is a normalized **name**, frozen at creation — including for
+   entity-derived groups, whose representative name is the most common normalized
+   name across their live transactions. Storing the raw entity id there would stop
+   a bare-name charge ever joining the entity group for the same merchant, splitting
+   the stream. `from_entity` then prevents the converse error: two distinct entity
+   ids merging because their names look alike.
 
-2. **Write path.** `_extract_fields` (`app/sync.py:318`) gains one entry so
-   `_upsert_transactions` persists `merchant_key` on every insert and update.
+2. **Write path.** `_extract_fields` persists `merchant_key` on every insert and
+   update, via `_grouping_key_for` (the Plaid-object counterpart of
+   `grouping_key`).
 
-3. **Index update.** New `app/merchant_groups.py` holds the DB-backed logic;
-   `app/subscriptions.py` stays a pure module. Called at the tail of
-   `_sync_institution`, it opens with a `NOT EXISTS` query for transactions whose
-   key has no group — zero rows on a quiet sync. Each genuinely new key then
-   fuzzy-matches against existing canonical keys and either joins a group or opens
-   one: O(new keys x groups).
+3. **Index update.** `app/merchant_groups.py` owns the DB-backed logic;
+   `app/subscriptions.py` stays pure. `update_index()` runs at the tail of
+   `_sync_institution` inside a `db.session.begin_nested()` savepoint, and opens
+   with a `NOT EXISTS` query for keys with no group — three indexed queries and
+   no matching work on a quiet sync. Entity keys are processed before name keys,
+   mirroring how the in-memory grouper seeds from `merchant_entity_id` first.
 
-   The trigger is deliberately *not* gated on `added_count`/`removed_count`.
-   `_upsert_transactions` returns a count of newly-inserted rows only
-   (`app/sync.py:436`), so a sync carrying only `modified` transactions — a pending
-   charge resolving, Plaid correcting a merchant name — returns 0 and would skip
-   exactly the case where a key changed. The `NOT EXISTS` query derives the same
-   answer from the data and is additionally correct under backfills and manual DB
-   edits.
+4. **Version stamp.** A `GROUPING_ALGO_VERSION` mismatch deletes the groups **and
+   nulls every `transactions.merchant_key`**, so the backfill re-derives the keys
+   with the new normalizer. Deleting only the groups would regroup stale keys and
+   report a successful rebuild that changed nothing.
 
-4. **Version stamp.** `GROUPING_ALGO_VERSION`; a mismatch against the stored value
-   triggers exactly one full rebuild on the next sync, so changing
-   `FUZZY_THRESHOLD` or `normalize_merchant` cannot leave the index silently wrong.
+5. **Read path.** `detect_subscriptions_from_groups` / `detect_bills_from_groups`
+   take pre-grouped transactions; the original transaction-taking functions remain
+   as the pure contract and the fallback. `groups_for_detection()` uses the index
+   when usable, builds it on demand when cold, and falls back to in-memory
+   grouping — behind a savepoint — if the build fails or leaves it unusable.
 
-5. **Read path.** Split `detect_subscriptions` / `detect_bills` into `*_from_groups`
-   cores plus the existing transaction-taking wrappers, preserving the tested
-   pure-function contract. Routes feed pre-grouped input. If the index is missing
-   or incomplete, the wrapper computes in memory exactly as today and the result is
-   persisted — correct once, slow once. The migration therefore adds nullable
-   columns only and runs no data backfill.
+6. **Prefilter.** `_similar` gained a length bound and difflib's `real_quick_ratio`
+   / `quick_ratio` bounds, rejecting only pairs that provably cannot reach the
+   threshold. Predicate unchanged, pinned by a differential test; cold build 5.8x
+   cheaper.
 
-6. **Prefilter.** Fold in a length bound plus difflib's `real_quick_ratio` /
-   `quick_ratio` upper bounds before the full `ratio()` call, reusing one
-   `SequenceMatcher` per key so the b-chain is built once instead of per pair. This
-   preserves the `_similar` predicate exactly — verified to produce byte-identical
-   groupings at 500/1000/2000/3000 merchants — and measured 5.5-5.8x, which is what
-   makes cold start and rebuilds cost ~8s instead of ~45s.
+### Measured (2000 distinct merchants / 6000 transactions)
+
+| path | seconds |
+|---|---|
+| original code, no prefilter | 20.39 |
+| in-memory with prefilter | 3.50 |
+| one-time index build | 3.85 |
+| **warm page load (indexed)** | **0.06** |
+| quiet sync index update | 0.018 |
 
 ## Success criteria
 
@@ -119,3 +122,10 @@ this user's data is inferred.
   merchant appears) but it is a genuine behavioural change on borderline fuzzy
   matches, and the numeric constants it interacts with are themselves provisional
   per knowledge entry 003.
+
+## Deferred work
+
+- [#45](https://github.com/honerlaw/financials/issues/45) — prune `merchant_group_keys`
+  rows orphaned by removed transactions (priority: low).
+- [#46](https://github.com/honerlaw/financials/issues/46) — `merchant_key` is derived by
+  two hand-written implementations that must stay in lockstep (priority: low).

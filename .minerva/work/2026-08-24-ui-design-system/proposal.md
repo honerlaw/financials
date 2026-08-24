@@ -75,8 +75,11 @@ registration is still settling (knowledge 022).
 
 ### Scope
 
-All 7 templates, `app/static/chat.css`, and the inline `<script>` blocks' class
-strings. Single unit, not decomposed: removing Bootstrap is atomic — a partial
+All 7 templates, `app/static/chat.css`, `app/static/chat.js`, and the inline
+`<script>` blocks' class strings — `chat.js` builds two buttons with Bootstrap
+class names (`chat.js:45`, `chat.js:115`), so it carries the same dead-class risk
+as the inline scripts and cannot be left out.
+Single unit, not decomposed: removing Bootstrap is atomic — a partial
 migration leaves two stylesheets fighting and every unconverted page visibly
 broken, so there is no coherent intermediate state to ship.
 

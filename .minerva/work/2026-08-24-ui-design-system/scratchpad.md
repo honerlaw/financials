@@ -88,3 +88,47 @@ row. Serves on :5055, password `preview`.
 - cancelled stream → dimmed row + neutral `Inactive` badge on both
   `/subscriptions` and `/bills` (knowledge 005)
 - light and dark both render; mobile at 390px wraps with no page overflow
+
+## Minerva audit 2026-08-24 (spec fidelity + knowledge compliance)
+
+Spec fidelity: matches the proposal. One drift corrected — the Scope sentence
+named the inline `<script>` blocks but not `app/static/chat.js`, which carries
+the same dead-Bootstrap-class risk and had to be converted too. Proposal updated.
+
+Knowledge compliance: 005 (lapsed ≠ unpaid) ✓, 021 (null ≠ zero) ✓, 012/019
+(expiry detection) ✓ untouched, 022 (A2P message text) ✓ `notifications.py` never
+opened, 017 (Postgres-only migration chain) ✓ n/a but is what forced the preview
+harness onto `db.create_all()`.
+
+### TODO — the infinite-scroll fetch still has the bug knowledge 019 describes
+
+`index.html`'s IntersectionObserver fetch against `/api/transactions` still keys
+session expiry on "response is not JSON":
+
+```js
+if (!(r.headers.get('content-type') || '').includes('application/json')) {
+  observer.disconnect();
+  window.location.href = '/login';
+```
+
+That is exactly the conflation knowledge 019 documents and fixed *for the digest
+button only*: non-JSON is the union of "session expired" and "endpoint crashed",
+and only one of those is cured by logging in again. If `/api/transactions` ever
+throws, the user is bounced to `/login` with a healthy session and the error text
+discarded — the same phantom-logout that unit 018 was opened to fix.
+
+Deliberately NOT fixed here. The real fix is two-sided: the client keys on
+`res.redirected` + pathname, AND the endpoint must fail as JSON — and the
+endpoint half is `app/routes.py`, which this unit is contractually barred from
+touching. Fixing only the client half would leave a raw 500 rendering as
+"Server error" with no logging change, which is better but still half the fix.
+
+File as a followup issue.
+
+### TODO — a `currency` Jinja filter
+
+15 in-template `"{:,.2f}".format(...)` call sites exist because registering a
+filter means editing `app/__init__.py` (the app registers no template filters at
+all), which the coordination contract barred. One definition beats 15 call sites;
+worth doing once `2026-08-24-merchant-group-index` has merged and the contract
+lapses. Low priority — the current form is correct, just repetitive.

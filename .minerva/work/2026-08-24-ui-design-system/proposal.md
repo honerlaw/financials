@@ -97,7 +97,11 @@ four hard-coded class strings inside `index.html`'s inline JS (lines 226-241).
    (`b'$12345.67'`, `b'$8900.00'`, `b'$1234.56'`, `b'$432.10'`) are *formatting
    snapshots*, not contracts — they may be updated to the grouped form, and each
    such edit is justified in the diff. No other test may be edited.
-3. **Zero Python changed.** `git diff --name-only main...HEAD -- '*.py'` is empty.
+3. **Zero application Python changed.** `git diff --name-only main -- 'app/**.py'`
+   is empty — the coordination contract with `2026-08-24-merchant-group-index`
+   covers `app/`. Criterion 2 authorises currency-literal edits in
+   `tests/test_routes.py`, so a blanket "no `.py` at all" would contradict it;
+   the contract that matters is that no *application* Python moves.
 4. **Null is not zero.** A missing balance renders `—`, never `$0.00`. The
    liability and vested/unvested rows stay gated on `is not none`, so an account
    with no vesting schedule shows no vested row at all (knowledge 021).

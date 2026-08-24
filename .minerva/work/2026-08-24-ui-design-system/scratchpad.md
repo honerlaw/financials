@@ -52,3 +52,38 @@ vested-with-null-unvested, plain depository, inactive streams, and a sync error
 row. Serves on :5055, password `preview`.
 
 ## Implementation notes
+
+### Implementation log
+
+- `app/static/app.css` is new (~470 lines): token block (light `:root` + a dark
+  override under `prefers-color-scheme`), then components consuming tokens only.
+  No literal colours below the token block, so re-theming is a token edit.
+- **CSS specificity trap, caught by screenshot rather than by tests.** `.table th`
+  sets `text-align: left` at specificity (0,1,1), which silently beats a bare
+  `.right` (0,1,0) — the Amount column header drifted out of line with its own
+  column while every test still passed. Fixed with `.table th.right`. Same class
+  of bug applied to `.empty`'s padding inside `.table td`. Worth remembering:
+  a utility class layered on top of an element-qualified component rule loses,
+  and nothing in a text-assertion suite can see it.
+- Criterion 3 was self-contradictory as first written (criterion 2 authorises
+  test-literal edits; criterion 3 said zero `.py` anywhere). Narrowed to
+  `app/**.py`, which is what the peer contract actually covers.
+- The "Total $X" string: moving the month total into the headline dropped the
+  literal `Total ` prefix and broke `test_dashboard_spending_honors_institution_filter`.
+  That test probes for the contiguous string to prove the total is filter-scoped,
+  so the fix was to restore the word in the template — NOT to weaken the probe to
+  a bare `$950.00`, which could match any other figure on the page.
+- Three currency literals updated in `tests/test_routes.py` (`$1234.56`,
+  `$12345.67`, `$8900.00`), each a formatting snapshot rather than a contract.
+  No contract assertion was touched.
+
+### Verified by rendering (preview harness, seeded edge cases)
+
+- null balance → `—`, never `$0.00` (the `$0.00` on that card is the *filter
+  sum*, which is genuinely zero and rendered that way before this change too)
+- `Rollover IRA` (vested set, unvested NULL) → `Unvested —`, row still present
+- account with no equity data → no `Vested` row at all
+- overdue liability → red `Overdue Aug 21`; future → `Due Sep 5` + `min $35.00 due`
+- cancelled stream → dimmed row + neutral `Inactive` badge on both
+  `/subscriptions` and `/bills` (knowledge 005)
+- light and dark both render; mobile at 390px wraps with no page overflow

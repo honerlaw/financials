@@ -1,26 +1,26 @@
 {% extends 'base.html' %}
 {% block content %}
-<div class="d-flex align-items-center gap-3 mb-4">
-  <a href="/" class="text-muted text-decoration-none small">← Transactions</a>
-  <h5 class="mb-0">Settings</h5>
+<div class="row wrap gap-3 mb-4">
+  <a href="/" class="small muted">← Transactions</a>
+  <h1 style="font-size: var(--fs-lg);">Settings</h1>
 </div>
 
-<div class="card shadow-sm mb-4">
-  <div class="card-header d-flex justify-content-between align-items-center">
-    <span class="fw-medium">Connected Institutions</span>
-    <div class="d-flex gap-2">
+<div class="card mb-5">
+  <div class="card-head">
+    <span>Connected Institutions</span>
+    <div class="row gap-2">
       {% if institutions %}
-        <button class="btn btn-danger btn-sm" onclick="forceFullResync(this)">Force full resync</button>
+        <button class="btn btn-sm btn-danger" onclick="forceFullResync(this)">Force full resync</button>
       {% endif %}
-      <button class="btn btn-primary btn-sm" onclick="connectInstitution()">+ Connect New</button>
+      <button class="btn btn-sm btn-primary" onclick="connectInstitution()">+ Connect New</button>
     </div>
   </div>
-  <div class="list-group list-group-flush">
+  <div>
     {% for inst in institutions %}
-    <div class="list-group-item d-flex align-items-center gap-3" id="inst-row-{{ inst.id }}">
-      <div class="flex-grow-1">
-        <div class="fw-medium">{{ inst.name }}</div>
-        <div class="text-muted small">
+    <div class="list-item" id="inst-row-{{ inst.id }}">
+      <div class="grow">
+        <div class="medium">{{ inst.name }}</div>
+        <div class="muted xs">
           {% if inst.last_synced_at %}
             Last synced {{ inst.last_synced_at.strftime('%b %d at %-I:%M %p') }}
           {% else %}Never synced{% endif %}
@@ -28,39 +28,39 @@
         </div>
       </div>
       {% if inst.status == 'login_required' %}
-        <span class="badge bg-warning text-dark">Login required</span>
+        <span class="badge badge-warn">Login required</span>
       {% else %}
-        <span class="badge bg-success">Active</span>
+        <span class="badge badge-success">Active</span>
       {% endif %}
       {# Available for healthy institutions too: re-connecting runs Plaid update
          mode, which is how an Item linked before the `liabilities` consent
          grants it and starts returning due dates / statement balances. #}
-      <button class="btn btn-sm btn-outline-primary"
+      <button class="btn btn-sm btn-accent"
               onclick="reconnectInstitution({{ inst.id }}, this)">Re-connect</button>
-      <button class="btn btn-sm btn-outline-danger"
+      <button class="btn btn-sm btn-danger"
               onclick="removeInstitution({{ inst.id }}, '{{ inst.name | e }}')">
         Disconnect
       </button>
     </div>
     {% else %}
-    <div class="list-group-item text-muted text-center py-4">
+    <div class="empty">
       No institutions connected. Click <strong>+ Connect New</strong> to get started.
     </div>
     {% endfor %}
   </div>
 </div>
 
-<div class="card shadow-sm">
-  <div class="card-header fw-medium">Sync Log</div>
-  <div class="table-responsive">
-    <table class="table table-sm align-middle mb-0">
-      <thead class="table-light">
-        <tr><th>Time</th><th>Institution</th><th>Result</th><th class="text-end">New</th></tr>
+<div class="card">
+  <div class="card-head">Sync Log</div>
+  <div class="table-wrap">
+    <table class="table table-compact">
+      <thead>
+        <tr><th>Time</th><th>Institution</th><th>Result</th><th class="right">New</th></tr>
       </thead>
       <tbody>
       {% for log in sync_logs %}
       <tr>
-        <td class="text-muted small text-nowrap">
+        <td class="muted xs nowrap">
           {{ log.started_at.strftime('%b %d, %-I:%M %p') }}
         </td>
         <td>{{ log.institution.name if log.institution else 'All' }}</td>
@@ -71,10 +71,10 @@
             <span class="text-success">✓ OK</span>
           {% endif %}
         </td>
-        <td class="text-end">{{ log.added_count if not log.error else '—' }}</td>
+        <td class="right amount">{{ log.added_count if not log.error else '—' }}</td>
       </tr>
       {% else %}
-      <tr><td colspan="4" class="text-center text-muted py-3">No syncs yet.</td></tr>
+      <tr><td colspan="4" class="empty">No syncs yet.</td></tr>
       {% endfor %}
       </tbody>
     </table>

@@ -282,8 +282,10 @@ def test_index_account_card_renders_balance_and_filter_sum(auth_client, app):
 
     res = auth_client.get('/')
     assert res.status_code == 200
-    # Headline = current_balance (no leading sign)
-    assert b'$1234.56' in res.data
+    # Headline = current_balance (no leading sign). Grouped separators to
+    # match app/notifications.py's :,.2f — a formatting change, not a
+    # contract change.
+    assert b'$1,234.56' in res.data
     # Secondary line = filtered transaction sum, labeled and signed
     assert b'This filter: -$15.50' in res.data
     assert b'2 txns' in res.data
@@ -392,9 +394,9 @@ def test_index_account_card_renders_vested_and_unvested(auth_client, app):
     res = auth_client.get('/')
     assert res.status_code == 200
     assert b'Vested' in res.data
-    assert b'$12345.67' in res.data
+    assert b'$12,345.67' in res.data
     assert b'Unvested' in res.data
-    assert b'$8900.00' in res.data
+    assert b'$8,900.00' in res.data
 
 
 def test_index_account_card_omits_vested_line_without_data(auth_client, app):

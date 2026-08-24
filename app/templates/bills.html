@@ -1,9 +1,9 @@
 {% extends 'base.html' %}
 {% block content %}
-<div class="d-flex align-items-baseline gap-3 mb-3">
-  <h4 class="mb-0">Bills</h4>
-  <span class="text-muted small">
-    {% if unpaid_count %}<span class="text-danger fw-semibold">{{ unpaid_count }} unpaid</span>{% endif %}
+<div class="row-b wrap gap-3 mb-4">
+  <h1 class="amount" style="font-size: var(--fs-lg);">Bills</h1>
+  <span class="small muted">
+    {% if unpaid_count %}<span class="text-danger strong">{{ unpaid_count }} unpaid</span>{% endif %}
     {% if unpaid_count and (upcoming_count or paid_count) %} · {% endif %}
     {% if upcoming_count %}{{ upcoming_count }} upcoming{% endif %}
     {% if upcoming_count and paid_count %} · {% endif %}
@@ -11,52 +11,57 @@
   </span>
 </div>
 
-<div class="card shadow-sm">
-  <div class="table-responsive">
-    <table class="table table-hover align-middle mb-0">
-      <thead class="table-light">
+<div class="card">
+  <div class="table-wrap">
+    <table class="table">
+      <thead>
         <tr>
           <th>Merchant</th>
           <th>Cadence</th>
-          <th class="text-end">Typical amount</th>
+          <th class="right">Typical amount</th>
           <th>Expected this month</th>
           <th>Last charge</th>
-          <th class="text-end">Charges</th>
+          <th class="right">Charges</th>
           <th>Accounts</th>
           <th>Status</th>
         </tr>
       </thead>
       <tbody>
+      {# `inactive` is dimmed with a NEUTRAL badge rather than the red 'Unpaid'
+         treatment — a lapsed stream is not an unpaid obligation, and conflating
+         them produces false alarms for cancelled services. See knowledge 005. #}
       {% for b in bills %}
-      <tr {% if b.payment_status == 'inactive' %}class="opacity-50"{% endif %}>
-        <td class="fw-semibold">{{ b.name }}</td>
-        <td class="text-capitalize text-muted">{{ b.cadence }}</td>
-        <td class="text-end text-nowrap text-danger">
-          -${{ "%.2f"|format(b.amount|abs) }}
-          {% if b.varies %}<span class="badge bg-warning text-dark ms-1">varies</span>{% endif %}
+      <tr {% if b.payment_status == 'inactive' %}class="is-lapsed"{% endif %}>
+        <td class="medium">{{ b.name }}</td>
+        <td class="cap muted">{{ b.cadence }}</td>
+        <td class="right nowrap amount medium text-danger">
+          -${{ "{:,.2f}".format(b.amount|abs) }}
+          {% if b.varies %}<span class="badge badge-warn">varies</span>{% endif %}
         </td>
-        <td class="text-muted small text-nowrap">{{ b.expected_date_this_month.strftime('%b %d') }}</td>
-        <td class="text-muted small text-nowrap">{{ b.last_date.strftime('%b %d, %Y') }}</td>
-        <td class="text-end text-muted">{{ b.count }}</td>
-        <td class="small">
+        <td class="muted xs nowrap">{{ b.expected_date_this_month.strftime('%b %d') }}</td>
+        <td class="muted xs nowrap">{{ b.last_date.strftime('%b %d, %Y') }}</td>
+        <td class="right muted amount">{{ b.count }}</td>
+        <td>
+          <span class="row wrap gap-1">
           {% for label in b.accounts %}
-          <span class="badge bg-primary fw-normal">{{ label }}</span>
+          <span class="badge badge-accent">{{ label }}</span>
           {% endfor %}
+          </span>
         </td>
         <td>
           {% if b.payment_status == 'paid' %}
-          <span class="badge bg-success">Paid</span>
+          <span class="badge badge-success">Paid</span>
           {% elif b.payment_status == 'unpaid' %}
-          <span class="badge bg-danger">Unpaid</span>
+          <span class="badge badge-danger">Unpaid</span>
           {% elif b.payment_status == 'upcoming' %}
-          <span class="badge bg-secondary">Upcoming</span>
+          <span class="badge">Upcoming</span>
           {% else %}
-          <span class="badge bg-secondary">Inactive</span>
+          <span class="badge">Inactive</span>
           {% endif %}
         </td>
       </tr>
       {% else %}
-      <tr><td colspan="8" class="text-center text-muted py-5">No recurring bills detected yet.</td></tr>
+      <tr><td colspan="8" class="empty">No recurring bills detected yet.</td></tr>
       {% endfor %}
       </tbody>
     </table>

@@ -42,7 +42,7 @@
     chipsEl.innerHTML = '';
     QUICK_ACTIONS.forEach(({ label, prompt }) => {
       const btn = document.createElement('button');
-      btn.className = 'btn btn-outline-secondary chip-btn';
+      btn.className = 'btn btn-sm chip-btn';
       btn.textContent = label;
       btn.disabled = busy;
       btn.onclick = () => send(prompt);
@@ -112,7 +112,7 @@
       const errBubble = bubble('error');
       errBubble.textContent = `Connection error: ${err.message}. Click retry to resend.`;
       const retry = document.createElement('button');
-      retry.className = 'btn btn-sm btn-outline-danger ms-2';
+      retry.className = 'btn btn-sm btn-danger';
       retry.textContent = 'Retry';
       retry.onclick = () => {
         history.splice(historyLengthBefore);

@@ -1,3 +1,7 @@
+/* Chat page — full-height shell. Consumes the tokens defined in app.css, so it
+   themes with the rest of the app instead of carrying its own hardcoded slate
+   palette. Loaded after app.css by chat.html. */
+
 .chat-page {
   display: flex;
   flex-direction: column;
@@ -5,11 +9,12 @@
   margin: 0;
   overflow: hidden;
 }
-.chat-page nav.navbar { flex: 0 0 auto; }
+.chat-page nav.nav { flex: 0 0 auto; }
 .chat-container {
   flex: 1 1 auto;
   min-height: 0;
-  padding: 0 !important;
+  padding: 0;
+  max-width: none;
   display: flex;
   flex-direction: column;
 }
@@ -18,23 +23,24 @@
   min-height: 0;
   display: flex;
   flex-direction: column;
-  background: #ffffff;
+  background: var(--surface);
 }
 .chat-header {
   flex: 0 0 auto;
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 0.75rem 1.25rem;
-  border-bottom: 1px solid #e2e8f0;
-  background: #ffffff;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-5);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
 }
 .chat-messages {
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
-  padding: 1.5rem 1.25rem;
-  background: #f8fafc;
+  padding: var(--sp-5);
+  background: var(--bg);
 }
 .chat-messages > .msg,
 .chat-messages > .tool-chip {
@@ -44,21 +50,43 @@
 }
 .chat-footer {
   flex: 0 0 auto;
-  padding: 0.75rem 1.25rem 1rem;
-  background: #ffffff;
-  border-top: 1px solid #e2e8f0;
+  padding: var(--sp-3) var(--sp-5) var(--sp-4);
+  background: var(--surface);
+  border-top: 1px solid var(--border);
 }
-.chat-inner {
-  max-width: 56rem;
-  margin: 0 auto;
-}
+.chat-inner { max-width: 56rem; margin: 0 auto; }
 
-.msg { padding: 0.5rem 0.75rem; border-radius: 0.5rem; margin-bottom: 0.5rem; }
-.msg.user { background: #e0f2fe; }
-.msg.assistant { background: #f1f5f9; }
-.msg.error { background: #fee2e2; color: #991b1b; }
-.tool-chip { font-family: ui-monospace, monospace; font-size: 0.85rem;
-             background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 0.25rem;
-             padding: 0.25rem 0.5rem; margin: 0.25rem 0; display: inline-block; }
-.tool-chip pre { margin: 0.25rem 0 0 0; max-height: 14rem; overflow: auto; }
-.chip-btn { font-size: 0.85rem; }
+.msg {
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--r-md);
+  margin-bottom: var(--sp-2);
+  border: 1px solid transparent;
+}
+.msg.user      { background: var(--accent-bg); border-color: var(--accent-border); }
+.msg.assistant { background: var(--surface-2); border-color: var(--border); }
+.msg.error     { background: var(--neg-bg); border-color: var(--neg-border); color: var(--neg); }
+.msg > :first-child { margin-top: 0; }
+.msg > :last-child { margin-bottom: 0; }
+.msg pre {
+  background: var(--surface-3);
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--r-sm);
+  overflow-x: auto;
+}
+.msg code { font-family: var(--font-mono); font-size: 0.9em; }
+
+.tool-chip {
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  padding: var(--sp-1) var(--sp-2);
+  margin: var(--sp-1) 0;
+  display: inline-block;
+  color: var(--text-muted);
+}
+.tool-chip pre { margin: var(--sp-1) 0 0 0; max-height: 14rem; overflow: auto; }
+
+.chip-btn { font-size: var(--fs-xs); }
+.retry-btn { margin-left: var(--sp-2); }

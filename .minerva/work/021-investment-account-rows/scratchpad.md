@@ -1,0 +1,13 @@
+# Scratchpad: investment-account-rows
+
+## Balanced decisions 2026-08-24
+
+- [decided] pre-flight: no in-flight collision (014, 020 unpromoted but disjoint in slug and goal); #28 judged adjacent, not a match — no adoption gate fired
+- [decided] coordination: peer session financials-a5 is mid-propose on /subscriptions perf, holds no branch/worktree, edits disjoint at function level; agreed this unit goes first, tests/test_sync.py is the only shared file
+- [reviewed — clean] scope check: single unit (Skeptic accept — both changes act on one causal layer, account-row creation). Two non-scope concerns carried into the approach gate: the KB 001/002 metadata-ownership reversal, and the unverified balance/get premise
+- [reviewed — folded] approach: Skeptic returned `revise` on three high-severity points, all folded —
+  (a) a blanket `_upsert_accounts` in `_refresh_balances` drops the `balances is None` guard and the conditional iso write, nulling known balances and clobbering a currency code where `unofficial_currency_code` is set → adopted **create-only**: insert when the row is missing, existing update path untouched. Same fold also resolves the scope Skeptic's 001/002 reversal and the "force-refresh balances" blast-radius widening
+  (b) changing `get_investment_holdings`' return type silently mis-destructures the seven existing list mocks → **renamed** to `get_investments` so stale mocks fail loudly
+  (c) A-as-primary framing may be backwards, since investment-account visibility could be consent-gated the way the product endpoints are → reframed: (2) is schema-guaranteed, (1) is schema-permitted but unverified for this Item; neither claimed as primary, settled by post-deploy criterion 8
+- [decided] verification: schema-level confirmation only (plaid-python 39.2.0 — `InvestmentsHoldingsGetResponse.accounts: [InvestmentAccount]`, `AccountType` includes `investment`, `AccountBalance.iso_currency_code` "always null if `unofficial_currency_code` is non-null"). Runtime verification needs the Item's access_token from a Postgres whose trusted sources admit only DO apps/tagged droplets; deferred to post-deploy criterion 8 rather than escalating for a firewall change
+- [decided] whole-proposal soundness: single subsystem, no schema change, one internal method rename, no public interface (solo gate)

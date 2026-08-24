@@ -144,8 +144,10 @@ Campaign review is quoted at **two to three weeks**, currently running 10–15 d
 
 Confirm real traffic still matches the filed samples. `digest_body` in
 `app/notifications.py` is the coupling: anything that changes what the message says —
-`BRAND`, the opt-out line, adding or dropping a section — changes every message, so it
-means re-filing samples.
+`BRAND`, the opt-out line, adding or dropping a section, a new parenthetical note on a
+balance line — changes every message, so it means re-filing samples. Both halves move
+together: the sample messages AND the campaign description's list of what a message
+contains.
 
 ---
 
@@ -205,7 +207,7 @@ The near-misses in that dropdown, and why each loses:
 ## Campaign description
 
 ```
-Onerlaw LLC operates Onerlaw, a web-based personal finance dashboard. Users link their bank and credit card accounts to the platform through Plaid, and the platform tracks their spending against a weekly budget they set. This campaign sends operational account notifications to registered users of that platform who have opted in to receive them. Each morning the platform sends one message reporting the user's spending so far that week against their budget, the total they spent in each of the four previous weeks, and the current balance of each linked account. A user can also trigger that same summary for themselves from inside the dashboard. Volume is about seven messages per user per week. The messages are transactional only, contain no marketing or promotional content, identify Onerlaw LLC as the sender, and carry STOP opt-out instructions.
+Onerlaw LLC operates Onerlaw, a web-based personal finance dashboard. Users link their bank and credit card accounts to the platform through Plaid, and the platform tracks their spending against a weekly budget they set. This campaign sends operational account notifications to registered users of that platform who have opted in to receive them. Each morning the platform sends one message reporting the user's spending so far that week against their budget, the total they spent in each of the four previous weeks, the current balance of each linked account, and the combined net worth of those accounts. A user can also trigger that same summary for themselves from inside the dashboard. Volume is about seven messages per user per week. The messages are transactional only, contain no marketing or promotional content, identify Onerlaw LLC as the sender, and carry STOP opt-out instructions.
 ```
 
 Describes the software, who it serves, and what the messages contain — the three things
@@ -234,6 +236,9 @@ Jul 26 – Aug 1: $1,204
 Balances
 Truist · Checking ••3390: $4,880.02
 Citi · Double Cash ••1234: $612.40
+SoFi · Checking ••7742: $412.00 (not counted)
+
+Net worth: $4,267.62
 
 Reply STOP to unsubscribe.
 ```
@@ -254,7 +259,10 @@ Jul 26 – Aug 1: $1,204
 Aug 2–8: $918
 
 Balances
+E*TRADE · Stock Plan ••7781: $84,200.00 (unvested excluded)
 Truist · Checking ••3390: $4,206.11
+
+Net worth: $35,606.11
 
 Reply STOP to unsubscribe.
 ```
@@ -277,13 +285,22 @@ Aug 9–15: $1,043
 Balances
 Truist · Checking ••3390: $4,206.11 (reconnect needed)
 
+Net worth: $4,206.11
+
 Reply STOP to unsubscribe.
 ```
 
 Generated from `digest_body` in `app/notifications.py`, not written by hand. Regenerate
 them whenever the message shape changes — a new section, a reworded line, a different
 `BRAND` — because filed samples that no longer match live traffic are a violation even
-after approval. The `Last 4 weeks` block is work unit 020.
+after approval. The `Last 4 weeks` block is work unit 020; the `Net worth` line and
+the parenthetical account notes are work unit 022.
+
+Between them the three samples show every parenthetical the digest can attach to a
+balance line — `(not counted)` for an account configuration keeps out of the total,
+`(unvested excluded)` for one whose printed balance is larger than what it
+contributes, and `(reconnect needed)` for a bank that stopped syncing — so a reviewer
+never sees a suffix in live traffic that no filed sample contains.
 
 ## Content flags
 

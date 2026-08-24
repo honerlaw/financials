@@ -1,5 +1,5 @@
 from datetime import date, datetime, timezone
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 import json
 import plaid
 from flask import current_app
@@ -74,9 +74,10 @@ def _sync_institution(client, institution):
         _upsert_accounts(institution.id, accounts)
 
         # Force-refresh balances via the dedicated Plaid endpoint, then pull
-        # liability details (due dates / statement balances). Both are
-        # best-effort: a failure annotates the SyncLog but does not abort the
-        # sync — the transactions above have already landed.
+        # liability details (due dates / statement balances) and investment
+        # holdings (vested / unvested equity comp). All three are best-effort:
+        # a failure annotates the SyncLog but does not abort the sync — the
+        # transactions above have already landed.
         errors = []
         balance_error = _refresh_balances(client, institution)
         if balance_error:
@@ -84,6 +85,9 @@ def _sync_institution(client, institution):
         liability_error = _refresh_liabilities(client, institution)
         if liability_error:
             errors.append(liability_error)
+        investment_error = _refresh_investments(client, institution)
+        if investment_error:
+            errors.append(investment_error)
         if errors:
             log.error = '; '.join(errors)
 
@@ -195,6 +199,104 @@ def _refresh_liabilities(client, institution):
                 minimum = getattr(entry, 'next_monthly_payment', None)
             row.minimum_payment_amount = _to_decimal(minimum)
             row.last_synced_at = now
+    return None
+
+
+# The investments analog of _BENIGN_LIABILITY_ERROR_CODES. Same reasoning:
+# every Item linked before `investments` joined the consented products returns
+# ADDITIONAL_CONSENT_REQUIRED on every sync until the user re-connects it, and
+# a depository-only Item has no investment accounts at all. Annotating the
+# SyncLog for either would bury real errors in noise.
+_BENIGN_INVESTMENT_ERROR_CODES = frozenset({
+    'ADDITIONAL_CONSENT_REQUIRED',
+    'PRODUCTS_NOT_SUPPORTED',
+    'NO_INVESTMENT_ACCOUNTS',
+    'NO_ACCOUNTS',
+})
+
+
+def _vested_value(holding):
+    """The vested value of one holding, or None if it isn't equity comp.
+
+    Plaid reports ``vested_value`` for equity compensation at institutions that
+    track it. Some report only ``vested_quantity``, so fall back to pricing that
+    quantity at the holding's ``institution_price`` (the same spirit as the
+    mortgage ``next_monthly_payment`` fallback in _refresh_liabilities).
+
+    Returning None means "not equity comp" — the holding is then excluded from
+    both totals entirely. A plain brokerage position is not unvested.
+    """
+    value = _to_decimal(getattr(holding, 'vested_value', None))
+    if value is not None:
+        return value
+    quantity = _to_decimal(getattr(holding, 'vested_quantity', None))
+    price = _to_decimal(getattr(holding, 'institution_price', None))
+    if quantity is None or price is None:
+        return None
+    return quantity * price
+
+
+def _money(value):
+    """Round to the 2 decimal places the Numeric(12, 2) columns store.
+
+    Postgres rounds on insert; SQLite (the test suite) does not. Rounding here
+    means the derived ``vested_quantity * institution_price`` product reads back
+    identically in both.
+    """
+    return value.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+
+
+def _refresh_investments(client, institution):
+    """Populate per-account vested / unvested totals via investments/holdings/get.
+
+    Returns an error string to record on the SyncLog for *unexpected* failures,
+    or None on success — including the benign "this Item has no investments"
+    responses that are normal for depository-only or non-consented Items. Never
+    re-raises; like balance and liability refresh, this is non-fatal to the sync.
+
+    Only holdings with a *known* vested figure contribute. An account whose
+    holdings all report none keeps both columns null, so its dashboard card is
+    unchanged rather than claiming a $0 vested balance.
+    """
+    try:
+        holdings = client.get_investment_holdings(institution.access_token)
+    except plaid.ApiException as e:
+        code = _get_plaid_error_code(e)
+        if code in _BENIGN_INVESTMENT_ERROR_CODES:
+            return None
+        return f'investment refresh failed: {code}: {e}'
+
+    if not holdings:
+        return None
+
+    totals = {}
+    for holding in holdings:
+        account_id = getattr(holding, 'account_id', None)
+        if not account_id:
+            continue
+        vested = _vested_value(holding)
+        if vested is None:
+            continue
+        total_value = _to_decimal(getattr(holding, 'institution_value', None))
+        # A stale institution_price can price the holding below its vested
+        # portion; clamp rather than report a negative unvested amount. A
+        # holding with no institution_value at all contributes nothing to the
+        # unvested total — the remainder is unknown, not zero-and-known, and
+        # overstating it is worse than omitting it.
+        unvested = Decimal('0')
+        if total_value is not None:
+            unvested = max(total_value - vested, Decimal('0'))
+        vested_sum, unvested_sum = totals.get(account_id, (Decimal('0'), Decimal('0')))
+        totals[account_id] = (vested_sum + vested, unvested_sum + unvested)
+
+    now = _utcnow()
+    for account_id, (vested_sum, unvested_sum) in totals.items():
+        row = Account.query.filter_by(plaid_account_id=account_id).first()
+        if row is None:
+            continue
+        row.vested_value = _money(vested_sum)
+        row.unvested_value = _money(unvested_sum)
+        row.last_synced_at = now
     return None
 
 

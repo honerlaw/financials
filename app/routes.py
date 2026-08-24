@@ -299,6 +299,8 @@ def _account_totals(institution_id, month_start, month_end):
             Account.next_payment_due_date.label('next_payment_due_date'),
             Account.last_statement_balance.label('last_statement_balance'),
             Account.minimum_payment_amount.label('minimum_payment_amount'),
+            Account.vested_value.label('vested_value'),
+            Account.unvested_value.label('unvested_value'),
             db.func.coalesce(db.func.sum(Transaction.amount), 0).label('total'),
             db.func.count(Transaction.id).label('txn_count'),
         )
@@ -311,6 +313,7 @@ def _account_totals(institution_id, month_start, month_end):
             Account.current_balance, Account.iso_currency_code,
             Account.next_payment_due_date, Account.last_statement_balance,
             Account.minimum_payment_amount,
+            Account.vested_value, Account.unvested_value,
         )
         .order_by(Institution.name, Account.name)
     )

@@ -196,7 +196,8 @@ def test_reconnect_requires_auth(client, app):
 
 def _make_account(app, inst_id, plaid_account_id='acc-001', name='Sapphire', mask='1234',
                   current_balance=None, next_payment_due_date=None,
-                  last_statement_balance=None, minimum_payment_amount=None):
+                  last_statement_balance=None, minimum_payment_amount=None,
+                  vested_value=None, unvested_value=None):
     with app.app_context():
         acct = Account(
             institution_id=inst_id,
@@ -213,6 +214,8 @@ def _make_account(app, inst_id, plaid_account_id='acc-001', name='Sapphire', mas
             minimum_payment_amount=(
                 Decimal(str(minimum_payment_amount)) if minimum_payment_amount is not None else None
             ),
+            vested_value=Decimal(str(vested_value)) if vested_value is not None else None,
+            unvested_value=Decimal(str(unvested_value)) if unvested_value is not None else None,
         )
         db.session.add(acct)
         db.session.commit()
@@ -364,6 +367,46 @@ def test_index_account_card_omits_liability_line_without_data(auth_client, app):
     assert b'Due ' not in res.data
     assert b'Overdue' not in res.data
     assert b'min $' not in res.data
+
+
+def test_index_account_totals_include_vested_fields(auth_client, app):
+    inst_id = _make_institution(app, name='E*TRADE', slug='etrade')
+    _make_account(app, inst_id, plaid_account_id='acc-inv', name='Stock Plan',
+                  vested_value='12345.67', unvested_value='8900.00')
+
+    with auth_client.application.test_request_context('/'):
+        from app.routes import _account_totals
+        rows = _account_totals(None, None, None)
+
+    match = [r for r in rows if r.account_name == 'Stock Plan'][0]
+    assert match.vested_value == Decimal('12345.67')
+    assert match.unvested_value == Decimal('8900.00')
+
+
+def test_index_account_card_renders_vested_and_unvested(auth_client, app):
+    inst_id = _make_institution(app, name='E*TRADE', slug='etrade')
+    _make_account(app, inst_id, plaid_account_id='acc-inv', name='Stock Plan',
+                  current_balance='21245.67',
+                  vested_value='12345.67', unvested_value='8900.00')
+
+    res = auth_client.get('/')
+    assert res.status_code == 200
+    assert b'Vested' in res.data
+    assert b'$12345.67' in res.data
+    assert b'Unvested' in res.data
+    assert b'$8900.00' in res.data
+
+
+def test_index_account_card_omits_vested_line_without_data(auth_client, app):
+    inst_id = _make_institution(app, name='Truist', slug='truist')
+    _make_account(app, inst_id, plaid_account_id='acc-dep', name='Fresh Checking')
+
+    res = auth_client.get('/')
+    assert res.status_code == 200
+    assert b'Fresh Checking' in res.data
+    # No equity-comp data → no vested/unvested rows.
+    assert b'Vested' not in res.data
+    assert b'Unvested' not in res.data
 
 
 def test_index_account_totals_include_zero_txn_accounts(auth_client, app):

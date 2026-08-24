@@ -1,7 +1,7 @@
 # Proposal: investment-vested-unvested
 
 **Date**: 2026-08-23
-**Status**: Draft
+**Status**: Shipped (2026-08-23)
 
 ## Goal
 
@@ -29,20 +29,24 @@ Plaid endpoint called after the transaction sync, writing nullable columns onto
 dates did it in [[014-decision-plaid-liabilities-piggyback-on-sync]]. This unit
 follows the same shape rather than inventing a new one.
 
-## Approach
+## Approach (as shipped)
 
-### 1. Schema — `app/models.py` + a migration
+### 1. Schema — `app/models.py` + migration `e9c2b7d41a58`
 
 Two nullable columns on `Account`:
 
 - `vested_value` (Numeric 12,2) — summed vested value across the account's
   equity-comp holdings.
-- `unvested_value` (Numeric 12,2) — summed `institution_value - vested_value`
-  across those same holdings.
+- `unvested_value` (Numeric 12,2) — summed clamped remainder,
+  `max(institution_value - vested, 0)`, across those same holdings.
 
 Both null for every account with no equity-comp holdings — depository accounts,
 plain brokerage accounts, and any Item not consented to `investments`. That is
 the same null-means-not-applicable contract the liability columns already use.
+
+The migration was verified in isolation against SQLite per
+[[017-pattern-migration-chain-is-postgres-only]] — stamp `d5a1c9e37b48`,
+upgrade, assert both columns present, downgrade, assert both gone.
 
 ### 2. Plaid consent + fetch — `app/plaid_client.py`
 
@@ -64,40 +68,44 @@ sync, unexpected codes are joined onto `SyncLog.error`, and the benign set
 Aggregation, per account:
 
 - Only holdings whose vested value is *known* participate. A plain brokerage
-  holding reports `vested_value = None` and must not be counted as unvested —
-  it is not unvested, it is not equity comp.
-- `vested_value` is used directly when present; when it is null but
-  `vested_quantity` is not, it is derived as
-  `vested_quantity * institution_price`. (Same spirit as the mortgage
-  `next_monthly_payment` fallback already in `_refresh_liabilities`.)
+  holding reports `vested_value = None` and is skipped entirely — it is not
+  unvested, it is not equity comp.
+- `_vested_value` uses `vested_value` when present; when it is null but
+  `vested_quantity` is not, it derives `vested_quantity * institution_price`.
 - `unvested = max(institution_value - vested, 0)` — clamped, because a stale
-  `institution_price` can otherwise produce a negative remainder.
+  `institution_price` can otherwise produce a negative remainder. A holding
+  with no `institution_value` contributes nothing to the unvested total.
+- Both totals go through `_money`, which quantizes to 2 dp. Added in review:
+  Postgres rounds a `Numeric(12, 2)` insert and SQLite (the test suite) does
+  not, so without it the derived-value path reads back differently per
+  environment.
 - An account whose holdings all report no vested figure keeps both columns
   null, so its card is unchanged.
 
 ### 4. Dashboard — `app/routes.py` + `app/templates/index.html`
 
-`_account_totals` selects and groups the two new columns. The card gains one
-row, rendered only when either value is non-null, directly mirroring the
-existing due-date/balance-due row:
-
-```
-Vested $12,345.67        Unvested $8,900.00
-```
+`_account_totals` selects and groups the two new columns. The card gains a
+bordered Vested / Unvested block, rendered only when either value is non-null,
+sitting below the existing due-date/balance-due row. Shipped as two labelled
+rows rather than the single row the draft sketched — the card is 240px wide and
+two dollar amounts plus two labels do not fit on one line without truncating.
 
 ### 5. Tests — `tests/test_plaid_client.py`, `tests/test_sync.py`, `tests/test_routes.py`
 
 Mirroring the liability tests already in place: the client method issues the
-request, sync populates both columns, the `vested_quantity` fallback works,
-non-equity holdings are ignored, benign error codes stay off the SyncLog, an
-unexpected code lands on it non-fatally, and the dashboard renders the row.
+request with the right access token, both link-token paths consent to
+`investments`, sync populates and sums both columns, the `vested_quantity`
+fallback works and rounds to cents, a non-equity holding is ignored, a negative
+remainder clamps to zero, each of the four benign error codes stays off the
+SyncLog (parametrized), an unexpected code lands on it non-fatally, and the
+dashboard renders the block when data is present and omits it when not.
 
 ### Rejected alternatives
 
 - **Full `Holding` / `Security` tables with a per-lot holdings view.** Correct
   destination if the app ever grows a portfolio page, but it is a new subsystem
   — two tables, a sync reconciliation path, and a new view — for a request that
-  asks only for two numbers per account. Deferred as a follow-up.
+  asks only for two numbers per account.
 - **Call `/investments/holdings/get` at dashboard render time.** No migration,
   always live, but it puts a network round-trip per institution on every page
   load and breaks the piggyback rule from
@@ -140,3 +148,23 @@ plan account cannot be verified from here — it depends on what the institution
 reports. If it comes back null, the columns stay null and the card is
 unchanged; the remedy would be a holdings-level view, not a change to this
 shape.
+
+## Deferred work
+
+- #28 — Plaid-derived `Account` columns are never cleared when the institution
+  stops reporting them (priority: low)
+
+## Verification
+
+`pytest`: 248 passed (+16).
+
+Migration `e9c2b7d41a58` exercised in isolation on a scratch SQLite DB:
+
+```
+after upgrade:   [... 'vested_value', 'unvested_value']
+after downgrade: [...]
+```
+
+Not verifiable from here: whether Plaid returns a `vested_value` for this
+particular E*TRADE stock plan. That depends on what the institution reports,
+and the Item must be re-connected before the call succeeds at all.

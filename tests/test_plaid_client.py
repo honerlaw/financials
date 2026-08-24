@@ -30,10 +30,13 @@ def test_create_link_token(MockApi):
     client._client = MockApi.return_value
     assert client.create_link_token() == 'link-sandbox-xyz'
 
-    # `liabilities` is consented as an additional product so new links can
-    # surface credit-card due dates without making it a required product.
+    # `liabilities` and `investments` are consented as additional products so
+    # new links can surface credit-card due dates and vested equity comp
+    # without making either a required product.
     request = MockApi.return_value.link_token_create.call_args[0][0]
-    assert 'liabilities' in [p.value for p in request.additional_consented_products]
+    consented = [p.value for p in request.additional_consented_products]
+    assert 'liabilities' in consented
+    assert 'investments' in consented
 
 
 @patch('app.plaid_client.plaid_api.PlaidApi')
@@ -53,10 +56,13 @@ def test_create_update_link_token(MockApi):
     assert request.access_token == 'access-existing-123'
     assert not hasattr(request, 'products')
     assert not hasattr(request, 'transactions')
-    # ...but it must request the `liabilities` consent: update mode is the only
-    # way an Item linked before that consent existed can start returning
-    # liabilities data (Plaid's remedy for ADDITIONAL_CONSENT_REQUIRED).
-    assert 'liabilities' in [p.value for p in request.additional_consented_products]
+    # ...but it must request the `liabilities` and `investments` consents:
+    # update mode is the only way an Item linked before a consent existed can
+    # start returning that product's data (Plaid's remedy for
+    # ADDITIONAL_CONSENT_REQUIRED).
+    consented = [p.value for p in request.additional_consented_products]
+    assert 'liabilities' in consented
+    assert 'investments' in consented
 
 
 @patch('app.plaid_client.plaid_api.PlaidApi')
@@ -135,6 +141,22 @@ def test_get_liabilities(MockApi):
 
     assert result is liabilities
     assert api.liabilities_get.call_count == 1
+
+
+@patch('app.plaid_client.plaid_api.PlaidApi')
+def test_get_investment_holdings(MockApi):
+    api = MockApi.return_value
+    holdings = [MagicMock(account_id='acc-1'), MagicMock(account_id='acc-2')]
+    api.investments_holdings_get.return_value = MagicMock(holdings=holdings)
+
+    client = _make_client()
+    client._client = api
+    result = client.get_investment_holdings('access-token-xyz')
+
+    assert result is holdings
+    assert api.investments_holdings_get.call_count == 1
+    request = api.investments_holdings_get.call_args[0][0]
+    assert request.access_token == 'access-token-xyz'
 
 
 def test_get_error_code():

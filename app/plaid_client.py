@@ -15,6 +15,7 @@ from plaid.model.transactions_sync_request import TransactionsSyncRequest
 from plaid.model.transactions_sync_request_options import TransactionsSyncRequestOptions
 from plaid.model.accounts_balance_get_request import AccountsBalanceGetRequest
 from plaid.model.liabilities_get_request import LiabilitiesGetRequest
+from plaid.model.investments_holdings_get_request import InvestmentsHoldingsGetRequest
 
 
 def slugify(name):
@@ -44,11 +45,15 @@ class PlaidClient:
         response = self._client.link_token_create(
             LinkTokenCreateRequest(
                 products=[Products('transactions')],
-                # `liabilities` is consented but not required: institutions that
-                # don't support it still link (transactions stays the only
-                # required product), and when present we can call
-                # /liabilities/get to surface credit-card due dates & balances.
-                additional_consented_products=[Products('liabilities')],
+                # `liabilities` and `investments` are consented but not
+                # required: institutions that don't support them still link
+                # (transactions stays the only required product), and when
+                # present we can call /liabilities/get for credit-card due
+                # dates & balances and /investments/holdings/get for
+                # vested/unvested equity compensation.
+                additional_consented_products=[
+                    Products('liabilities'), Products('investments'),
+                ],
                 client_name='Financial Sync',
                 country_codes=[CountryCode('US')],
                 language='en',
@@ -69,10 +74,11 @@ class PlaidClient:
 
         ``additional_consented_products`` *is* accepted alongside
         ``access_token``, and update mode is Plaid's remedy for
-        ADDITIONAL_CONSENT_REQUIRED: an Item linked before `liabilities` was
-        consented can only start returning liabilities data once the user
+        ADDITIONAL_CONSENT_REQUIRED: an Item linked before a product was
+        consented can only start returning that product's data once the user
         re-consents here. Re-connecting is therefore useful for a healthy Item
-        too, not just after a login failure.
+        too, not just after a login failure — it is the only way an Item linked
+        before `investments` was consented starts reporting vested holdings.
         """
         response = self._client.link_token_create(
             LinkTokenCreateRequest(
@@ -81,7 +87,9 @@ class PlaidClient:
                 language='en',
                 user=LinkTokenCreateRequestUser(client_user_id='local-user'),
                 access_token=access_token,
-                additional_consented_products=[Products('liabilities')],
+                additional_consented_products=[
+                    Products('liabilities'), Products('investments'),
+                ],
             )
         )
         return response.link_token
@@ -134,6 +142,21 @@ class PlaidClient:
             LiabilitiesGetRequest(access_token=access_token)
         )
         return response.liabilities
+
+    def get_investment_holdings(self, access_token):
+        """Fetch investment holdings (including vested equity-comp figures).
+
+        Returns the response's ``holdings`` list. Each ``Holding`` ties back to
+        an ``Account`` via ``account_id`` and carries ``institution_value``
+        plus, for equity compensation the institution reports on,
+        ``vested_value`` / ``vested_quantity``. Raises ``plaid.ApiException``
+        when the Item wasn't consented to the ``investments`` product (callers
+        treat this as non-fatal — see app/sync.py::_refresh_investments).
+        """
+        response = self._client.investments_holdings_get(
+            InvestmentsHoldingsGetRequest(access_token=access_token)
+        )
+        return response.holdings
 
     def sync_transactions(self, access_token, cursor=''):
         added, modified, removed = [], [], []

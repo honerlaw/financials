@@ -44,3 +44,4 @@ pattern.
 - [[008-decision-dashboard-spend-and-weekly-budget]] — see also
 - [[010-decision-budget-alert-notifier]] — see also
 - [[012-pattern-fetch-content-type-session-detection]] — see also
+- [[028-pattern-byte-assertions-are-contracts-or-snapshots]] — see also

@@ -273,6 +273,60 @@ is `res.redirected` plus a final URL of `/login`; everything else non-JSON is an
 error to display. The server side of the same rule: an API endpoint must fail as
 JSON, naming the exception, rather than letting Flask's HTML 500 page escape.
 
+## The presentation layer
+
+For most of the app's life the UI was stock Bootstrap 5 from a CDN plus two lines
+of inline override, and the question that finally forced a decision was whether
+making it look good required moving to React.
+[[025-decision-hand-authored-design-system]] records that it did not, and why:
+seven Jinja templates of mostly read-only tables were not held back by the
+absence of a framework but by the absence of design — no type scale, no spacing
+rhythm, no palette, no dark mode, and money rendered with `"%.2f"` so a real
+account read `$615966.75` while the SMS digest
+([[022-decision-digest-four-week-spend-history]]) had been saying
+`$615,966.75` all along. The replacement is a hand-authored token-driven
+stylesheet: `:root` holds the light set, a `prefers-color-scheme` block redefines
+the same names for dark, and no component rule contains a literal colour, so
+re-theming is a token edit and the two themes cannot drift apart.
+
+Tailwind lost on two counts that are worth separating, because only one of them
+is about this repo's size. The toolchain cost is ordinary — a Node stage in a
+`Dockerfile` that is otherwise a clean `pip install`
+([[011-decision-doppler-hybrid-config]]). The other is
+[[026-constraint-css-class-names-cross-the-json-boundary]], and it is the more
+interesting constraint: `app/routes.py` puts the literal strings `text-danger` /
+`text-success` into the `/api/transactions` payload, and the infinite-scroll
+script applies them verbatim to appended rows. A presentation-layer name is
+therefore chosen by Python, travels through JSON, and is resolved by CSS. Those
+are not stock Tailwind utilities, so Tailwind would have needed a custom theme
+existing solely to satisfy a line of Python — and nothing would have caught it
+breaking, since the tests assert only that the payload *key* is present, never
+its value. The visible failure is that the first page of transactions is coloured
+correctly and every lazily-appended row after it is not.
+
+Two rules from elsewhere in this wiki survived the rewrite by being named as
+design-system states rather than left as styling. Null is not zero
+([[021-decision-plaid-vested-value-piggyback-on-sync]]): a missing balance
+renders an em dash and an account with no vesting schedule renders no vested row
+at all, because `$0.00` asserts that nothing has vested, which is a different and
+false claim. Lapsed is not unpaid ([[005-decision-bills-inactive-override]]): a
+cancelled stream stays dimmed with a neutral badge, never the danger treatment. A
+design pass is precisely the operation that tends to normalise both away, which
+is why they were written down as acceptance criteria before the markup was
+touched.
+
+[[027-pattern-utility-classes-lose-to-element-qualified-rules]] is the defect
+class the rewrite kept producing, and it belongs beside the testing blind spots
+below rather than apart from them. `.table th { text-align: left }` has
+specificity (0,1,1) and beats a bare `.right` utility at (0,1,0), so a numeric
+column header sat visibly out of line with its own column while all 268 tests
+passed. Class attributes were present and correct in the HTML; only the computed
+style was wrong. Neither a text-assertion suite nor a subagent reading the diff
+can observe that — a screenshot found it, and a contrast regression that put
+2.58:1 grey on every table header in the app. For visual work, rendering the page
+and looking at it is not a nicety layered on the tests; it is the only instrument
+that sees this category at all.
+
 ## Testing and local verification
 
 [[004-pattern-seed-relative-dates-in-time-sensitive-tests]] is the
@@ -312,6 +366,22 @@ step up from both: **a test that supplies the thing whose absence is the bug
 cannot detect the bug**. The unit that shipped it had asserted the payload's
 contents in its proposal as fact, without checking; the correction was verified
 against the live production dashboard, not against a mock.
+
+[[028-pattern-byte-assertions-are-contracts-or-snapshots]] is the fourth, and
+unlike the three above it is a blind spot in the *reader* rather than the suite.
+The route tests assert literal substrings of rendered HTML, and those assertions
+are two different kinds wearing one syntax. Some are **contracts** —
+`b'Vested' not in res.data` guards 021's null-is-not-zero rule, `b'Due ' not in`
+does the same for liabilities (note the trailing space, and that it matches
+anywhere on the page), and `'Total $950.00' in body` proves the month total is
+institution-scoped, where the word `Total` is the anchor that stops the probe
+matching any figure at all. Others are **formatting snapshots** — `b'$12345.67'`
+pins an incidental rendering and broke by design the moment thousands separators
+landed. Editing a snapshot to get green is correct; editing a contract to get
+green ships the regression the contract existed to catch. The asymmetry is the
+whole point, and it cuts both ways: refusing to edit *any* test forces real
+formatting work to be abandoned or faked. Classify before you edit, and say in
+the diff which kind you decided it was.
 
 ## Limitations
 

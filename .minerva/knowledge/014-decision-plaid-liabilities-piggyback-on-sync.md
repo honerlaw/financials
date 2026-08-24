@@ -61,3 +61,4 @@ dedicated `/liabilities/get` endpoint (analogous to how live balances come from
 - [[001-decision-plaid-accounts-piggyback-on-sync]] — see also
   the piggyback rule these liability columns sit alongside on `Account`.
 - [[015-decision-liability-consent-requires-update-mode]] — see also
+- [[021-decision-plaid-vested-value-piggyback-on-sync]] — see also

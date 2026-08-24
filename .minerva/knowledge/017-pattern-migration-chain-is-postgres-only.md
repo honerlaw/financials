@@ -41,3 +41,4 @@ builds still needs a real Postgres.
   the unit whose migration (`d5a1c9e37b48`) was verified this way.
 - [[011-decision-doppler-hybrid-config]] — see also
   `DATABASE_ADMIN_URL`, the privileged URL the production `flask db upgrade` runs under.
+- [[021-decision-plaid-vested-value-piggyback-on-sync]] — see also

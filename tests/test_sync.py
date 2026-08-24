@@ -2,12 +2,13 @@ from datetime import date
 from decimal import Decimal
 from unittest.mock import MagicMock, patch
 
+import pytest
 from freezegun import freeze_time
 from app.models import Institution, Transaction, SyncLog, Account
 from app.models import db
 from app.sync import (
     sync_all_institutions, run_daily_sync, _upsert_transactions, _mark_removed,
-    _upsert_accounts, _refresh_liabilities,
+    _upsert_accounts, _refresh_liabilities, _refresh_investments,
 )
 
 
@@ -519,3 +520,202 @@ def test_daily_sync_survives_digest_import_failure(MockPlaidClient, app):
         # Poisoning sys.modules makes `from app.notifications import ...` raise.
         with patch.dict(sys.modules, {'app.notifications': None}):
             run_daily_sync()  # should not raise
+
+
+def _mock_holding(account_id='acc-inv', institution_value=1000.00,
+                  vested_value=600.00, vested_quantity=None,
+                  institution_price=None):
+    holding = MagicMock()
+    holding.account_id = account_id
+    holding.institution_value = institution_value
+    holding.vested_value = vested_value
+    holding.vested_quantity = vested_quantity
+    holding.institution_price = institution_price
+    return holding
+
+
+@patch('app.sync.PlaidClient')
+def test_sync_populates_vested_fields(MockPlaidClient, app):
+    inst_id = _make_institution(app)
+    with app.app_context():
+        mock_client = MagicMock()
+        mock_client.sync_transactions.return_value = (
+            [], [], [], 'cursor-x',
+            [_mock_account('acc-inv', type_='investment', subtype='brokerage')],
+        )
+        mock_client.get_balances.return_value = []
+        mock_client.get_liabilities.return_value = None
+        # Two equity-comp lots on one account: totals are summed.
+        mock_client.get_investment_holdings.return_value = [
+            _mock_holding('acc-inv', institution_value=1000.00, vested_value=600.00),
+            _mock_holding('acc-inv', institution_value=500.00, vested_value=125.00),
+        ]
+        MockPlaidClient.return_value = mock_client
+
+        sync_all_institutions()
+
+        row = Account.query.filter_by(plaid_account_id='acc-inv').first()
+        assert row.vested_value == Decimal('725.00')
+        assert row.unvested_value == Decimal('775.00')
+        log = SyncLog.query.first()
+        assert log.error is None
+
+
+def test_refresh_investments_derives_vested_from_quantity(app):
+    """An institution reporting only vested_quantity is priced at institution_price."""
+    inst_id = _make_institution(app)
+    with app.app_context():
+        _upsert_accounts(inst_id, [_mock_account('acc-inv', type_='investment',
+                                                 subtype='brokerage')])
+        db.session.commit()
+
+        client = MagicMock()
+        client.get_investment_holdings.return_value = [
+            _mock_holding('acc-inv', institution_value=1000.00, vested_value=None,
+                          vested_quantity=40, institution_price=10.00),
+        ]
+        inst = db.session.get(Institution, inst_id)
+        err = _refresh_investments(client, inst)
+        db.session.commit()
+
+        assert err is None
+        row = Account.query.filter_by(plaid_account_id='acc-inv').first()
+        assert row.vested_value == Decimal('400.00')
+        assert row.unvested_value == Decimal('600.00')
+
+
+def test_refresh_investments_rounds_derived_value_to_cents(app):
+    """The derived quantity x price product is stored at Numeric(12, 2) precision."""
+    inst_id = _make_institution(app)
+    with app.app_context():
+        _upsert_accounts(inst_id, [_mock_account('acc-inv', type_='investment',
+                                                 subtype='brokerage')])
+        db.session.commit()
+
+        client = MagicMock()
+        client.get_investment_holdings.return_value = [
+            _mock_holding('acc-inv', institution_value=1000.00, vested_value=None,
+                          vested_quantity=33.333, institution_price=12.34),
+        ]
+        inst = db.session.get(Institution, inst_id)
+        err = _refresh_investments(client, inst)
+        db.session.commit()
+
+        assert err is None
+        row = Account.query.filter_by(plaid_account_id='acc-inv').first()
+        # 33.333 * 12.34 == 411.32922 -> 411.33
+        assert row.vested_value == Decimal('411.33')
+        assert row.unvested_value == Decimal('588.67')
+
+
+def test_refresh_investments_ignores_holdings_with_no_vested_figure(app):
+    """A plain brokerage position is not unvested — it is excluded entirely."""
+    inst_id = _make_institution(app)
+    with app.app_context():
+        _upsert_accounts(inst_id, [_mock_account('acc-inv', type_='investment',
+                                                 subtype='brokerage')])
+        db.session.commit()
+
+        client = MagicMock()
+        client.get_investment_holdings.return_value = [
+            _mock_holding('acc-inv', institution_value=5000.00, vested_value=None,
+                          vested_quantity=None, institution_price=None),
+        ]
+        inst = db.session.get(Institution, inst_id)
+        err = _refresh_investments(client, inst)
+        db.session.commit()
+
+        assert err is None
+        row = Account.query.filter_by(plaid_account_id='acc-inv').first()
+        assert row.vested_value is None
+        assert row.unvested_value is None
+
+
+def test_refresh_investments_clamps_negative_unvested(app):
+    """A stale institution_price must not produce a negative unvested amount."""
+    inst_id = _make_institution(app)
+    with app.app_context():
+        _upsert_accounts(inst_id, [_mock_account('acc-inv', type_='investment',
+                                                 subtype='brokerage')])
+        db.session.commit()
+
+        client = MagicMock()
+        client.get_investment_holdings.return_value = [
+            _mock_holding('acc-inv', institution_value=100.00, vested_value=150.00),
+        ]
+        inst = db.session.get(Institution, inst_id)
+        err = _refresh_investments(client, inst)
+        db.session.commit()
+
+        assert err is None
+        row = Account.query.filter_by(plaid_account_id='acc-inv').first()
+        assert row.vested_value == Decimal('150.00')
+        assert row.unvested_value == Decimal('0')
+
+
+@pytest.mark.parametrize('error_code', [
+    'ADDITIONAL_CONSENT_REQUIRED',
+    'PRODUCTS_NOT_SUPPORTED',
+    'NO_INVESTMENT_ACCOUNTS',
+    'NO_ACCOUNTS',
+])
+@patch('app.sync.PlaidClient')
+def test_sync_ignores_benign_investment_error(MockPlaidClient, app, error_code):
+    """A never-consented or investment-free Item must not spam the SyncLog."""
+    import json
+    import plaid
+
+    inst_id = _make_institution(app)
+    with app.app_context():
+        mock_client = MagicMock()
+        mock_client.sync_transactions.return_value = (
+            [_mock_txn('txn-new')], [], [], 'cursor-x', [_mock_account('acc-001')],
+        )
+        mock_client.get_balances.return_value = []
+        mock_client.get_liabilities.return_value = None
+        api_exc = plaid.ApiException(status=400)
+        api_exc.body = json.dumps({
+            'error_code': error_code, 'error_message': 'no investments',
+        })
+        mock_client.get_investment_holdings.side_effect = api_exc
+        MockPlaidClient.return_value = mock_client
+
+        sync_all_institutions()
+
+        log = SyncLog.query.first()
+        assert log.error is None  # benign — not annotated
+        assert Transaction.query.count() == 1  # sync did not abort
+        inst = db.session.get(Institution, inst_id)
+        assert inst.status == 'active'
+
+
+@patch('app.sync.PlaidClient')
+def test_sync_logs_unexpected_investment_error(MockPlaidClient, app):
+    """An unexpected holdings failure is recorded on the SyncLog, non-fatally."""
+    import json
+    import plaid
+
+    inst_id = _make_institution(app)
+    with app.app_context():
+        mock_client = MagicMock()
+        mock_client.sync_transactions.return_value = (
+            [_mock_txn('txn-new')], [], [], 'cursor-x', [_mock_account('acc-001')],
+        )
+        mock_client.get_balances.return_value = []
+        mock_client.get_liabilities.return_value = None
+        api_exc = plaid.ApiException(status=429)
+        api_exc.body = json.dumps(
+            {'error_code': 'RATE_LIMIT_EXCEEDED', 'error_message': 'slow down'}
+        )
+        mock_client.get_investment_holdings.side_effect = api_exc
+        MockPlaidClient.return_value = mock_client
+
+        sync_all_institutions()
+
+        assert Transaction.query.count() == 1  # sync did not abort
+        log = SyncLog.query.first()
+        assert log.error is not None
+        assert 'investment refresh failed' in log.error
+        assert 'RATE_LIMIT_EXCEEDED' in log.error
+        inst = db.session.get(Institution, inst_id)
+        assert inst.status == 'active'

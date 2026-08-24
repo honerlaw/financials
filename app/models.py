@@ -60,6 +60,14 @@ class Account(db.Model):
     next_payment_due_date = db.Column(db.Date, nullable=True)
     last_statement_balance = db.Column(db.Numeric(12, 2), nullable=True)
     minimum_payment_amount = db.Column(db.Numeric(12, 2), nullable=True)
+    # Equity-compensation totals, populated from Plaid's
+    # /investments/holdings/get. Null unless the account holds equity comp the
+    # institution reports a vested figure for (so: null for depository
+    # accounts, for plain brokerage accounts, and for any Item not consented to
+    # the `investments` product). See
+    # .minerva/knowledge/021-decision-plaid-vested-value-piggyback-on-sync.md.
+    vested_value = db.Column(db.Numeric(12, 2), nullable=True)
+    unvested_value = db.Column(db.Numeric(12, 2), nullable=True)
     last_synced_at = db.Column(db.DateTime(timezone=True), nullable=True)
     created_at = db.Column(db.DateTime(timezone=True), default=_utcnow, nullable=False)
 

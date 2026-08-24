@@ -4,27 +4,27 @@
 {% block content %}
 <div class="chat-shell">
   {% if not api_key_set %}
-    <div class="alert alert-warning rounded-0 mb-0 border-0 border-bottom">
+    <div class="alert alert-warn">
       Set <code>OPENROUTER_API_KEY</code> in the environment to enable chat.
     </div>
   {% endif %}
   <div class="chat-header">
-    <span class="fw-semibold">Chat</span>
-    <div class="d-flex align-items-center gap-2">
-      <select id="model-select" class="form-select form-select-sm" style="width: auto;" {% if not api_key_set %}disabled{% endif %}>
+    <span class="strong small">Chat</span>
+    <div class="row gap-2">
+      <select id="model-select" class="select" {% if not api_key_set %}disabled{% endif %}>
         {% for slug, label in models %}
           <option value="{{ slug }}" {% if slug == default_model %}selected{% endif %}>{{ label }}</option>
         {% endfor %}
       </select>
-      <button id="clear-chat" class="btn btn-sm btn-outline-secondary" type="button">Clear</button>
+      <button id="clear-chat" class="btn btn-sm" type="button">Clear</button>
     </div>
   </div>
   <div id="messages" class="chat-messages"></div>
   <div class="chat-footer">
     <div class="chat-inner">
-      <div id="chips" class="d-flex flex-wrap gap-2 mb-2"></div>
-      <form id="chat-form" class="d-flex gap-2">
-        <input id="chat-input" class="form-control" placeholder="Ask about your finances…" autocomplete="off" {% if not api_key_set %}disabled{% endif %}>
+      <div id="chips" class="row wrap gap-2 mb-2"></div>
+      <form id="chat-form" class="row gap-2">
+        <input id="chat-input" class="field grow" placeholder="Ask about your finances…" autocomplete="off" {% if not api_key_set %}disabled{% endif %}>
         <button class="btn btn-primary" type="submit" {% if not api_key_set %}disabled{% endif %}>Send</button>
       </form>
     </div>

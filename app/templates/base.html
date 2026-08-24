@@ -3,38 +3,37 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="light dark">
   <title>Financials</title>
-  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-  <style>
-    body { background: #f8fafc; }
-    .navbar-brand { color: #60a5fa !important; font-weight: 700; }
-  </style>
+  <link href="{{ url_for('static', filename='app.css') }}" rel="stylesheet">
 </head>
 <body class="{% block body_class %}{% endblock %}">
 {% if session.get('authenticated') %}
-<nav class="navbar navbar-dark bg-dark px-3">
-  <a class="navbar-brand" href="/">Financials</a>
-  <div class="d-flex align-items-center gap-3">
-    <a href="/" class="text-secondary text-decoration-none">Transactions</a>
-    <a href="/subscriptions" class="text-secondary text-decoration-none">Subscriptions</a>
-    <a href="/bills" class="text-secondary text-decoration-none">Bills</a>
-    <a href="/chat" class="text-secondary text-decoration-none">Chat</a>
-    <small id="sync-label" class="text-secondary"></small>
-    <button id="sync-btn" class="btn btn-sm btn-primary" onclick="triggerSync(this)">Sync now</button>
-    <a href="/settings" class="text-secondary text-decoration-none fs-5">⚙</a>
+<nav class="nav">
+  <a class="nav-brand" href="/">Financials</a>
+  <div class="nav-links">
+    <a href="/" class="nav-link{% if request.path == '/' %} is-active{% endif %}">Transactions</a>
+    <a href="/subscriptions" class="nav-link{% if request.path == '/subscriptions' %} is-active{% endif %}">Subscriptions</a>
+    <a href="/bills" class="nav-link{% if request.path == '/bills' %} is-active{% endif %}">Bills</a>
+    <a href="/chat" class="nav-link{% if request.path == '/chat' %} is-active{% endif %}">Chat</a>
+  </div>
+  <div class="nav-right">
+    <small id="sync-label" class="nav-status muted xs"></small>
+    <button id="sync-btn" class="btn btn-sm" onclick="triggerSync(this)">Sync now</button>
+    <a href="/settings" class="nav-icon" title="Settings" aria-label="Settings">⚙</a>
   </div>
 </nav>
 {% endif %}
 {% if login_required_institutions %}
-<div class="alert alert-warning border-0 rounded-0 mb-0 px-4 py-3" role="alert">
-  <div class="d-flex align-items-center flex-wrap gap-2">
+<div class="alert alert-warn" role="alert">
+  <div class="row wrap gap-2">
     <strong>⚠ Reconnection needed.</strong>
     <span>These accounts have stopped syncing and need to be re-authenticated —
       transactions are not being pulled until you reconnect:</span>
   </div>
-  <div class="d-flex flex-wrap gap-2 mt-2">
+  <div class="row wrap gap-2 mt-1">
     {% for inst in login_required_institutions %}
-    <button class="btn btn-sm btn-warning fw-medium"
+    <button class="btn btn-sm btn-warn"
             onclick="reconnectInstitution({{ inst.id }}, this)">
       Reconnect {{ inst.name }}
     </button>
@@ -42,10 +41,9 @@
   </div>
 </div>
 {% endif %}
-<div class="{% block container_class %}container-fluid py-4 px-4{% endblock %}">
+<div class="{% block container_class %}page{% endblock %}">
   {% block content %}{% endblock %}
 </div>
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 <script>
 async function triggerSync(btn) {
   btn.disabled = true;

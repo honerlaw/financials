@@ -1,194 +1,196 @@
 {% extends 'base.html' %}
 {% block content %}
-<div class="card shadow-sm mb-3">
+<div class="card mb-4">
   <div class="card-body">
-    <div class="d-flex justify-content-between align-items-baseline mb-3 flex-wrap gap-2">
-      <h2 class="h6 fw-bold mb-0">Spending · {{ spending_month_label }}</h2>
-      <div class="d-flex align-items-center gap-2">
-        <span class="text-muted small">Weekly budget ${{ "%.0f"|format(weekly_budget) }}</span>
+    <div class="row-b between wrap gap-3 mb-4">
+      <div>
+        <h1 class="eyebrow mb-2">Spending · {{ spending_month_label }}</h1>
+        {# "Total" and the figure stay in one text node deliberately: the
+           institution-filter test probes for the contiguous string, and
+           splitting it across elements to style the label would break that
+           probe without changing what the page says. #}
+        <div class="amount amount-xl">Total ${{ "{:,.2f}".format(month_total) }}</div>
+        <div class="small muted">Weekly budget ${{ "{:,.0f}".format(weekly_budget) }}</div>
+      </div>
+      <div class="row gap-2">
         {# Sends the same message the 7am job sends. Disabled up front when the
            Twilio config is incomplete, rather than only failing on press. #}
-        <button id="digest-btn" class="btn btn-sm btn-outline-secondary"
+        <button id="digest-btn" class="btn btn-sm"
                 onclick="sendDigest(this)"
                 {% if not sms_configured %}disabled
                 title="Set the Twilio credentials and BUDGET_ALERT_RECIPIENTS to enable"
                 {% else %}title="Text me the daily digest now"{% endif %}>
           Text me this
         </button>
-        <span id="digest-status" class="small text-muted"></span>
+        <span id="digest-status" class="small muted"></span>
       </div>
     </div>
 
-    <div class="row row-cols-2 row-cols-md-3 row-cols-xl-5 g-2 mb-3">
+    <div class="tiles mb-4">
       {% for wk in budget_weeks %}
       {% set wk_iso = wk.week_start.strftime('%Y-%m-%d') %}
-      <div class="col">
-        <div class="border rounded p-2 h-100 {% if wk.is_current %}border-primary border-2 bg-primary-subtle{% endif %}{% if selected_start == wk_iso %} border-primary border-2 shadow bg-primary-subtle{% endif %}"
-             style="cursor: pointer;" title="Show this week's transactions"
-             onclick="selectWindow('{{ wk_iso }}', 7)">
-          <div class="d-flex justify-content-between align-items-baseline gap-1">
-            <span class="small fw-semibold text-nowrap">{{ wk.label }}</span>
-            {% if wk.is_current %}<span class="badge bg-primary">This week</span>{% endif %}
-          </div>
-          <div class="fw-bold mt-1">
-            ${{ "%.0f"|format(wk.spent) }}<span class="text-muted small fw-normal"> / ${{ "%.0f"|format(wk.budget) }}</span>
-          </div>
-          <div class="progress mt-1" style="height: 6px;" role="progressbar"
-               aria-valuenow="{{ wk.pct }}" aria-valuemin="0" aria-valuemax="100">
-            <div class="progress-bar {% if wk.over %}bg-danger{% elif wk.pct >= 80 %}bg-warning{% else %}bg-success{% endif %}"
-                 style="width: {{ 100 if wk.pct > 100 else wk.pct }}%;"></div>
-          </div>
-          <div class="small mt-1 {% if wk.over %}text-danger{% else %}text-muted{% endif %}">
-            {% if wk.over %}${{ "%.0f"|format(-wk.remaining) }} over{% else %}${{ "%.0f"|format(wk.remaining) }} left{% endif %}
-          </div>
+      <div class="tile{% if wk.is_current %} is-current{% endif %}{% if selected_start == wk_iso %} is-selected{% endif %}"
+           role="button" tabindex="0"
+           aria-label="Show transactions for {{ wk.label }}"
+           onclick="selectWindow('{{ wk_iso }}', 7)">
+        <div class="row-b between gap-1">
+          <span class="xs strong nowrap muted">{{ wk.label }}</span>
+          {% if wk.is_current %}<span class="badge badge-accent">This week</span>{% endif %}
+        </div>
+        <div class="amount mt-1">
+          <span class="strong">${{ "{:,.0f}".format(wk.spent) }}</span><span class="muted xs"> / ${{ "{:,.0f}".format(wk.budget) }}</span>
+        </div>
+        <div class="progress mt-1" role="progressbar"
+             aria-valuenow="{{ wk.pct }}" aria-valuemin="0" aria-valuemax="100">
+          <div style="width: {{ 100 if wk.pct > 100 else wk.pct }}%;"
+               class="{% if wk.over %}is-over{% elif wk.pct >= 80 %}is-near{% else %}is-ok{% endif %}"></div>
+        </div>
+        <div class="xs mt-1 amount {% if wk.over %}text-danger{% else %}muted{% endif %}">
+          {% if wk.over %}${{ "{:,.0f}".format(-wk.remaining) }} over{% else %}${{ "{:,.0f}".format(wk.remaining) }} left{% endif %}
         </div>
       </div>
       {% endfor %}
     </div>
 
     {% if spend_max and spend_max > 0 %}
-    <div class="d-flex align-items-end gap-1" style="height: 120px;">
+    <div class="chart">
       {% for bar in spend_bars %}
       {% set bar_iso = bar.date.strftime('%Y-%m-%d') %}
-      <div class="flex-fill d-flex flex-column justify-content-end h-100 {% if selected_start == bar_iso %}bg-primary-subtle rounded{% endif %}"
-           style="cursor: pointer;"
-           title="{{ bar.date.strftime('%b %-d') }}: ${{ '%.2f'|format(bar.total) }} — click to filter"
+      <div class="chart-col{% if selected_start == bar_iso %} is-selected{% endif %}"
+           role="button" tabindex="0"
+           title="{{ bar.date.strftime('%b %-d') }}: ${{ '{:,.2f}'.format(bar.total) }} — click to filter"
+           aria-label="{{ bar.date.strftime('%b %-d') }}: ${{ '{:,.2f}'.format(bar.total) }} — show this day"
            onclick="selectWindow('{{ bar_iso }}', 1)">
-        <div class="bg-primary rounded-top"
+        <div class="chart-bar"
              style="height: {{ bar.pct }}%;{% if bar.total > 0 %} min-height: 2px;{% endif %}"></div>
       </div>
       {% endfor %}
     </div>
-    <div class="d-flex justify-content-between text-muted small mt-1">
+    <div class="row between xs muted mt-1">
       <span>{{ spend_bars[0].date.strftime('%b %-d') }}</span>
-      <span class="fw-semibold">Total ${{ "%.2f"|format(month_total) }}</span>
       <span>{{ spend_bars[-1].date.strftime('%b %-d') }}</span>
     </div>
     {% else %}
-    <p class="text-muted small mb-0">No spending recorded this month.</p>
+    <p class="small muted">No spending recorded this month.</p>
     {% endif %}
   </div>
 </div>
 
 {% if account_totals %}
-<div class="d-flex gap-2 mb-3 overflow-auto pb-1">
+<div class="strip mb-4">
   {% for row in account_totals %}
-  <div class="card shadow-sm flex-shrink-0" style="min-width: 240px;">
-    <div class="card-body py-2 px-3">
-      <div class="text-muted small text-truncate">{{ row.institution_name }}</div>
-      <div class="fw-semibold text-truncate">
-        {{ row.account_name }}{% if row.mask %} <span class="text-muted">····{{ row.mask }}</span>{% endif %}
-      </div>
-      <div class="fs-5 fw-bold mt-1">
-        {% if row.current_balance is none %}
-          <span class="text-muted">—</span>
-        {% else %}
-          ${{ "%.2f"|format(row.current_balance) }}
-        {% endif %}
-      </div>
-      <div class="d-flex justify-content-between align-items-baseline small">
-        <span class="{% if row.total > 0 %}text-danger{% elif row.total < 0 %}text-success{% else %}text-muted{% endif %}">
-          This filter: {% if row.total > 0 %}-{% elif row.total < 0 %}+{% endif %}${{ "%.2f"|format(row.total|abs) }}
-        </span>
-        <span class="text-muted">{{ row.txn_count }} txn{% if row.txn_count != 1 %}s{% endif %}</span>
-      </div>
-      {% if row.next_payment_due_date is not none or row.last_statement_balance is not none %}
-      {% set overdue = row.next_payment_due_date is not none and row.next_payment_due_date < today %}
-      <div class="d-flex justify-content-between align-items-baseline small mt-1 pt-1 border-top">
-        <span class="{% if overdue %}text-danger fw-semibold{% else %}text-muted{% endif %}">
-          {% if row.next_payment_due_date is not none %}
-            {% if overdue %}Overdue {{ row.next_payment_due_date.strftime('%b %-d') }}{% else %}Due {{ row.next_payment_due_date.strftime('%b %-d') }}{% endif %}
-          {% else %}Balance due{% endif %}
-        </span>
-        <span class="fw-semibold {% if overdue %}text-danger{% endif %}">
-          {% if row.last_statement_balance is not none %}
-            ${{ "%.2f"|format(row.last_statement_balance) }}
-          {% elif row.minimum_payment_amount is not none %}
-            ${{ "%.2f"|format(row.minimum_payment_amount) }}
-          {% else %}—{% endif %}
-        </span>
-      </div>
-      {% if row.last_statement_balance is not none and row.minimum_payment_amount is not none %}
-      <div class="text-muted text-end" style="font-size: 0.72rem;">min ${{ "%.2f"|format(row.minimum_payment_amount) }} due</div>
-      {% endif %}
-      {% endif %}
-      {% if row.vested_value is not none or row.unvested_value is not none %}
-      <div class="d-flex justify-content-between align-items-baseline small mt-1 pt-1 border-top">
-        <span class="text-muted">Vested</span>
-        <span class="fw-semibold">
-          {% if row.vested_value is not none %}${{ "%.2f"|format(row.vested_value) }}{% else %}—{% endif %}
-        </span>
-      </div>
-      <div class="d-flex justify-content-between align-items-baseline small">
-        <span class="text-muted">Unvested</span>
-        <span class="text-muted">
-          {% if row.unvested_value is not none %}${{ "%.2f"|format(row.unvested_value) }}{% else %}—{% endif %}
-        </span>
-      </div>
+  <div class="acct">
+    <div class="xs muted truncate">{{ row.institution_name }}</div>
+    <div class="medium truncate">
+      {{ row.account_name }}{% if row.mask %} <span class="muted">····{{ row.mask }}</span>{% endif %}
+    </div>
+    <div class="amount amount-lg mt-1">
+      {% if row.current_balance is none %}
+        <span class="muted">—</span>
+      {% else %}
+        ${{ "{:,.2f}".format(row.current_balance) }}
       {% endif %}
     </div>
+    <div class="acct-row">
+      <span class="amount {% if row.total > 0 %}text-danger{% elif row.total < 0 %}text-success{% else %}muted{% endif %}">
+        This filter: {% if row.total > 0 %}-{% elif row.total < 0 %}+{% endif %}${{ "{:,.2f}".format(row.total|abs) }}
+      </span>
+      <span class="muted xs nowrap">{{ row.txn_count }} txn{% if row.txn_count != 1 %}s{% endif %}</span>
+    </div>
+    {% if row.next_payment_due_date is not none or row.last_statement_balance is not none %}
+    {% set overdue = row.next_payment_due_date is not none and row.next_payment_due_date < today %}
+    <div class="acct-row acct-divider">
+      <span class="{% if overdue %}text-danger strong{% else %}muted{% endif %}">
+        {% if row.next_payment_due_date is not none %}
+          {% if overdue %}Overdue {{ row.next_payment_due_date.strftime('%b %-d') }}{% else %}Due {{ row.next_payment_due_date.strftime('%b %-d') }}{% endif %}
+        {% else %}Balance due{% endif %}
+      </span>
+      <span class="amount strong {% if overdue %}text-danger{% endif %}">
+        {% if row.last_statement_balance is not none %}
+          ${{ "{:,.2f}".format(row.last_statement_balance) }}
+        {% elif row.minimum_payment_amount is not none %}
+          ${{ "{:,.2f}".format(row.minimum_payment_amount) }}
+        {% else %}—{% endif %}
+      </span>
+    </div>
+    {% if row.last_statement_balance is not none and row.minimum_payment_amount is not none %}
+    <div class="xs muted right amount">min ${{ "{:,.2f}".format(row.minimum_payment_amount) }} due</div>
+    {% endif %}
+    {% endif %}
+    {# Vested/unvested render ONLY when non-null. A null means the account has no
+       vesting schedule; a $0.00 row would assert that nothing has vested, which
+       is a different and false statement. See knowledge 021. #}
+    {% if row.vested_value is not none or row.unvested_value is not none %}
+    <div class="acct-row acct-divider">
+      <span class="muted">Vested</span>
+      <span class="amount strong">
+        {% if row.vested_value is not none %}${{ "{:,.2f}".format(row.vested_value) }}{% else %}—{% endif %}
+      </span>
+    </div>
+    <div class="acct-row">
+      <span class="muted">Unvested</span>
+      <span class="amount muted">
+        {% if row.unvested_value is not none %}${{ "{:,.2f}".format(row.unvested_value) }}{% else %}—{% endif %}
+      </span>
+    </div>
+    {% endif %}
   </div>
   {% endfor %}
 </div>
 {% endif %}
 
-<div class="d-flex gap-2 mb-3 flex-wrap">
-  <select id="inst-filter" class="form-select form-select-sm w-auto" onchange="applyFilter()">
+<div class="row wrap gap-2 mb-3">
+  <select id="inst-filter" class="select" onchange="applyFilter()">
     <option value="">All institutions</option>
     {% for inst in institutions %}
     <option value="{{ inst.id }}"
       {% if selected_institution == inst.id %}selected{% endif %}>{{ inst.name }}</option>
     {% endfor %}
   </select>
-  <input type="month" id="month-filter" class="form-control form-control-sm w-auto"
+  <input type="month" id="month-filter" class="field field-auto"
          value="{{ selected_month }}" onchange="applyFilter()">
   {% if selected_institution or selected_month %}
-  <a href="/" class="btn btn-sm btn-outline-secondary">Clear</a>
+  <a href="/" class="btn btn-sm">Clear</a>
+  {% endif %}
+  {% if window_active %}
+  <span class="badge badge-accent">Showing {{ window_label }}</span>
+  <button class="btn btn-sm btn-ghost" onclick="clearWindow()">Clear window</button>
   {% endif %}
 </div>
 
-{% if window_active %}
-<div class="d-flex align-items-center gap-2 mb-2 flex-wrap">
-  <span class="badge bg-primary-subtle text-primary-emphasis border border-primary-subtle">
-    Showing {{ window_label }}
-  </span>
-  <button class="btn btn-sm btn-outline-secondary py-0" onclick="clearWindow()">Clear window</button>
-</div>
-{% endif %}
-
-<div class="card shadow-sm">
-  <div class="table-responsive">
-    <table class="table table-hover align-middle mb-0">
-      <thead class="table-light">
+<div class="card">
+  <div class="table-wrap">
+    <table class="table">
+      <thead>
         <tr>
           <th>Date</th><th>Description</th><th>Institution</th>
-          <th class="text-end">Amount</th>
+          <th class="right">Amount</th>
         </tr>
       </thead>
       <tbody>
       {% if week_groups %}
         {% for label, group in week_groups %}
-        <tr class="table-secondary">
-          <td colspan="4" class="small fw-semibold text-muted py-1 px-3">{{ label }}</td>
+        <tr class="section">
+          <td colspan="4">{{ label }}</td>
         </tr>
         {% for txn in group %}
         <tr>
-          <td class="text-muted small text-nowrap">{{ txn.date.strftime('%b %d, %Y') }}</td>
+          <td class="muted xs nowrap">{{ txn.date.strftime('%b %d, %Y') }}</td>
           <td>
             {{ txn.description }}
             {% if txn.merchant_name and txn.merchant_name != txn.description %}
-            <span class="text-muted small ms-1">· {{ txn.merchant_name }}</span>
+            <span class="muted xs">· {{ txn.merchant_name }}</span>
             {% endif %}
           </td>
-          <td><span class="badge bg-primary">{{ txn.institution.name }}</span></td>
-          <td class="text-end text-nowrap {% if txn.amount > 0 %}text-danger{% else %}text-success{% endif %}">
-            {% if txn.amount > 0 %}-{% else %}+{% endif %}${{ "%.2f"|format(txn.amount|abs) }}
+          <td><span class="badge badge-accent">{{ txn.institution.name }}</span></td>
+          <td class="right nowrap amount medium {% if txn.amount > 0 %}text-danger{% else %}text-success{% endif %}">
+            {% if txn.amount > 0 %}-{% else %}+{% endif %}${{ "{:,.2f}".format(txn.amount|abs) }}
           </td>
         </tr>
         {% endfor %}
         {% endfor %}
       {% else %}
-      <tr><td colspan="4" class="text-center text-muted py-5">No transactions found.</td></tr>
+      <tr><td colspan="4" class="empty">No transactions found.</td></tr>
       {% endif %}
       </tbody>
     </table>
@@ -199,7 +201,7 @@
      data-has-next="{{ 'true' if transactions.has_next else 'false' }}"
      data-next-page="{{ transactions.next_num or 2 }}">
 </div>
-<p id="load-status" class="text-center text-muted small mt-2" aria-live="polite"></p>
+<p id="load-status" class="center muted small mt-1" aria-live="polite"></p>
 {% endblock %}
 
 {% block scripts %}
@@ -210,7 +212,7 @@ async function sendDigest(btn) {
   btn.disabled = true;
   btn.textContent = 'Sending…';
   status.textContent = '';
-  status.className = 'small text-muted';
+  status.className = 'small muted';
   try {
     const res = await fetch('/api/digest/send', { method: 'POST' });
     // An expired session 302s to /login and the browser follows it
@@ -234,7 +236,7 @@ async function sendDigest(btn) {
       return;
     }
     const n = data.sent.length;
-    status.className = data.failed.length ? 'small text-warning' : 'small text-success';
+    status.className = data.failed.length ? 'small text-warn' : 'small text-success';
     status.textContent = `Sent to ${n} ${n === 1 ? 'number' : 'numbers'}`
       + (data.failed.length ? ` · ${data.failed.length} failed` : '');
   } catch (e) {
@@ -247,6 +249,17 @@ async function sendDigest(btn) {
 }
 </script>
 <script>
+// The budget tiles and chart bars carry onclick handlers on divs. Giving them
+// role=button + tabindex makes them focusable; this makes them *operable*, since
+// a div does not synthesise a click from Enter/Space the way a button does.
+document.addEventListener('keydown', function (e) {
+  if (e.key !== 'Enter' && e.key !== ' ') return;
+  const el = e.target.closest('[role="button"][tabindex]');
+  if (!el) return;
+  e.preventDefault();
+  el.click();
+});
+
 function applyFilter() {
   const inst = document.getElementById('inst-filter').value;
   const month = document.getElementById('month-filter').value;
@@ -296,26 +309,29 @@ function clearWindow() {
     const tr = document.createElement('tr');
 
     const tdDate = document.createElement('td');
-    tdDate.className = 'text-muted small text-nowrap';
+    tdDate.className = 'muted xs nowrap';
     tdDate.textContent = txn.date;
 
     const tdDesc = document.createElement('td');
     tdDesc.textContent = txn.description;
     if (txn.merchant_name) {
       const span = document.createElement('span');
-      span.className = 'text-muted small ms-1';
+      span.className = 'muted xs';
       span.textContent = '· ' + txn.merchant_name;
       tdDesc.appendChild(span);
     }
 
     const tdInst = document.createElement('td');
     const badge = document.createElement('span');
-    badge.className = 'badge bg-primary';
+    badge.className = 'badge badge-accent';
     badge.textContent = txn.institution_name;
     tdInst.appendChild(badge);
 
+    // `txn.amount_class` is 'text-danger' | 'text-success', emitted server-side
+    // by app/routes.py:261. Those two class names are defined in app.css purely
+    // to keep this payload working — do not rename either side independently.
     const tdAmount = document.createElement('td');
-    tdAmount.className = 'text-end text-nowrap ' + txn.amount_class;
+    tdAmount.className = 'right nowrap amount medium ' + txn.amount_class;
     tdAmount.textContent = txn.amount_sign + '$' + txn.amount;
 
     tr.appendChild(tdDate);

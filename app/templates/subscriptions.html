@@ -1,56 +1,61 @@
 {% extends 'base.html' %}
 {% block content %}
-<div class="d-flex align-items-baseline gap-3 mb-3">
-  <h4 class="mb-0">Subscriptions</h4>
-  <span class="text-muted small">
+<div class="row-b wrap gap-3 mb-4">
+  <h1 class="amount" style="font-size: var(--fs-lg);">Subscriptions</h1>
+  <span class="small muted">
     {{ active_count }} active{% if inactive_count %} · {{ inactive_count }} inactive{% endif %}
   </span>
 </div>
 
-<div class="card shadow-sm">
-  <div class="table-responsive">
-    <table class="table table-hover align-middle mb-0">
-      <thead class="table-light">
+<div class="card">
+  <div class="table-wrap">
+    <table class="table">
+      <thead>
         <tr>
           <th>Merchant</th>
           <th>Cadence</th>
-          <th class="text-end">Typical amount</th>
+          <th class="right">Typical amount</th>
           <th>Last charge</th>
           <th>Next expected</th>
-          <th class="text-end">Charges</th>
+          <th class="right">Charges</th>
           <th>Accounts</th>
           <th>Status</th>
         </tr>
       </thead>
       <tbody>
+      {# An inactive stream is dimmed and carries a NEUTRAL badge, never a
+         danger-coloured one: a cancelled subscription is not an outstanding
+         obligation. See knowledge 005. #}
       {% for s in streams %}
-      <tr {% if not s.active %}class="opacity-50"{% endif %}>
-        <td class="fw-semibold">{{ s.name }}</td>
-        <td class="text-capitalize text-muted">{{ s.cadence }}</td>
-        <td class="text-end text-nowrap {% if s.is_inflow %}text-success{% else %}text-danger{% endif %}">
-          {% if s.is_inflow %}+{% else %}-{% endif %}${{ "%.2f"|format(s.amount|abs) }}
-          {% if s.varies %}<span class="badge bg-warning text-dark ms-1">varies</span>{% endif %}
+      <tr {% if not s.active %}class="is-lapsed"{% endif %}>
+        <td class="medium">{{ s.name }}</td>
+        <td class="cap muted">{{ s.cadence }}</td>
+        <td class="right nowrap amount medium {% if s.is_inflow %}text-success{% else %}text-danger{% endif %}">
+          {% if s.is_inflow %}+{% else %}-{% endif %}${{ "{:,.2f}".format(s.amount|abs) }}
+          {% if s.varies %}<span class="badge badge-warn">varies</span>{% endif %}
         </td>
-        <td class="text-muted small text-nowrap">{{ s.last_date.strftime('%b %d, %Y') }}</td>
-        <td class="text-muted small text-nowrap">
+        <td class="muted xs nowrap">{{ s.last_date.strftime('%b %d, %Y') }}</td>
+        <td class="muted xs nowrap">
           {% if s.active %}{{ s.next_date.strftime('%b %d, %Y') }}{% else %}—{% endif %}
         </td>
-        <td class="text-end text-muted">{{ s.count }}</td>
-        <td class="small">
+        <td class="right muted amount">{{ s.count }}</td>
+        <td>
+          <span class="row wrap gap-1">
           {% for label in s.accounts %}
-          <span class="badge bg-primary fw-normal">{{ label }}</span>
+          <span class="badge badge-accent">{{ label }}</span>
           {% endfor %}
+          </span>
         </td>
         <td>
           {% if s.active %}
-          <span class="badge bg-success">Active</span>
+          <span class="badge badge-success">Active</span>
           {% else %}
-          <span class="badge bg-secondary">Inactive</span>
+          <span class="badge">Inactive</span>
           {% endif %}
         </td>
       </tr>
       {% else %}
-      <tr><td colspan="8" class="text-center text-muted py-5">No recurring transactions detected yet.</td></tr>
+      <tr><td colspan="8" class="empty">No recurring transactions detected yet.</td></tr>
       {% endfor %}
       </tbody>
     </table>

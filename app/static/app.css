@@ -1,0 +1,498 @@
+/* ============================================================================
+   Financials — design system
+   ----------------------------------------------------------------------------
+   Hand-authored, no build step. Replaces Bootstrap 5.
+
+   Two token sets: light is the default, dark activates on the OS preference.
+   Everything below the token block consumes tokens only — no literal colours in
+   component rules, so a theme change is a token edit.
+
+   NOTE: `.text-danger` / `.text-success` (bottom of this file) are load-bearing
+   NAMES, not styling conveniences. app/routes.py:261 emits them as strings into
+   the /api/transactions JSON payload and the infinite-scroll script applies them
+   verbatim to appended rows. Renaming them here silently breaks the colour of
+   every lazy-loaded transaction. See the work unit's proposal.
+   ========================================================================== */
+
+:root {
+  /* Surfaces ------------------------------------------------------------- */
+  --bg: #f6f7f9;
+  --surface: #ffffff;
+  --surface-2: #f2f4f7;
+  --surface-3: #eaecf0;
+  --border: #e4e7ec;
+  --border-strong: #d0d5dd;
+
+  /* Text ----------------------------------------------------------------- */
+  --text: #101828;
+  /* Two text tiers only. A third, lighter tier was tried (#98a2b3) and removed:
+     small text on --surface-2 needs >=4.5:1 for WCAG AA, and at that background
+     nothing lighter than --text-muted clears it — so a "subtle" tier could only
+     have existed by failing contrast. Bootstrap's .text-muted, which this
+     replaced, measured 4.69:1; the discarded token measured 2.34:1. */
+  --text-muted: #667085;
+
+  /* Accents -------------------------------------------------------------- */
+  --accent: #2563eb;
+  --accent-text: #1d4ed8;
+  --accent-bg: #eff4ff;
+  --accent-border: #c7d7fe;
+
+  /* Semantic ------------------------------------------------------------- */
+  --pos: #067647;
+  --pos-bg: #ecfdf3;
+  --pos-border: #abefc6;
+  --neg: #b42318;
+  --neg-bg: #fef3f2;
+  --neg-border: #fecdca;
+  --warn: #93370d;
+  --warn-bg: #fffaeb;
+  --warn-border: #fedf89;
+
+  /* Type scale ----------------------------------------------------------- */
+  --fs-xs: 0.75rem;
+  --fs-sm: 0.8125rem;
+  --fs-base: 0.9375rem;
+  --fs-md: 1.0625rem;
+  --fs-lg: 1.375rem;
+  --fs-xl: 1.875rem;
+
+  /* Spacing -------------------------------------------------------------- */
+  --sp-1: 0.25rem;
+  --sp-2: 0.5rem;
+  --sp-3: 0.75rem;
+  --sp-4: 1rem;
+  --sp-5: 1.5rem;
+  --sp-6: 2rem;
+
+  /* Radii + shadow ------------------------------------------------------- */
+  --r-sm: 6px;
+  --r-md: 10px;
+  --r-lg: 14px;
+  --r-pill: 999px;
+  --shadow-sm: 0 1px 2px rgb(16 24 40 / 0.05);
+
+  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica,
+          Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0c0e12;
+    --surface: #14171c;
+    --surface-2: #1a1e25;
+    --surface-3: #232830;
+    --border: #23272f;
+    --border-strong: #333944;
+
+    --text: #edeff2;
+    --text-muted: #98a2b3;
+
+    --accent: #5b8def;
+    --accent-text: #84adf7;
+    --accent-bg: #131c2e;
+    --accent-border: #23375c;
+
+    --pos: #47c97e;
+    --pos-bg: #0d1f16;
+    --pos-border: #1d4430;
+    --neg: #f97066;
+    --neg-bg: #24110f;
+    --neg-border: #55211d;
+    --warn: #f2b23c;
+    --warn-bg: #241a09;
+    --warn-border: #4d3a12;
+
+    --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.40);
+  }
+}
+
+/* ── Reset / base ─────────────────────────────────────────────────────────── */
+
+*, *::before, *::after { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: var(--font);
+  font-size: var(--fs-base);
+  line-height: 1.5;
+  color: var(--text);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+}
+
+h1, h2, h3, h4, h5, h6 { margin: 0; font-weight: 600; line-height: 1.3; }
+p { margin: 0; }
+a { color: var(--accent-text); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--r-sm);
+}
+
+/* ── Layout ───────────────────────────────────────────────────────────────── */
+
+.page { padding: var(--sp-5) var(--sp-5) var(--sp-6); max-width: 1600px; margin: 0 auto; }
+@media (max-width: 640px) { .page { padding: var(--sp-4) var(--sp-3) var(--sp-5); } }
+
+.stack   { display: flex; flex-direction: column; }
+.row     { display: flex; align-items: center; }
+.row-b   { display: flex; align-items: baseline; }
+.between { justify-content: space-between; }
+.wrap    { flex-wrap: wrap; }
+.grow    { flex: 1 1 auto; min-width: 0; }
+.gap-1 { gap: var(--sp-1); } .gap-2 { gap: var(--sp-2); }
+.gap-3 { gap: var(--sp-3); }
+.mb-2 { margin-bottom: var(--sp-2); } .mb-3 { margin-bottom: var(--sp-3); }
+.mb-4 { margin-bottom: var(--sp-4); } .mb-5 { margin-bottom: var(--sp-5); }
+.mt-1 { margin-top: var(--sp-1); }
+
+/* ── Navbar ───────────────────────────────────────────────────────────────── */
+/* No collapse/hamburger: the previous navbar had none to inherit, and at this
+   link count wrapping beats a disclosure widget. Links stay reachable at 320px. */
+
+.nav {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-2) var(--sp-4);
+  padding: var(--sp-3) var(--sp-5);
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+.nav-brand {
+  font-weight: 700;
+  font-size: var(--fs-md);
+  color: var(--text);
+  letter-spacing: -0.01em;
+  margin-right: var(--sp-2);
+}
+.nav-brand:hover { text-decoration: none; }
+.nav-links { display: flex; align-items: center; gap: var(--sp-1); flex-wrap: wrap; }
+.nav-link {
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  padding: var(--sp-1) var(--sp-2);
+  border-radius: var(--r-sm);
+}
+.nav-link:hover { color: var(--text); background: var(--surface-2); text-decoration: none; }
+.nav-link.is-active { color: var(--text); background: var(--surface-2); }
+.nav-right { display: flex; align-items: center; gap: var(--sp-2); margin-left: auto; }
+.nav-icon { font-size: var(--fs-md); color: var(--text-muted); line-height: 1; }
+.nav-icon:hover { color: var(--text); text-decoration: none; }
+@media (max-width: 640px) {
+  .nav { padding: var(--sp-3); }
+  .nav-right { margin-left: 0; width: 100%; }
+  .nav-status { display: none; }
+}
+
+/* ── Cards ────────────────────────────────────────────────────────────────── */
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+}
+.card-body { padding: var(--sp-5); }
+@media (max-width: 640px) { .card-body { padding: var(--sp-4); } }
+.card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-5);
+  border-bottom: 1px solid var(--border);
+  font-weight: 600;
+  font-size: var(--fs-sm);
+}
+
+/* Section label — the small tracked-caps heading above a data block. */
+.eyebrow {
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+/* ── Typography helpers ───────────────────────────────────────────────────── */
+
+.muted   { color: var(--text-muted); }
+.small   { font-size: var(--fs-sm); }
+.xs      { font-size: var(--fs-xs); }
+.strong  { font-weight: 600; }
+.medium  { font-weight: 500; }
+.nowrap  { white-space: nowrap; }
+.truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cap     { text-transform: capitalize; }
+.right   { text-align: right; }
+.center  { text-align: center; }
+
+/* Money. Tabular figures keep columns of amounts aligned on the decimal —
+   the single highest-value typographic choice in a finance UI. */
+.amount { font-variant-numeric: tabular-nums; font-feature-settings: "tnum"; }
+.amount-xl { font-size: var(--fs-xl); font-weight: 650; letter-spacing: -0.02em; }
+.amount-lg { font-size: var(--fs-lg); font-weight: 600; letter-spacing: -0.01em; }
+
+/* ── Buttons ──────────────────────────────────────────────────────────────── */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2);
+  padding: 0.4375rem var(--sp-3);
+  font-family: inherit;
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  line-height: 1.2;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+.btn:hover { background: var(--surface-2); }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn-sm { padding: 0.25rem var(--sp-2); font-size: var(--fs-xs); }
+.btn-block { width: 100%; }
+
+.btn-primary {
+  color: #fff;
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.btn-primary:hover { background: var(--accent-text); border-color: var(--accent-text); }
+
+.btn-danger { color: var(--neg); border-color: var(--neg-border); background: var(--neg-bg); }
+.btn-danger:hover { background: var(--neg-border); }
+
+.btn-warn { color: var(--warn); background: var(--warn-bg); border-color: var(--warn-border); }
+.btn-warn:hover { background: var(--warn-border); }
+
+.btn-accent { color: var(--accent-text); background: var(--accent-bg); border-color: var(--accent-border); }
+.btn-accent:hover { background: var(--accent-border); }
+
+.btn-ghost { border-color: transparent; background: transparent; color: var(--text-muted); }
+.btn-ghost:hover { background: var(--surface-2); color: var(--text); }
+
+/* ── Badges ───────────────────────────────────────────────────────────────── */
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.125rem var(--sp-2);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  line-height: 1.5;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.badge-accent  { background: var(--accent-bg); color: var(--accent-text); border-color: var(--accent-border); }
+.badge-success { background: var(--pos-bg);    color: var(--pos);         border-color: var(--pos-border); }
+.badge-danger  { background: var(--neg-bg);    color: var(--neg);         border-color: var(--neg-border); }
+.badge-warn    { background: var(--warn-bg);   color: var(--warn);        border-color: var(--warn-border); }
+/* Neutral is the default (.badge alone) — used for lapsed/inactive states,
+   which must read as "not applicable", never as "overdue". See knowledge 005. */
+
+/* ── Alerts ───────────────────────────────────────────────────────────────── */
+
+.alert {
+  padding: var(--sp-3) var(--sp-5);
+  font-size: var(--fs-sm);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text);
+}
+.alert-warn   { background: var(--warn-bg); border-bottom-color: var(--warn-border); color: var(--warn); }
+.alert-danger { background: var(--neg-bg);  border-color: var(--neg-border); color: var(--neg);
+                border-radius: var(--r-sm); border-width: 1px; border-style: solid; }
+
+/* ── Forms ────────────────────────────────────────────────────────────────── */
+
+.field, .select {
+  padding: 0.4375rem var(--sp-3);
+  font-family: inherit;
+  font-size: var(--fs-sm);
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-sm);
+  line-height: 1.2;
+}
+.field::placeholder { color: var(--text-muted); }
+.field:focus, .select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-bg); }
+.select {
+  appearance: none;
+  padding-right: var(--sp-6);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='none' stroke='%23667085' stroke-width='1.5' d='M3 4.5 6 7.5 9 4.5'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right var(--sp-2) center;
+}
+.field-auto { width: auto; }
+
+/* ── Tables ───────────────────────────────────────────────────────────────── */
+
+.table-wrap { overflow-x: auto; }
+.table { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); }
+.table th {
+  padding: var(--sp-2) var(--sp-4);
+  text-align: left;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+.table td {
+  padding: var(--sp-3) var(--sp-4);
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+.table tbody tr:last-child td { border-bottom: none; }
+.table tbody tr:hover { background: var(--surface-2); }
+.table-compact td { padding: var(--sp-2) var(--sp-4); }
+
+/* `.table th` sets text-align:left at specificity (0,1,1), which silently beats
+   a bare `.right` (0,1,0) — so a right-aligned numeric header needs the element
+   in the selector or the header drifts out of line with its column. */
+.table th.right { text-align: right; }
+.table td.center, .table th.center { text-align: center; }
+.table td.empty { padding: var(--sp-6) var(--sp-4); }
+
+/* Week/section divider row inside the transactions table. */
+.table tr.section > td {
+  padding: var(--sp-2) var(--sp-4);
+  background: var(--surface-2);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.table tr.section:hover > td { background: var(--surface-2); }
+
+.empty { padding: var(--sp-6) var(--sp-4); text-align: center; color: var(--text-muted); }
+
+/* Lapsed rows. Dimming is semantic — it means the stream stopped, not that it
+   is merely low-priority (knowledge 005). Kept above 0.5 so the row stays
+   readable rather than becoming decoration. */
+.is-lapsed { opacity: 0.55; }
+
+/* ── List (settings institutions) ─────────────────────────────────────────── */
+
+.list-item {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+  padding: var(--sp-3) var(--sp-5);
+  border-bottom: 1px solid var(--border);
+}
+.list-item:last-child { border-bottom: none; }
+
+/* ── Progress ─────────────────────────────────────────────────────────────── */
+
+.progress {
+  height: 5px;
+  background: var(--surface-3);
+  border-radius: var(--r-pill);
+  overflow: hidden;
+}
+.progress > span { display: block; height: 100%; border-radius: var(--r-pill); background: var(--accent); }
+.progress > span.is-over { background: var(--neg); }
+.progress > span.is-near { background: var(--warn); }
+.progress > span.is-ok   { background: var(--pos); }
+
+/* ── Tiles (weekly budget grid) ───────────────────────────────────────────── */
+
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: var(--sp-2);
+}
+.tile {
+  padding: var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  cursor: pointer;
+  transition: border-color 0.12s ease, background 0.12s ease;
+}
+.tile:hover { border-color: var(--border-strong); }
+.tile.is-current { border-color: var(--accent-border); background: var(--accent-bg); }
+.tile.is-selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+
+/* ── Account strip ────────────────────────────────────────────────────────── */
+
+.strip { display: flex; gap: var(--sp-3); overflow-x: auto; padding-bottom: var(--sp-2); }
+.acct {
+  flex: 0 0 auto;
+  min-width: 232px;
+  padding: var(--sp-4);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-sm);
+}
+/* Sub-rows on an account card (liability, vested/unvested). Each is rendered
+   ONLY when its data is non-null — a null means "not applicable", never zero.
+   See knowledge 021: a $0.00 vested row asserts nothing has vested. */
+.acct-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  font-size: var(--fs-sm);
+}
+.acct-divider { margin-top: var(--sp-2); padding-top: var(--sp-2); border-top: 1px solid var(--border); }
+
+/* ── Chart ────────────────────────────────────────────────────────────────── */
+
+.chart { display: flex; align-items: flex-end; gap: 2px; height: 110px; }
+.chart-col {
+  flex: 1 1 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  height: 100%;
+  cursor: pointer;
+  border-radius: var(--r-sm) var(--r-sm) 0 0;
+}
+.chart-col:hover { background: var(--surface-2); }
+.chart-col.is-selected { background: var(--accent-bg); }
+.chart-bar { background: var(--accent); border-radius: 3px 3px 0 0; opacity: 0.85; }
+.chart-col:hover .chart-bar { opacity: 1; }
+
+/* ── Semantic colour utilities ────────────────────────────────────────────── */
+/* `.text-danger` and `.text-success` are emitted by app/routes.py:261 into the
+   /api/transactions payload. Do not rename. */
+
+.text-danger  { color: var(--neg); }
+.text-success { color: var(--pos); }
+.text-warn    { color: var(--warn); }
+
+/* ── Login ────────────────────────────────────────────────────────────────── */
+
+.login-page {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100dvh;
+  padding: var(--sp-4);
+}
+.login-card { width: 100%; max-width: 21rem; }

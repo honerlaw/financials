@@ -1,7 +1,7 @@
 # Proposal: ui-design-system
 
 **Date**: 2026-08-24
-**Status**: Draft
+**Status**: Shipped (2026-08-24)
 
 ## Goal
 
@@ -48,6 +48,20 @@ against the new vocabulary.
 - **Theming Bootstrap in place** — rejected. Overriding Bootstrap's variables
   keeps its component geometry and still ships the framework; it gets perhaps 60%
   of the way and leaves the defaults visible.
+
+**Two text tiers, not three.** A `--text-subtle` tier was written and then
+deleted during review: it measured 2.58:1 on `--surface` and 2.34:1 on
+`--surface-2` while styling every table header, against a WCAG AA floor of 4.5:1.
+Clearing AA on `--surface-2` needs a value no lighter than `--text-muted`, so a
+lighter third tier could only have existed by failing contrast. Its 10 call sites
+use `.muted`.
+
+**One deliberate exception to "changes no behaviour".** The budget tiles and
+chart bars are `div`s carrying `onclick`, with no keyboard path — pre-existing,
+but rewritten line-for-line here, and carrying a keyboard trap through a full
+rewrite is how it becomes permanent. They gained `role="button" tabindex="0"`,
+`aria-label`s, and one delegated `keydown` listener translating Enter/Space into
+a click. Additive only; no existing interaction changed.
 
 **Hard constraint — zero `.py` file changes.** A concurrent session
 (`2026-08-24-merchant-group-index`) owns `app/routes.py`, `app/models.py`,
@@ -118,8 +132,9 @@ four hard-coded class strings inside `index.html`'s inline JS (lines 226-241).
 7. **Money is grouped and tabular.** All amounts use `{:,.2f}` / `{:,.0f}`,
    matching `notifications.py`, and render with `font-variant-numeric:
    tabular-nums`.
-8. **Both themes render.** Light is the default; dark activates on
-   `prefers-color-scheme: dark`. Every page is legible in both.
+8. **Both themes render, and both clear WCAG AA.** Light is the default; dark
+   activates on `prefers-color-scheme: dark`. Every text/background token pair
+   used for small text clears 4.5:1 in both themes.
 9. **Responsive.** All 7 pages render at 375px and 1440px with no horizontal
    overflow. The navbar needs a from-scratch small-screen answer — it currently
    has no collapse behaviour to inherit.

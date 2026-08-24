@@ -176,6 +176,12 @@ class MerchantGroup(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     canonical_key = db.Column(db.String(255), nullable=False)
     algo_version = db.Column(db.Integer, nullable=False)
+    # True when this group was opened from a merchant_entity_id. Two distinct
+    # entity ids must never merge into one group, however alike their names
+    # look: the in-memory path never compares entity groups against each other,
+    # and letting the persisted path do so makes the two disagree about which
+    # subscriptions exist.
+    from_entity = db.Column(db.Boolean, default=False, nullable=False)
     created_at = db.Column(db.DateTime(timezone=True), default=_utcnow, nullable=False)
 
 

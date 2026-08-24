@@ -30,6 +30,7 @@ def upgrade():
         sa.Column('id', sa.Integer(), nullable=False),
         sa.Column('canonical_key', sa.String(length=255), nullable=False),
         sa.Column('algo_version', sa.Integer(), nullable=False),
+        sa.Column('from_entity', sa.Boolean(), nullable=False, server_default=sa.false()),
         sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
         sa.PrimaryKeyConstraint('id'),
     )

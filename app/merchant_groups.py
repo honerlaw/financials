@@ -45,7 +45,14 @@ def backfill_missing_keys():
     """
     rows = Transaction.query.filter(Transaction.merchant_key.is_(None)).all()
     for txn in rows:
-        txn.merchant_key = grouping_key(txn) or None
+        # '' means "processed, but this row has no groupable merchant" — a
+        # purely numeric memo, or no name at all. It must be distinguishable
+        # from NULL ("never processed"), because is_index_usable() treats NULL
+        # as work outstanding: storing NULL here would make one unkeyable
+        # transaction hold the whole index hostage, sending every page load
+        # down the O(n^2) path forever. The in-memory grouper likewise drops
+        # these rows rather than grouping them.
+        txn.merchant_key = grouping_key(txn)
     return len(rows)
 
 
@@ -69,6 +76,7 @@ def _unindexed_keys():
     rows = (
         db.session.query(Transaction.merchant_key)
         .filter(Transaction.merchant_key.isnot(None))
+        .filter(Transaction.merchant_key != '')
         .filter(~Transaction.merchant_key.in_(indexed))
         .distinct()
         .all()
@@ -90,7 +98,7 @@ def _representative_name(key):
     Returns '' when the entity's transactions carry no usable name, in which
     case the caller falls back to the entity key itself.
     """
-    rows = Transaction.query.filter_by(merchant_key=key).all()
+    rows = Transaction.query.filter_by(merchant_key=key, removed=False).all()
     names = Counter(
         normalize_merchant(t.merchant_name or t.description) for t in rows
     )
@@ -98,19 +106,30 @@ def _representative_name(key):
     return names.most_common(1)[0][0] if names else ''
 
 
-def _match_name(name, canonical):
+def _match_name(name, canonical, allow_entity_groups=True):
     """The group whose canonical key fuzzy-matches `name`, or None.
 
-    `canonical` maps canonical_key -> group_id. Canonical keys that are still
-    raw entity ids (an entity whose transactions carried no name at all) are
-    skipped: matching a name against 'entity:abc123' by string similarity is
-    meaningless.
+    `canonical` maps canonical_key -> (group_id, from_entity). Canonical keys
+    that are still raw entity ids (an entity whose transactions carried no name
+    at all) are skipped: matching a name against 'entity:abc123' by string
+    similarity is meaningless.
+
+    `allow_entity_groups=False` additionally refuses groups opened from a
+    merchant_entity_id. Two distinct entity ids must never merge, however alike
+    their display names: Plaid has already said they are different merchants,
+    and the in-memory grouper never compares entity groups against each other.
+    Allowing it makes the two paths report different subscriptions from the
+    same data — two 2-charge "Amazon" entities merge into one 4-charge stream
+    that clears MIN_OCCURRENCES on the indexed path and does not exist on the
+    in-memory one.
     """
     if not name:
         return None
     matcher = SequenceMatcher(None, '', name, autojunk=False)
-    for canonical_key, group_id in canonical.items():
+    for canonical_key, (group_id, from_entity) in canonical.items():
         if canonical_key.startswith('entity:'):
+            continue
+        if from_entity and not allow_entity_groups:
             continue
         if _similar(canonical_key, name, matcher):
             return group_id
@@ -130,6 +149,15 @@ def update_index():
     if stored is not None and stored != GROUPING_ALGO_VERSION:
         MerchantGroupKey.query.delete()
         MerchantGroup.query.delete()
+        # Clearing the groups is not enough. A version bump exists precisely
+        # because normalize_merchant or the matching rule changed, and every
+        # stored merchant_key was computed by the OLD normalizer. Regrouping
+        # stale keys reproduces the old grouping under a new version stamp —
+        # the rebuild would report success while changing nothing. Null them so
+        # backfill_missing_keys recomputes each one.
+        Transaction.query.update(
+            {Transaction.merchant_key: None}, synchronize_session=False,
+        )
         db.session.flush()
         rebuilt = True
 
@@ -141,7 +169,7 @@ def update_index():
         return {'rebuilt': False, 'backfilled': 0, 'new_keys': 0, 'new_groups': 0}
 
     canonical = {
-        g.canonical_key: g.id
+        g.canonical_key: (g.id, g.from_entity)
         for g in MerchantGroup.query.all()
     }
 
@@ -154,15 +182,19 @@ def update_index():
     new_groups = 0
     for key in entity_keys:
         name = _representative_name(key)
-        group_id = _match_name(name, canonical)
+        # May join a group opened from a plain name (Plaid starting to supply an
+        # entity id for a merchant already seen without one), but never another
+        # entity's group.
+        group_id = _match_name(name, canonical, allow_entity_groups=False)
         if group_id is None:
             group = MerchantGroup(
                 canonical_key=name or key, algo_version=GROUPING_ALGO_VERSION,
+                from_entity=True,
             )
             db.session.add(group)
             db.session.flush()          # need the id before the key row
             group_id = group.id
-            canonical[group.canonical_key] = group_id
+            canonical[group.canonical_key] = (group_id, True)
             new_groups += 1
         db.session.add(MerchantGroupKey(key=key, group_id=group_id))
 
@@ -171,11 +203,12 @@ def update_index():
         if group_id is None:
             group = MerchantGroup(
                 canonical_key=key, algo_version=GROUPING_ALGO_VERSION,
+                from_entity=False,
             )
             db.session.add(group)
             db.session.flush()
             group_id = group.id
-            canonical[key] = group_id
+            canonical[key] = (group_id, False)
             new_groups += 1
         db.session.add(MerchantGroupKey(key=key, group_id=group_id))
 
@@ -201,6 +234,7 @@ def is_index_usable():
         db.session.query(Transaction.id)
         .filter(Transaction.removed.is_(False))
         .filter(Transaction.merchant_key.isnot(None))
+        .filter(Transaction.merchant_key != '')     # '' = nothing to group
         .filter(~Transaction.merchant_key.in_(db.session.query(MerchantGroupKey.key)))
         .first()
     )
@@ -233,6 +267,12 @@ def grouped_transactions():
     return list(groups.values())
 
 
+def _in_memory_fallback():
+    """Group the slow way. Correct, just O(distinct merchants squared)."""
+    live = Transaction.query.filter_by(removed=False).all()
+    return _group_transactions(live), False
+
+
 def groups_for_detection():
     """The grouping /subscriptions and /bills should use, warming the index if
     it is cold.
@@ -260,8 +300,7 @@ def groups_for_detection():
             update_index()
     except Exception:
         current_app.logger.exception('merchant group index build failed')
-        live = Transaction.query.filter_by(removed=False).all()
-        return _group_transactions(live), False
+        return _in_memory_fallback()
 
     if is_index_usable():
         return grouped_transactions(), True
@@ -272,5 +311,4 @@ def groups_for_detection():
         'merchant group index still unusable after build; '
         'falling back to in-memory grouping'
     )
-    live = Transaction.query.filter_by(removed=False).all()
-    return _group_transactions(live), False
+    return _in_memory_fallback()

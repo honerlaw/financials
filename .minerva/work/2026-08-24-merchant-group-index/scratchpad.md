@@ -55,3 +55,25 @@ likely conflict surface if this unit appends test cases there.
 - [reviewed — folded] replan acceptance (Skeptic): verdict revise. Concern #1 (high) was a real defect, not a documentation gap — no savepoint or rollback around update_index, so on Postgres an aborted transaction would make the fallback's own query raise, and would fail _sync_institution's closing commit. Folded: begin_nested at both call sites per _create_account_if_missing's precedent, plus a real-SQL-failure test. Concern #3 (medium) folded: exact == 3 assertion plus a second corpus an order of magnitude larger, replacing the <= 4 slack bound. Concern #2 (medium) answered by pinning the O(1) invariant rather than minimising the constant. Concern #5 (low, pre-existing) recorded as a follow-up below.
 - TODO (follow-up, low): `_unindexed_keys` uses `NOT IN (subquery)`, a classic anti-join pattern some planners handle poorly at scale. Currently safe — MerchantGroupKey.key is non-nullable, so the NULL-sensitivity trap does not apply — and the new query-count test measures round trips, not per-query cost, so a plan regression here would not be caught. Worth revisiting if the corpus grows.
 - Verified: removing the savepoint and re-running test_sql_failure_during_build_leaves_the_session_usable still passes on SQLite. The suite's backend cannot detect Postgres aborted-transaction bugs; savepoint discipline holds by inspection and precedent, not by test. Candidate knowledge entry.
+
+## Review triage 2026-08-24
+
+Minerva audit (self) — 3 findings, all FIXed:
+- knowledge 017 prescribes exercising a new migration in isolation (conftest uses `db.create_all()`, never Alembic, so a migration can be wrong with no test catching it). Had not been done. Ran the procedure: upgrade and downgrade both round-trip, re-verified after the `from_entity` amendment.
+- knowledge 020: `_upsert_transactions` runs `_grouping_key_for` in existing sync tests, but nothing asserted the result — the write path could start storing NULL with the suite still green. Added `test_sync_writes_merchant_key_on_upsert`.
+- Spec fidelity vs proposal `## Approach`: clean, all six items present.
+
+Code review (fresh-context subagent) — 9 findings:
+- [high, FIX] #1 one transaction whose merchant_key can never be computed left it NULL, which `is_index_usable` reads as outstanding work — the index would never become usable, and every page load would attempt a rebuild and then fall back to in-memory grouping. Strictly worse than before the feature. Fixed with a '' sentinel meaning "processed, nothing to group". Writing the regression test then exposed a second instance I had missed in `is_index_usable`'s own query.
+- [high, FIX] #2 a version bump deleted the groups but regrouped the *stale* `merchant_key` values, reproducing the old grouping under a new stamp — a rebuild that reports success while changing nothing. Now nulls the keys so backfill recomputes them.
+- [high, FIX] #3 the persisted path could merge two distinct `merchant_entity_id`s whose representative names fuzzy-match; the in-memory path never compares entity groups against each other. Two sub-threshold streams merged into one that cleared MIN_OCCURRENCES, so a subscription existed or not depending on whether the index was warm. Added `merchant_groups.from_entity`; an entity key may join a name-derived group but never another entity's.
+- [medium, FIX] #4 `_representative_name` did not filter `removed`, unlike `_group_key` which only ever sees live rows.
+- [medium, FIX] #9 `test_version_bump_rebuilds_exactly_once` bumped only the version number and so could not detect #2. Added `test_version_bump_recomputes_merchant_keys`, which actually changes `_NOISE_TOKENS`.
+- [low, FIX] #5 duplicated fallback block factored into `_in_memory_fallback`.
+- [low, SUGGEST] #6 `_grouping_key_for` (Plaid objects) and `grouping_key` (Transaction rows) are two hand-written implementations of one rule. A change to either that is not mirrored silently splits merchants. Held: unifying them means passing Plaid objects into a pure module or building a shim type, both worse than the comment plus the new write-path test. Revisit if a third caller appears.
+- [low, TODO] #7 keys belonging only to removed transactions are indexed and never pruned — permanent debris in `merchant_group_keys`, not a correctness bug.
+- #8 migration: no issues. #10 count discrepancy was a test added after the brief was written.
+
+All three high findings were verified to fail against the pre-fix code and pass after, by reverting each fix in isolation.
+
+No replan-vs-FIX gate: these are defects in executing the approved approach, not divergence from it. The approach section still describes what shipped.

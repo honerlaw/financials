@@ -403,7 +403,11 @@ def _grouping_key_for(txn):
     entity_id = getattr(txn, 'merchant_entity_id', None)
     if entity_id:
         return 'entity:%s' % entity_id
-    return normalize_merchant(txn.merchant_name or txn.name or '') or None
+    # '' rather than None: NULL means "never computed" and drives the index's
+    # backfill, so a transaction that simply has no usable name must not look
+    # like one that was never processed — it would keep the index permanently
+    # unusable and send every page load down the slow path forever.
+    return normalize_merchant(txn.merchant_name or txn.name or '')
 
 
 def _extract_fields(txn):

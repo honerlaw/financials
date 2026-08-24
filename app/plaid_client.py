@@ -143,20 +143,38 @@ class PlaidClient:
         )
         return response.liabilities
 
-    def get_investment_holdings(self, access_token):
-        """Fetch investment holdings (including vested equity-comp figures).
+    def get_investments(self, access_token):
+        """Fetch investment accounts and holdings (with vested equity-comp figures).
 
-        Returns the response's ``holdings`` list. Each ``Holding`` ties back to
-        an ``Account`` via ``account_id`` and carries ``institution_value``
-        plus, for equity compensation the institution reports on,
-        ``vested_value`` / ``vested_quantity``. Raises ``plaid.ApiException``
-        when the Item wasn't consented to the ``investments`` product (callers
-        treat this as non-fatal — see app/sync.py::_refresh_investments).
+        Returns ``(accounts, holdings)``.
+
+        ``holdings`` is the response's ``holdings`` list. Each ``Holding`` ties
+        back to an ``Account`` via ``account_id`` and carries
+        ``institution_value`` plus, for equity compensation the institution
+        reports on, ``vested_value`` / ``vested_quantity``.
+
+        ``accounts`` is the response's ``accounts`` list — "the accounts
+        associated with the Item". This is the one payload *guaranteed by
+        schema* to carry the Item's investment accounts, which
+        ``transactions/sync`` never returns; ``_refresh_investments`` creates
+        rows from it so a brokerage account can reach the dashboard at all.
+        Each entry is an ``InvestmentAccount``, which composes ``AccountBase``
+        and exposes the same ``account_id`` / ``name`` / ``mask`` / ``subtype``
+        / ``balances`` fields ``_upsert_accounts`` reads.
+
+        Named ``get_investments`` rather than ``get_investment_holdings``
+        because the return shape changed from a bare list to a tuple: a
+        same-named method would let an existing ``return_value = [...]`` mock
+        destructure two holdings into ``accounts, holdings`` without raising.
+
+        Raises ``plaid.ApiException`` when the Item wasn't consented to the
+        ``investments`` product (callers treat this as non-fatal — see
+        app/sync.py::_refresh_investments).
         """
         response = self._client.investments_holdings_get(
             InvestmentsHoldingsGetRequest(access_token=access_token)
         )
-        return response.holdings
+        return response.accounts, response.holdings
 
     def sync_transactions(self, access_token, cursor=''):
         added, modified, removed = [], [], []

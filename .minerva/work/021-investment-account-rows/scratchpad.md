@@ -11,3 +11,17 @@
   (c) A-as-primary framing may be backwards, since investment-account visibility could be consent-gated the way the product endpoints are → reframed: (2) is schema-guaranteed, (1) is schema-permitted but unverified for this Item; neither claimed as primary, settled by post-deploy criterion 8
 - [decided] verification: schema-level confirmation only (plaid-python 39.2.0 — `InvestmentsHoldingsGetResponse.accounts: [InvestmentAccount]`, `AccountType` includes `investment`, `AccountBalance.iso_currency_code` "always null if `unofficial_currency_code` is non-null"). Runtime verification needs the Item's access_token from a Postgres whose trusted sources admit only DO apps/tagged droplets; deferred to post-deploy criterion 8 rather than escalating for a firewall change
 - [decided] whole-proposal soundness: single subsystem, no schema change, one internal method rename, no public interface (solo gate)
+
+## Implementation notes 2026-08-24
+
+- The rename to `get_investments` paid for itself immediately: 8 pre-existing
+  tests that never configured the investments mock at all (relying on a bare
+  `MagicMock`, which `if not holdings` happened to treat as falsy) failed loudly
+  on the tuple unpack instead of silently mis-destructuring. Each got an explicit
+  `get_investments.return_value = ([], [])`. Under the old name they would have
+  kept passing while exercising nothing.
+- `_refresh_balances`'s row lookup had to move *above* the `balances is None`
+  guard: an account with metadata but no balances object should still get a row.
+  The guard now applies only to the existing-row update path, which is where it
+  was always load-bearing.
+- Suite: 266 passed (was 259 on main; +7 new).

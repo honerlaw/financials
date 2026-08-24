@@ -114,6 +114,21 @@ def _refresh_balances(client, institution):
     Returns an error string to record on the SyncLog if the call fails,
     None on success. Never re-raises — balance refresh failures are
     non-fatal to the sync.
+
+    An account with no row yet is *created* here. accounts/balance/get returns
+    every account on the Item, while transactions/sync returns only the ones the
+    transactions product covers — so a brokerage account on an investment-only
+    Item reaches this function and nothing else. Creating it here is the only
+    way it ever gets a row (and therefore a dashboard card).
+
+    Create-only, deliberately: an account that already has a row takes the
+    balance-only update below, unchanged. The piggyback keeps owning metadata
+    for every account it returns
+    (002-decision-plaid-balance-refresh-via-dedicated-endpoint), and the two
+    guards in that path — skip when `balances` is absent, write
+    `iso_currency_code` only when non-null — stay load-bearing: Plaid nulls
+    `iso_currency_code` whenever `unofficial_currency_code` is populated, so
+    writing it unconditionally would clobber a known code.
     """
     try:
         accounts = client.get_balances(institution.access_token)
@@ -122,11 +137,12 @@ def _refresh_balances(client, institution):
         return f'balance refresh failed: {code}: {e}'
 
     for acct in accounts:
-        balances = getattr(acct, 'balances', None)
-        if balances is None:
-            continue
         row = Account.query.filter_by(plaid_account_id=acct.account_id).first()
         if row is None:
+            _upsert_accounts(institution.id, [acct])
+            continue
+        balances = getattr(acct, 'balances', None)
+        if balances is None:
             continue
         row.current_balance = _to_decimal(getattr(balances, 'current', None))
         row.available_balance = _to_decimal(getattr(balances, 'available', None))
@@ -257,14 +273,27 @@ def _refresh_investments(client, institution):
     Only holdings with a *known* vested figure contribute. An account whose
     holdings all report none keeps both columns null, so its dashboard card is
     unchanged rather than claiming a $0 vested balance.
+
+    The response's ``accounts`` array is upserted first, before the empty-holdings
+    early return, so an investment account gets a row even when it reports no
+    holdings at all. Create-only, like _refresh_balances: this is the only
+    payload guaranteed by schema to carry the Item's investment accounts, and
+    ``transactions/sync`` never returns them.
     """
     try:
-        holdings = client.get_investment_holdings(institution.access_token)
+        accounts, holdings = client.get_investments(institution.access_token)
     except plaid.ApiException as e:
         code = _get_plaid_error_code(e)
         if code in _BENIGN_INVESTMENT_ERROR_CODES:
             return None
         return f'investment refresh failed: {code}: {e}'
+
+    for acct in accounts or []:
+        account_id = getattr(acct, 'account_id', None)
+        if not account_id:
+            continue
+        if Account.query.filter_by(plaid_account_id=account_id).first() is None:
+            _upsert_accounts(institution.id, [acct])
 
     if not holdings:
         return None

@@ -1,7 +1,7 @@
 # Proposal: investment-account-rows
 
 **Date**: 2026-08-24
-**Status**: Draft
+**Status**: Shipped (2026-08-24)
 
 ## Goal
 
@@ -49,7 +49,7 @@ not catch it — the same shape as
 [[020-pattern-injected-fakes-hide-construction-failures]]: the fixture supplies
 the thing whose absence is the bug.
 
-## Approach
+## Approach (as shipped)
 
 The rule for both changes below is **create-only**: each new path may INSERT a
 row for an account that has none, and may not change what happens to a row that
@@ -97,6 +97,21 @@ without raising. Renaming makes every stale mock fail loudly.
 `_refresh_investments` upserts those accounts **before** its `if not holdings:
 return None` early return, so an investment account whose holdings are empty
 still gets a row.
+
+### 3. Both creations go through a savepoint
+
+Added in review. `plaid_account_id` is unique and syncs overlap — `/api/sync`
+spawns an unsynchronized thread on every dashboard load, on top of the 7am job —
+so two runs can both see a new account missing and the loser's `INSERT` raises
+`IntegrityError`. That is not a `plaid.ApiException`, so it would escape both
+refreshes' "never re-raises" contract *and* `_sync_institution`'s except clause:
+the institution's already-upserted transactions discarded, its SyncLog row lost,
+every institution after it skipped, silently, because the thread just dies.
+
+`_create_account_if_missing` does the insert inside `db.session.begin_nested()`.
+The savepoint is the load-bearing part, not the `except`: catching the error
+without one leaves the session unusable and the sync dies one statement later.
+Updating never had this race; creating does.
 
 ### Which of the two actually fixes E*TRADE is not yet known
 
@@ -189,3 +204,43 @@ this one, and no longer masked by the account being invisible.
 **#28 is adjacent, not this.** "Plaid-derived `Account` columns are never cleared
 when the institution stops reporting them" is about stale values on rows that
 exist; this is about rows that never exist. Not adopted.
+
+## Verification
+
+`pytest`: 268 passed (260 on main; +8). New coverage: an account seen only in the
+balance payload; an account seen only in the holdings payload, including its
+vested/unvested totals landing once a row exists; an investment account with no
+holdings at all; the create-only guard on both paths (metadata left alone for a
+known account, on `_refresh_balances` and `_refresh_investments` alike); the two
+guards the create-only design exists to preserve (`balances is None` skip, null
+`iso_currency_code` not clobbering a known code); and `_create_account_if_missing`
+swallowing a racing `IntegrityError` while leaving the session usable.
+
+Found in review and fixed: the concurrent-insert race (§3) and the missing
+create-only test on the investments path — without the latter, deleting that
+guard as "redundant" would have kept the suite green while reversing 002's
+metadata/balance split.
+
+The rename to `get_investments` was load-bearing in practice, not just in
+principle: it immediately failed 8 pre-existing tests that had never configured
+the investments mock at all, relying on a bare `MagicMock` that `if not holdings`
+happened to treat as falsy. Under the old name a two-element list mock would have
+destructured into `accounts, holdings` without raising and those tests would have
+kept passing while exercising nothing.
+
+**Criterion 8 is not met at merge and cannot be** — it is a post-deploy
+observation. Whether `/accounts/balance/get` returns this Item's stock-plan
+account turns on the Item's own behavior, so no sandbox call settles it; it needs
+the `access_token`, which lives in a Postgres whose trusted sources admit only DO
+apps and tagged droplets. Both code paths ship for that reason. The check to run
+after deploy: trigger a sync, confirm the dashboard renders an E*TRADE card, and
+record which endpoint created the row and whether vested/unvested figures appear.
+
+Deferred, contingent on that answer: if balance/get turns out to omit the
+account, its balance is written once at creation and never refreshed while
+`last_synced_at` is bumped every sync — a stale balance presented as fresh. The
+follow-up is filed only if the post-deploy check lands that way; filing it now
+would be speculative.
+
+Filed regardless: #34 — the sync silently drops payload rows naming an unknown
+`account_id`, which is why this bug was invisible for a day.

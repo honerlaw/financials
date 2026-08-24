@@ -70,3 +70,5 @@ non-empty.
 - [[014-decision-plaid-liabilities-piggyback-on-sync]] — see also
 - [[016-decision-daily-digest-notifier]] — see also
 - [[021-decision-plaid-vested-value-piggyback-on-sync]] — see also
+- [[023-bug-transactions-sync-is-not-the-only-account-source]] — see also
+  balance/get now also *creates* rows; the metadata/balance split is preserved by making that path create-only.

@@ -205,9 +205,9 @@ newly-crossed 50/75/100% threshold of the week's household spend.
 [[016-decision-daily-digest-notifier]] supersedes that cadence. Threshold
 alerting had two properties nobody wanted — a quiet week produced **zero**
 texts, so there was no "where do we stand" signal unless spending was already
-high; and the send landed on whichever sync first observed the crossing,
-including the background sync `/api/sync` fires on every dashboard page load, so
-the arrival time was unpredictable. It is now one digest per recipient per day —
+high; and the send landed on whichever sync first observed the crossing —
+the 7am job, a reconnect, or a press of the "Sync now" button — so the arrival
+time was unpredictable. It is now one digest per recipient per day —
 budget status *and* every account's balance — and `newly_crossed`, `THRESHOLDS`
 and the `BudgetAlert` model are gone.
 
@@ -220,9 +220,9 @@ milestone (duplicate > miss), soft-disable to a clean no-op unless every Twilio
 var is set, and a non-fatal hook that can never abort a sync.
 
 Three things 016 adds are worth carrying forward. **Only the scheduled job
-notifies** — `sync_all_institutions()` (what page loads call) is now silent and
-`run_daily_sync()` is the single notifying path, which is what buys predictable
-timing. **A wall-clock schedule needs an explicit timezone**: the container sets
+notifies** — `sync_all_institutions()` (what `/api/sync` calls) is now silent
+and `run_daily_sync()` is the single notifying path, which is what buys
+predictable timing. **A wall-clock schedule needs an explicit timezone**: the container sets
 no `TZ`, so the pre-existing `hour=7` cron had been firing at 07:00 UTC — 3am
 Eastern — and both the scheduler and the digest's notion of "today" now resolve
 through `APP_TIMEZONE`, falling back to the configured default rather than to

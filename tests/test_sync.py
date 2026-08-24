@@ -486,11 +486,11 @@ def test_daily_sync_dispatches_digest(MockPlaidClient, app):
 
 
 @patch('app.sync.PlaidClient')
-def test_page_load_sync_does_not_text(MockPlaidClient, app):
-    """The shared sync path (/api/sync on every page load) must never notify.
+def test_shared_sync_path_does_not_text(MockPlaidClient, app):
+    """The shared sync path (``/api/sync``, the "Sync now" button) must never notify.
 
-    This is what makes the digest land at 7am rather than whenever the dashboard
-    is next opened.
+    Only ``run_daily_sync`` texts, which is what makes the digest land at a fixed
+    hour rather than on whatever else happens to trigger a sync.
     """
     MockPlaidClient.return_value = MagicMock()
     with app.app_context():
@@ -936,7 +936,8 @@ def test_create_account_if_missing_survives_a_concurrent_insert(app):
     """A racing sync's INSERT must not abort this one, and must not poison the session.
 
     plaid_account_id is unique and /api/sync spawns an unsynchronized thread on
-    every dashboard load, so two runs can both see the row missing. The loser's
+    every press of the "Sync now" button, on top of the 7am job and the reconnect
+    trigger, so two runs can both see the row missing. The loser's
     IntegrityError would otherwise escape the refresh's "never re-raises"
     contract and kill the whole institution's sync.
 

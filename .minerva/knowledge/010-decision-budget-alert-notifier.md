@@ -32,7 +32,10 @@ providing dedup.
 1. **Fires from the sync path, every sync.** `send_budget_alerts` is hooked at
    the end of `sync_all_institutions()` via `_send_budget_alerts_safe`, so it
    evaluates on the 7am cron AND on the background-thread sync that `/api/sync`
-   kicks on every page load — near-real-time, not once-a-day. The hook is
+   kicks off when the dashboard's "Sync now" button is pressed — near-real-time,
+   not once-a-day. (Originally written as "on every page load", which was never
+   true; see
+   [[034-pattern-only-the-call-site-is-authoritative-for-runtime-behaviour]].) The hook is
    **non-fatal**: the import *and* the call sit inside one `try/except` logging
    via `current_app.logger` (never `SyncLog.error`), mirroring the
    `_refresh_balances` contract ([[007-decision-plaid-reconnect-update-mode]]).

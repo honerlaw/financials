@@ -38,3 +38,19 @@ A truncating tail (`…and N more`) would bound it. Not built: the household has
 three institutions.
 
 _Source: 016 review triage (F5), 2026-08-08._
+
+---
+
+**Correction, 2026-08-24.** The second option above — "a bounded catch-up on the
+page-load sync path" — rests on a mechanism that does not exist and never did.
+`/api/sync` is POST-only and has exactly one caller: the dashboard's "Sync now"
+button. There is no page-load sync path to hook a catch-up onto, so that option
+has no substrate as written; re-anchoring it to a real trigger would be a fresh
+design question, not a detail.
+
+The other two options are unaffected — `misfire_grace_time` and an
+absence-heartbeat both stand on their own.
+
+The original text above is left exactly as written, per the append-only
+convention for this file. See
+`.minerva/knowledge/034-pattern-only-the-call-site-is-authoritative-for-runtime-behaviour.md`.

@@ -61,7 +61,11 @@ was only ever half the problem.
   populated, so an unconditional write clobbers a known code).
 - **Creating rows introduced a write race that updating never had.**
   `plaid_account_id` is unique and `/api/sync` spawns an unsynchronized thread on
-  every dashboard load, so two syncs can both see a new account missing. The
+  every press of the dashboard's "Sync now" button — on top of the 7am job and the
+  reconnect trigger — so two syncs can both see a new account missing. (This bullet
+  originally said "on every dashboard load", which was never true; the race is real
+  regardless of what starts the overlapping syncs. See
+  [[034-pattern-only-the-call-site-is-authoritative-for-runtime-behaviour]].) The
   loser's `IntegrityError` is not a `plaid.ApiException`, so it would escape the
   refreshes' "never re-raises" contract *and* `_sync_institution`'s except clause,
   discarding that institution's already-upserted transactions and skipping every

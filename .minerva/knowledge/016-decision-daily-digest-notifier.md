@@ -2,7 +2,7 @@
 
 **Date**: 2026-08-08
 **Type**: decision
-**Summary**: Threshold budget alerts replaced by one 7am daily digest (budget status + every account balance) — dispatched only from run_daily_sync so page-load syncs never text, deduped per (sent_date, recipient), and scheduled in APP_TIMEZONE because the container is UTC.
+**Summary**: Threshold budget alerts replaced by one 7am daily digest (budget status + every account balance) — dispatched only from run_daily_sync so a manual sync never texts, deduped per (sent_date, recipient), and scheduled in APP_TIMEZONE because the container is UTC.
 **Context**: .minerva/work/016-daily-balance-digest
 
 ## Context
@@ -11,9 +11,15 @@ Unit 012 shipped SMS that fired only when a 50/75/100% weekly-budget threshold
 was newly crossed ([[010-decision-budget-alert-notifier]]). Two properties made
 it the wrong shape for what the user actually wanted: a week under 50% of budget
 produced **zero** texts, and the send landed whenever a sync happened to observe
-the crossing — including the background sync `/api/sync` fires on every
-dashboard page load. The ask was a predictable "where do we stand" text every
-morning, carrying account balances as well as budget status.
+the crossing — the 7am job, a reconnect, or a press of the dashboard's "Sync
+now" button. The ask was a predictable "where do we stand" text every morning,
+carrying account balances as well as budget status.
+
+(This entry originally said `/api/sync` fired on every dashboard page load, and
+repeated it in the Summary and in Decision 2 below. That was never true — the
+endpoint has only ever been called from a button's `onclick`. The unpredictable
+*timing* that motivated this decision was real, but its stated cause was not.
+See [[034-pattern-only-the-call-site-is-authoritative-for-runtime-behaviour]].)
 
 ## Decisions
 
@@ -24,10 +30,11 @@ morning, carrying account balances as well as budget status.
    account. Nothing suppresses a quiet week; that silence was the bug.
 
 2. **Only the 7am job notifies.** `app/sync.py` now separates
-   `sync_all_institutions()` (pure sync, called by `/api/sync` on every page
-   load) from `run_daily_sync()` (sync, then `_send_daily_digest_safe()`). The
-   APScheduler cron calls the latter, so the digest lands at a predictable hour
-   instead of whenever the dashboard is next opened, and syncing first makes the
+   `sync_all_institutions()` (pure sync, called by `/api/sync`, which the
+   dashboard's "Sync now" button triggers) from `run_daily_sync()` (sync, then
+   `_send_daily_digest_safe()`). The APScheduler cron calls the latter, so the
+   digest lands at a fixed hour rather than on whatever else triggers a sync,
+   and syncing first makes the
    balances as fresh as Plaid allows. The non-fatal wrapper contract is
    unchanged — an import-time or runtime failure in the notifier never aborts a
    sync ([[007-decision-plaid-reconnect-update-mode]]).

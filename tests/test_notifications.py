@@ -903,3 +903,14 @@ def test_manual_send_carries_the_same_net_worth_line(app):
         body = sender.sent[0][1]
         assert 'SoFi · Checking ••1234: $412.00 (not counted)' in body
         assert 'Net worth: $4,880.02' in body
+
+
+def test_a_liability_never_claims_an_unvested_discount():
+    """The note and the arithmetic come from one predicate. A credit row
+    carrying an unvested_value is negated outright — no discount is applied, so
+    the line must not say one was."""
+    row = _row(balance=Decimal('612.40'), type='credit',
+               unvested=Decimal('100'))
+    display, total, _ = digest_accounts([row], [])
+    assert total == Decimal('-612.40')
+    assert display[0][6] is False

@@ -4,8 +4,9 @@ Once a day, right after the 7am sync (``app.sync.run_daily_sync``), every
 configured recipient is texted one message: where the current Sun–Sat week's
 household spend stands against ``WEEKLY_BUDGET``, what each of the four
 completed weeks behind it totalled, the current balance of every linked
-account, and the net worth those balances add up to. The message building is pure and unit-tested (``digest_body`` and
-friends); the Twilio send and the ``DailyDigest`` writes are the impure shell.
+account, and the net worth those balances add up to. The message building is
+pure and unit-tested (``digest_body`` and friends); the Twilio send and the
+``DailyDigest`` writes are the impure shell.
 
 Cadence: exactly one text per recipient per calendar day, deduped on
 ``(sent_date, recipient)``. Nothing here is threshold-driven — a quiet week
@@ -43,7 +44,7 @@ that single-worker invariant ever changes.
 import threading
 from datetime import timedelta
 from decimal import Decimal
-from typing import NamedTuple
+from typing import NamedTuple, Optional
 
 from flask import current_app
 from sqlalchemy.exc import IntegrityError
@@ -88,11 +89,12 @@ class AccountRow(NamedTuple):
     institution: str
     slug: str
     account: str
-    mask: str
-    balance: object
+    mask: Optional[str]
+    balance: Optional[Decimal]
     status: str
-    type: str
-    unvested: object
+    type: Optional[str]
+    unvested: Optional[Decimal]
+
 
 # Serializes send_daily_digest across any concurrent callers. Correct only
 # under a single worker process (see module docstring); the DB unique constraint
@@ -224,6 +226,20 @@ def _pattern_matches(pattern, row):
             or acct_part in (row.account or '').lower())
 
 
+def _is_liability(row):
+    """Is this account's balance money owed rather than money held?
+
+    The single predicate behind both the sign `account_net_worth` applies and
+    the note `digest_accounts` attaches to the line. Deriving them separately
+    is how a line comes to claim a discount the total never applied: nothing in
+    the schema stops a `credit` row from also carrying an `unvested_value`.
+
+    Lowercased before the check — Plaid sends lowercase, but the column is a
+    free-form `String(50)`.
+    """
+    return (row.type or '').lower() in LIABILITY_TYPES
+
+
 def account_net_worth(row):
     """What one account contributes to the total. Signed.
 
@@ -247,7 +263,7 @@ def account_net_worth(row):
     """
     if row.balance is None:
         return Decimal('0')
-    if (row.type or '').lower() in LIABILITY_TYPES:
+    if _is_liability(row):
         return -row.balance
     if row.unvested is None:
         return row.balance
@@ -280,7 +296,8 @@ def digest_accounts(rows, patterns):
         hits = [p for p in patterns if _pattern_matches(p, row)]
         matched.update(hits)
         excluded = bool(hits)
-        discounted = row.unvested is not None and row.unvested > 0
+        discounted = (row.unvested is not None and row.unvested > 0
+                      and not _is_liability(row))
         display.append((
             row.institution, row.account, row.mask, row.balance,
             row.status != 'active', excluded, discounted,

@@ -1,7 +1,7 @@
 # Proposal: digest-net-worth
 
 **Date**: 2026-08-24
-**Status**: Draft
+**Status**: Shipped (2026-08-24)
 
 ## Goal
 
@@ -34,7 +34,7 @@ The exclusion mechanism is the load-bearing half of the ask. One account should
 not count today, and the user's framing — "we might exclude others as well in
 the future" — makes this a list that changes over time, not a one-off condition.
 
-## Approach
+## Approach (as shipped)
 
 ### 1. One widened query, two pure derivations
 
@@ -70,12 +70,23 @@ scopes this to the text message and there is no second consumer.
   silently drop the value of ordinary holdings sitting alongside the equity
   comp. `current_balance - unvested_value` keeps plain holdings at full weight
   and discounts only the unvested portion. A null `unvested_value` subtracts
-  nothing.
+  nothing, and the result is **clamped at zero**: the two figures come from
+  different Plaid endpoints (`accounts/balance/get` vs
+  `investments/holdings/get`), so a stale holdings price can put unvested above
+  the account's own balance, and a negative asset is never the right answer.
+  `sync._refresh_investments` clamps its own unvested remainder for exactly
+  this reason.
 - **A null `current_balance` contributes 0.** The account still prints its `—`
   line, so the gap is visible rather than silent.
 - **A stale account still counts**, at its last-known balance. Its line already
   carries `(reconnect needed)`; dropping it from the total would understate net
   worth far more badly than a slightly old number does.
+
+`_is_liability(row)` is the single predicate behind both the sign the total
+applies and the note the line carries. Deriving them separately is how a line
+comes to claim a discount the total never applied — nothing in the schema stops
+a `credit` row from also carrying an `unvested_value`, and the first version of
+this code had exactly that bug (caught in review).
 
 ### 3. Exclusions are configuration
 
@@ -97,6 +108,12 @@ returned as data by the pure matcher and logged as a warning by the impure
 shell, so the pure functions stay pure. An entry matching **too much** shows up
 in the next morning's text as an unexpected `(not counted)` line — which is why
 excluded accounts stay listed rather than disappearing.
+
+Both send paths go through one impure seam, `_digest_parts(session, config,
+today)`, which fetches, derives, and hands back the argument tuple plus the
+patterns that matched nothing. The scheduled digest and the dashboard button
+therefore cannot drift in what the message contains — a property unit 018
+established by hand and this keeps structurally.
 
 ### 4. Message shape
 

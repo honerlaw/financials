@@ -68,3 +68,4 @@ Item was never consented to it. It was absent from
 - [[007-decision-plaid-reconnect-update-mode]] — builds on
   update mode itself — the same mechanism, used here to grant consent rather than re-authenticate.
 - [[021-decision-plaid-vested-value-piggyback-on-sync]] — see also
+- [[023-bug-transactions-sync-is-not-the-only-account-source]] — see also

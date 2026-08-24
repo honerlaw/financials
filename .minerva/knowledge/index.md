@@ -22,6 +22,7 @@
 ## Bugs
 
 - [[019-bug-non-json-response-conflated-with-session-expiry]] — The digest button redirected to `/login` on every press because its `fetch` treated any non-JSON response as session expiry, so an unhandled 500 rendered as a phantom logout; the precise expiry signal is `res.redirected` plus the final URL, and API endpoints must fail as JSON.
+- [[023-bug-transactions-sync-is-not-the-only-account-source]] — `Account` rows were only ever created from `transactions/sync`'s accounts array, which omits brokerage accounts, so an investment-only Item never got a row and never rendered a dashboard card; `_refresh_balances` and `_refresh_investments` now create the rows they used to skip.
 
 ## Patterns
 

@@ -19,6 +19,7 @@
 - [[021-decision-plaid-vested-value-piggyback-on-sync]] — Vested and unvested equity-compensation totals come from a dedicated `/investments/holdings/get` call after the liability refresh, aggregated per account into two nullable `Account` columns, non-fatally.
 - [[022-decision-digest-four-week-spend-history]] — The digest SMS gained a `Last 4 weeks` block between the budget line and the balances — the four COMPLETE Sun–Sat weeks before the current one, whole dollars, zero-filled; the running week stays exclusively in the budget line, both aggregates come out of one widened query, and the A2P sample messages were regenerated because filed samples must match live traffic.
 - [[024-decision-digest-net-worth]] — The digest SMS closes its Balances block with one `Net worth:` line — assets minus `credit`/`loan` balances, with unvested equity netted out by SUBTRACTING `unvested_value` rather than substituting `vested_value`, and with accounts named by `NET_WORTH_EXCLUDED_ACCOUNTS` kept out of the total but still printed as `(not counted)`.
+- [[025-decision-hand-authored-design-system]] — Bootstrap 5 was replaced by `app/static/app.css` — CSS custom properties defining a light and a dark token set, consumed by component rules that contain no literal colours — chosen over Tailwind because this repo has no Node toolchain and because two Bootstrap class names are hard-coded in a JSON payload the CSS cannot rename.
 
 ## Bugs
 
@@ -31,7 +32,11 @@
 - [[012-pattern-fetch-content-type-session-detection]] — A `fetch()` against a Flask `@login_required` route cannot detect session expiry with `!r.ok` — the browser follows the 302 to `/login` transparently, so check the response Content-Type before parsing.
 - [[017-pattern-migration-chain-is-postgres-only]] — The Alembic chain cannot be replayed on SQLite (00a2889ed2af issues Postgres GRANTs), so a new migration is verified in isolation — stamp the parent, hand-create the tables it touches, upgrade, downgrade.
 - [[020-pattern-injected-fakes-hide-construction-failures]] — Every notifier test injected a fake sender, so `_sender_from_config` — the line that actually threw in production — was never executed and the whole suite passed with `twilio` uninstalled; a dependency built behind a seam needs at least one test that builds the real thing.
+- [[027-pattern-utility-classes-lose-to-element-qualified-rules]] — `.table th { text-align: left }` has specificity (0,1,1) and beats a bare `.right` utility at (0,1,0), so the utility appears to do nothing — a failure invisible to a suite that asserts on rendered text rather than layout, and only found by looking at a screenshot.
+- [[028-pattern-byte-assertions-are-contracts-or-snapshots]] — `tests/test_routes.py` asserts literal substrings of rendered HTML, and those assertions are two different things — semantic contracts whose failure means the change is wrong, and formatting snapshots whose failure is a decision to make; editing the first to get green is how a real regression ships.
 
 ## Constraints
+
+- [[026-constraint-css-class-names-cross-the-json-boundary]] — `app/routes.py:261` puts the literal strings `text-danger` / `text-success` into the `/api/transactions` payload and the infinite-scroll script applies them verbatim to appended rows, so those two class names are a cross-layer contract that no test asserts and no framework migration may quietly rename.
 
 ## References

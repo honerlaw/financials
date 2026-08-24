@@ -84,3 +84,5 @@ populated for equity holdings at institutions that track equity compensation.
 - [[023-bug-transactions-sync-is-not-the-only-account-source]] — corrected by
   two factual errors here: the account never showed a card, and `get_investment_holdings` has been renamed.
 - [[024-decision-digest-net-worth]] — see also
+- [[025-decision-hand-authored-design-system]] — see also
+- [[028-pattern-byte-assertions-are-contracts-or-snapshots]] — see also

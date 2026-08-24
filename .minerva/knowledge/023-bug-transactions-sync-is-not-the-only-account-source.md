@@ -100,3 +100,4 @@ was only ever half the problem.
   the same failure shape: the fixture supplied what the code could not produce.
 - [[015-decision-liability-consent-requires-update-mode]] — see also
   the re-connect step, a real prerequisite here but not the fix.
+- [[034-pattern-only-the-call-site-is-authoritative-for-runtime-behaviour]] — see also

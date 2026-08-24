@@ -38,6 +38,7 @@
 - [[028-pattern-byte-assertions-are-contracts-or-snapshots]] — `tests/test_routes.py` asserts literal substrings of rendered HTML, and those assertions are two different things — semantic contracts whose failure means the change is wrong, and formatting snapshots whose failure is a decision to make; editing the first to get green is how a real regression ships.
 - [[031-pattern-version-stamp-must-invalidate-derived-inputs]] — The merchant index's algo-version rebuild deleted the groups but regrouped the stale per-row keys the old algorithm had produced — reporting a successful rebuild while reproducing exactly the grouping it existed to replace.
 - [[033-pattern-sqlite-tests-cannot-catch-postgres-transaction-aborts]] — A missing savepoint around a best-effort write is invisible to this suite — SQLite keeps the session usable after a failed statement where Postgres aborts the whole transaction, so the test passes with and without the fix.
+- [[034-pattern-only-the-call-site-is-authoritative-for-runtime-behaviour]] — A claim that `/api/sync` fired on every dashboard page load lived at fourteen sites across nine files — code, tests and the knowledge wiki — and was never true in any revision; it spread because each new author read it from the previous document rather than the call site, so the usual "check a second source" mitigation confirmed it instead of catching it.
 
 ## Constraints
 

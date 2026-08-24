@@ -103,3 +103,4 @@ excluding `TRANSFER`/`LOAN_PAYMENTS`, Sun–Sat weeks). It is a **household tota
 - [[016-decision-daily-digest-notifier]] — superseded by
 - [[018-decision-on-demand-digest-trigger]] — see also
 - [[020-pattern-injected-fakes-hide-construction-failures]] — see also
+- [[034-pattern-only-the-call-site-is-authoritative-for-runtime-behaviour]] — see also

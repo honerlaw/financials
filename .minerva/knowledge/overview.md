@@ -446,6 +446,25 @@ implementation. This is the same SQLite-vs-Postgres gap
 [[017-pattern-migration-chain-is-postgres-only]] describes for migrations,
 reaching runtime behaviour instead of schema.
 
+[[034-pattern-only-the-call-site-is-authoritative-for-runtime-behaviour]] is the
+fourth blind spot, and the only one where the corpus itself was the defect. A
+claim that `/api/sync` fired on every dashboard page load lived at fourteen sites
+— three code files, two of them tests, and five wiki files including two
+narratives in this document — and was never true in any revision: the endpoint
+has only ever been called from a button's `onclick`. It spread because each
+author's source was the previous document. A unit's proposal asserted it, promote
+lifted that into a knowledge entry, synthesis lifted the entry into this overview,
+and the next unit read the overview.
+
+That makes the standard defence backfire. A reader who distrusts a docstring and
+checks a second source finds the wiki agreeing, and a third finds this file
+agreeing again — three confirmations descending from one unverified sentence.
+**For a claim about what calls what, or when something runs, the call site is the
+only authoritative source**; corroboration between documents is evidence about the
+corpus, not about the code. The entry also marks where the amplification happens:
+a wrong assumption in a work-unit proposal is cheap and ordinary, and **promote is
+the step that converts it into something every future agent reads as settled**.
+
 ## Limitations
 
 A link here attests synthesis **intent**, not body **content**: an entry can stay

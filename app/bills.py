@@ -68,9 +68,19 @@ def detect_bills(transactions, today):
     then upcoming, then paid; within each group by amount magnitude descending.
     """
     live = [t for t in transactions if not t.removed]
+    return detect_bills_from_groups(_group_transactions(live), today)
 
+
+def detect_bills_from_groups(groups, today):
+    """Build bills from already-grouped transactions.
+
+    Split out so the persisted merchant-group index can supply the grouping
+    (see app/merchant_groups.py). Payment status is recomputed from `today` on
+    every call and never cached — a stored status would be wrong the moment the
+    month rolled over, with nothing to trigger a refresh.
+    """
     bills = []
-    for group in _group_transactions(live):
+    for group in groups:
         stream = _build_stream(group, today)
         if stream is None:
             continue

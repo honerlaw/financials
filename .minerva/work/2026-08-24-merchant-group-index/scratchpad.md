@@ -30,3 +30,24 @@ touched `_refresh_balances` / `_refresh_investments` bodies and added
 `_sync_institution` — the two places this unit edits in sync.py — were left
 untouched. `tests/test_sync.py` grew ~230 lines and its import block is the
 likely conflict surface if this unit appends test cases there.
+
+## Balanced decisions 2026-08-24
+
+- [escalated to user] pre-flight in-flight collision: unit 2026-08-24-merchant-group-index reported in_flight=True and matched the run seed — user chose "resume the existing unit" (escalation counter = 1)
+- [decided] Phase 1 gates not re-run: scope check and approach selection were answered directly by the user during the interactive propose run (single-unit scope covering /subscriptions + /bills; approach A incremental index over B full-recompute and C algorithm-fix-only), then stress-tested via minerva:grill-plan. Human decisions supersede an advisory Skeptic; re-dispatching would re-litigate settled calls.
+- [decided] whole-proposal soundness: single subsystem, no public HTTP interface change, template contract unchanged (solo gate)
+- [decided] entity-group canonical key = representative normalized name, not 'entity:<id>'. Caught while implementing `_assign`: storing the raw entity key means a bare-name charge ("netflix") can never fuzzy-match into the Netflix entity group, silently splitting one stream into two — each of which may then fall below MIN_OCCURRENCES and disappear from both pages. Mirrors `_group_key` in subscriptions.py. Pinned by test_name_key_joins_the_entity_group. Not treated as a load-bearing divergence: it is a refinement *within* the approved approach (the proposal did not specify what an entity group's canonical key holds), the success criteria are unchanged, and the completion Verifier gate covers it.
+- [decided] entity keys are processed before name keys in update_index, mirroring how `_group_transactions` seeds its group list from merchant_entity_id before merging name keys. A name key can only join an entity group that already exists.
+- [decided] a new entity key first tries to fuzzy-match its representative name into an existing group rather than always opening its own. Diverges from a cold full recompute (which would keep two entity ids with similar names separate) but prevents the bad direction: Plaid starting to supply an entity id for a merchant that already has a name group would otherwise split a live stream.
+
+### Measured (2000 distinct merchants / 6000 transactions, sqlite in-memory)
+
+| path | seconds |
+|---|---|
+| original code, no prefilter (pre-change baseline) | 20.39 |
+| in-memory with prefilter | 3.50 |
+| one-time index build | 3.85 |
+| warm page load (indexed) | 0.06 |
+| quiet sync index update | 0.018 |
+
+~340x on a warm load versus the pre-change baseline; 5.8x of that is the prefilter alone.

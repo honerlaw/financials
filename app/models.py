@@ -102,6 +102,12 @@ class Transaction(db.Model):
     location = db.Column(JSONType, nullable=True)
     counterparties = db.Column(JSONType, nullable=True)
     removed = db.Column(db.Boolean, default=False, nullable=False)
+    # The grouping key this row belongs to: 'entity:<merchant_entity_id>' when
+    # Plaid supplied an entity id, else normalize_merchant(merchant_name or
+    # description). Written at upsert so the subscriptions/bills read path is an
+    # indexed join instead of a per-request normalization pass. Nullable because
+    # rows predating the merchant-group index have none until it is built.
+    merchant_key = db.Column(db.String(255), nullable=True)
     created_at = db.Column(db.DateTime(timezone=True), default=_utcnow, nullable=False)
     updated_at = db.Column(
         db.DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False
@@ -109,6 +115,7 @@ class Transaction(db.Model):
 
     __table_args__ = (
         db.Index('ix_transactions_date', 'date'),
+        db.Index('ix_transactions_merchant_key', 'merchant_key'),
     )
 
 
@@ -146,4 +153,49 @@ class DailyDigest(db.Model):
         db.UniqueConstraint(
             'sent_date', 'recipient', name='uq_daily_digests_date_recipient',
         ),
+    )
+
+
+class MerchantGroup(db.Model):
+    """One detected merchant identity — the unit /subscriptions and /bills group by.
+
+    ``canonical_key`` is frozen at creation and is what later keys fuzzy-match
+    against. It is deliberately NOT recomputed from the group's name
+    distribution on each pass: a moving canonical key would make a group's
+    matching behaviour depend on the order transactions happened to arrive in,
+    which is the instability this index exists to remove.
+
+    ``algo_version`` records the grouping algorithm that built the row. A
+    mismatch against ``GROUPING_ALGO_VERSION`` triggers exactly one full rebuild
+    (see app/merchant_groups.py), so changing the fuzzy threshold or the
+    normalizer can never leave a silently stale index behind.
+    """
+
+    __tablename__ = 'merchant_groups'
+
+    id = db.Column(db.Integer, primary_key=True)
+    canonical_key = db.Column(db.String(255), nullable=False)
+    algo_version = db.Column(db.Integer, nullable=False)
+    created_at = db.Column(db.DateTime(timezone=True), default=_utcnow, nullable=False)
+
+
+class MerchantGroupKey(db.Model):
+    """A merchant key mapped to its group. One row per distinct key ever seen.
+
+    Grain is the key, not the transaction: thousands of transactions share a
+    key, and the read path joins transactions to groups through this table.
+    """
+
+    __tablename__ = 'merchant_group_keys'
+
+    id = db.Column(db.Integer, primary_key=True)
+    key = db.Column(db.String(255), unique=True, nullable=False)
+    group_id = db.Column(
+        db.Integer,
+        db.ForeignKey('merchant_groups.id', ondelete='CASCADE'),
+        nullable=False,
+    )
+
+    __table_args__ = (
+        db.Index('ix_merchant_group_keys_group_id', 'group_id'),
     )

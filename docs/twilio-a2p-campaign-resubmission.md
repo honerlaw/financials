@@ -4,6 +4,9 @@
 The Sole Proprietor path was abandoned after four failures; the last one was not fixable
 by rewording. History is preserved in the appendix so the same ground is not re-walked.
 
+**Status (2026-08-09):** the business primary customer profile is approved under the EIN,
+which clears the blocker. Next: register the brand (step 2), then the campaign (step 4).
+
 | # | Error | Verdict | Outcome |
 |---|-------|---------|---------|
 | 1 | [30896](https://www.twilio.com/docs/api/errors/30896) | *"rejected because of provided Opt-in information"* | Fixed — public policy/terms/unsubscribe pages, real keywords, real consent description |
@@ -41,7 +44,8 @@ momentum.
   Standard one. The old brand carried `Onerlaw LLC` on a `SOLE_PROPRIETOR` registration —
   a latent rejection that had not yet fired.
 - **30914 gone.** The campaign-title-must-match-the-proprietor's-name rule applies only to
-  sole proprietor brands. The title becomes `Onerlaw LLC`.
+  sole proprietor brands, so the title is now free to describe the campaign rather than
+  echo a name.
 - **A use case that fits.** Sole prop brands get exactly one generic `SOLE_PROPRIETOR`
   bucket. A Standard brand can select `Account Notification`, which is what this traffic
   actually is.
@@ -64,14 +68,14 @@ momentum.
       **⚠️ Must be deployed before submitting** — a reviewer reads the live site.
 - [x] **Consent script republished.** The script in this doc and the blockquote on
       /terms are byte-identical. Reword one, reword the other in the same change.
-- [ ] **A *business* primary customer profile.** ⚠️ *This is the real blocker.* The
-      account's only Trust Hub profile is `BU705b57ee2280eb0909e27e39a73b0843` — labelled
-      "Onerlaw LLC" but running policy `RNffcb02a20420c81caf596ffc44f69712`, which is
-      **"Primary customer profile for individual"**. A Standard brand needs a *business*
-      primary profile carrying the EIN, and Twilio's docs say an Individual profile's type
-      cannot be changed after creation. Expect to create a new business profile, and to
-      need Twilio support if the console will not let a second primary profile exist. Do
-      this first — everything else is blocked behind it.
+- [x] **A *business* primary customer profile.** Approved 2026-08-09, carrying the LLC's
+      EIN. This was the blocker; everything below is now unblocked. It had to be a *new*
+      profile rather than a conversion: the old `BU705b57ee2280eb0909e27e39a73b0843` runs
+      policy `RNffcb02a20420c81caf596ffc44f69712` — **"Primary customer profile for
+      individual"** — and Twilio does not allow a profile's type to change after creation.
+      ⚠️ **Record the new `BU…` SID here, read from the API rather than the console**
+      (failure 2's lesson), and register the brand against *that* profile. Selecting the
+      old individual profile at the brand step is a silent way to re-fail vetting.
 - [ ] **Retire or leave the old brand.** `BN7b34ddf2893d6ed15ea72161bc5d8ba8` (sole prop,
       APPROVED) has no campaign attached and can simply be left dormant. Do not attach the
       new campaign to it.
@@ -89,9 +93,8 @@ the tabs run left to right in the order below.
 
 ## 1. Business primary customer profile — *Create Customer Profile* tab
 
-The blocker above. The existing profile is an individual one and cannot be converted, so a
-business profile has to exist before a Standard brand can be registered. Fields and the
-rules that actually fail vetting:
+**Done — approved 2026-08-09.** Kept as the record of what was filed, because the brand
+registration in step 2 must match it field for field:
 
 | Field | Value | Rule |
 |---|---|---|
@@ -103,18 +106,22 @@ rules that actually fail vetting:
 | Address | the LLC's registered address | One address can back at most 10 TCR registrations |
 | Authorized rep | name, job title, `derek@onerlaw.com`, phone in E.164 | Business email, not a free provider |
 
-Approval takes **up to 72 hours**, but you can continue to the next step while it is
-pending.
-
-**If the EIN was issued recently**, expect trouble: IRS records take 30–90 days to
-propagate to the vetting vendors, and a lookup miss reads as a name mismatch.
+Approval took under 72 hours, as quoted.
 
 ## 2. Register the brand — *Register Brand* tab
 
 Choose **Low-Volume Standard** (suited to under 6,000 message segments/day — this sends
-about 7 per user per week). Supply a brand contact email; identity is confirmed by 2FA to
-it. TCR usually answers in minutes; anything needing manual review takes seven or more
-business days.
+about 7 per user per week). Select the **business** profile approved in step 1, not the
+individual one. Supply a brand contact email; identity is confirmed by 2FA to it. TCR
+usually answers in minutes; anything needing manual review takes seven or more business
+days.
+
+**A profile approval is not a brand approval.** Twilio approved the customer profile;
+TCR runs its own independent EIN + legal-name lookup at this step. **If the EIN was issued
+recently**, expect trouble here: IRS records take 30–90 days to propagate to the vetting
+vendors, and a lookup miss reads as a name mismatch. That is a reason to expect a retry at
+this step, not a reason to soften the name — `Onerlaw LLC` must stay character-identical to
+the CP 575 letter either way.
 
 Leave the old sole proprietor brand `BN7b34ddf2893d6ed15ea72161bc5d8ba8` alone. It has no
 campaign attached and can sit dormant — just do not attach the new campaign to it.
@@ -144,9 +151,10 @@ means re-filing samples.
 
 # Field-by-field answers
 
-`Onerlaw LLC` is the legal business name, the brand name, the campaign title, and the
-brand string in message copy. One name everywhere — the two name-mismatch failures in the
-appendix both came from that not being true.
+`Onerlaw LLC` is the legal business name, the brand name, and the brand string in message
+copy, and those three genuinely must agree — the two name-mismatch failures in the appendix
+both came from that not being true. The **campaign title** is the one field where the
+matching rule was sole-prop-only, so it is now free to describe the campaign; see below.
 
 ## Legal business name / Brand name
 
@@ -159,8 +167,20 @@ Must match the EIN letter exactly.
 ## Campaign title
 
 ```
-Onerlaw LLC
+Onerlaw LLC Account Notifications
 ```
+
+Changed from the bare `Onerlaw LLC`. That was chosen to satisfy
+[30914](https://www.twilio.com/docs/api/errors/30914), whose
+title-must-match-the-proprietor's-name rule **applies only to sole proprietor brands** —
+under a Standard brand the title is a free-form label with no matching rule, so keeping it
+bare buys nothing and tells a human reviewer nothing. Leading with the legal name keeps it
+consistent at a glance; the suffix says what the campaign is, which is the same correction
+failure 4 asked for.
+
+This field is *not* coupled to `BRAND` in `app/notifications.py` — the title never appears
+in message copy, so changing it does not mean re-filing samples. Keep `Onerlaw LLC` bare
+instead if you would rather change nothing that a previous submission carried.
 
 ## Use case
 
@@ -168,8 +188,19 @@ Onerlaw LLC
 Account Notification
 ```
 
-Recurring operational notifications about the state of a user's own account. Not Marketing
-(nothing promotional is ever sent), not Customer Care (no support conversation), not 2FA.
+Confirmed selectable in the console dropdown under the Standard brand (2026-08-09) — the
+whole reason failure 3 cannot recur. Recurring operational notifications about the state of
+a user's own account is exactly what this traffic is.
+
+The near-misses in that dropdown, and why each loses:
+
+| Option | Why not |
+|---|---|
+| Low Volume Mixed | Tempting under a Low-Volume *brand*, but "Mixed" means several kinds of message and the description must say so. This sends exactly one kind — claiming breadth re-opens failure 3's description/use-case mismatch for no gain |
+| Customer Care | Implies a two-way support conversation. The digest is one-way; STOP/HELP are not a conversation, every campaign has them |
+| Fraud Alert / Security Alert | Event-driven warnings that something is wrong. A scheduled 7am summary is not event-driven |
+| Marketing | Nothing promotional is ever sent, and it would attach content rules this traffic does not need |
+| Two-Factor authentication (2FA) | Not what this is |
 
 ## Campaign description
 
@@ -297,6 +328,22 @@ publicly* for reviewer verification — that public copy is what makes verbal co
 checkable. So this block and the terms page must be word-for-word identical. Reword one,
 reword the other in the same change.
 
+**This is the weakest remaining answer, and it is weak for a real reason.** Verbal,
+in-person consent with no sign-up form is the one part of the submission that still carries
+the shape failure 4 rejected: a person adding people he knows, by hand. Everything else now
+describes a platform; consent still describes a conversation. It is legitimate — Twilio
+accepts verbal opt-in when the script is published, which it is — and it is *accurate*,
+which is the property that matters most, because the implementation really is an operator
+putting numbers in `BUDGET_ALERT_RECIPIENTS`.
+
+Do **not** close that gap by rewriting this answer to describe an in-app opt-in checkbox
+that does not exist. That is the "dressing up the facts" failure mode this whole document
+exists to avoid, and it fails at audit rather than at vetting, which is worse. Close it by
+building the checkbox — a per-user SMS opt-in stored in the DB, unchecked by default (an
+explicit requirement, [30925](https://www.twilio.com/docs/api/errors/30925)), with the
+consent language beside it and a recorded timestamp — and *then* rewriting this answer to
+describe it. Until that exists, file the verbal script as written.
+
 ## Opt-in keywords
 
 ```
@@ -332,6 +379,20 @@ HELP, INFO
 ```
 Onerlaw LLC: daily budget and account balance summaries, about 7 msgs/week. For help contact derek@onerlaw.com. Msg & data rates may apply. Reply STOP to unsubscribe.
 ```
+
+## ⚠️ These three replies must be configured, not just filed
+
+Nothing in this repo answers an inbound message — there is no webhook, and
+`app/notifications.py` only ever sends. The three replies above are delivered by **Advanced
+Opt-Out on the messaging service** (`MG29a7b84c2ca3db80ff108d72534d7254`), which has its own
+default wording. Filing these strings on the campaign while the messaging service still
+sends Twilio's defaults is a filed-copy-vs-real-traffic mismatch of exactly the kind that is
+a violation after approval — the same class of problem as submitting the retired
+threshold-alert samples (failure 1).
+
+So: set the keyword lists and all three message bodies on the messaging service to match
+this section **byte for byte**, and re-check after the campaign is approved by texting
+`HELP`, then `STOP`, then `START` to `+1 980 217 7693` from a real handset.
 
 ---
 

@@ -96,6 +96,27 @@ def _sync_institution(client, institution):
         institution.last_synced_at = _utcnow()
         institution.status = 'active'
 
+        # Keep the merchant-group index current so /subscriptions and /bills
+        # never pay for fuzzy matching on a page load. Best-effort, like the
+        # three refreshes above: the transactions have already landed, and a
+        # stale index degrades to the slower in-memory path rather than to
+        # wrong output.
+        try:
+            from app.merchant_groups import update_index
+            # Savepoint for the same reason _create_account_if_missing uses one:
+            # a failure inside this block would otherwise leave the session's
+            # transaction aborted, and the db.session.commit() below would then
+            # raise and escape — discarding the transactions already upserted
+            # for this institution, losing the SyncLog row, and killing the
+            # remaining institutions in the loop. A stale index is a slow page;
+            # a poisoned transaction is a lost sync.
+            with db.session.begin_nested():
+                update_index()
+        except Exception as exc:
+            current_app.logger.exception('merchant group index update failed')
+            errors.append(f'merchant group index: {type(exc).__name__}: {exc}')
+            log.error = '; '.join(errors)
+
         log.completed_at = _utcnow()
         log.added_count = added_count
         log.removed_count = removed_count
@@ -369,6 +390,26 @@ def _to_jsonable(value):
     return value
 
 
+def _grouping_key_for(txn):
+    """`app.subscriptions.grouping_key` for a raw Plaid transaction.
+
+    Same rule, different input shape: Plaid calls the description `name` where
+    the model calls it `description`. Kept next to _extract_fields so the two
+    stay in step — a drift here would silently split one merchant into two
+    groups.
+    """
+    from app.subscriptions import normalize_merchant
+
+    entity_id = getattr(txn, 'merchant_entity_id', None)
+    if entity_id:
+        return 'entity:%s' % entity_id
+    # '' rather than None: NULL means "never computed" and drives the index's
+    # backfill, so a transaction that simply has no usable name must not look
+    # like one that was never processed — it would keep the index permanently
+    # unusable and send every page load down the slow path forever.
+    return normalize_merchant(txn.merchant_name or txn.name or '')
+
+
 def _extract_fields(txn):
     """Pull every column we persist out of a Plaid Transaction object."""
     pfc = getattr(txn, 'personal_finance_category', None)
@@ -394,6 +435,7 @@ def _extract_fields(txn):
         'original_description': getattr(txn, 'original_description', None),
         'merchant_name': txn.merchant_name or '',
         'merchant_entity_id': getattr(txn, 'merchant_entity_id', None),
+        'merchant_key': _grouping_key_for(txn),
         'website': getattr(txn, 'website', None),
         'amount': Decimal(str(txn.amount)),
         'iso_currency_code': getattr(txn, 'iso_currency_code', None),

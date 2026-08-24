@@ -326,13 +326,17 @@ def _account_totals(institution_id, month_start, month_end):
 @bp.route('/subscriptions')
 @login_required
 def subscriptions():
-    from app.subscriptions import detect_subscriptions
+    from app.merchant_groups import groups_for_detection
+    from app.subscriptions import detect_subscriptions_from_groups
 
-    # Full in-memory load is the intended tradeoff at personal-finance
-    # volumes. The removed=False filter here is a query optimization;
-    # detect_subscriptions owns the removed-gate as its tested contract.
-    transactions = Transaction.query.filter_by(removed=False).all()
-    streams = detect_subscriptions(transactions, date.today())
+    # Merchant grouping is the expensive half of detection and is served from
+    # the persisted index (app/merchant_groups.py). Everything below it is
+    # cheap and date-dependent, so it is recomputed per request rather than
+    # cached — a stored `active` flag would be wrong the moment a stream
+    # lapsed, with nothing to trigger a refresh.
+    groups, _used_index = groups_for_detection()
+    db.session.commit()
+    streams = detect_subscriptions_from_groups(groups, date.today())
 
     accounts = {a.plaid_account_id: a for a in Account.query.all()}
     institution_names = {i.id: i.name for i in Institution.query.all()}
@@ -356,10 +360,12 @@ def subscriptions():
 @bp.route('/bills')
 @login_required
 def bills():
-    from app.bills import detect_bills
+    from app.bills import detect_bills_from_groups
+    from app.merchant_groups import groups_for_detection
 
-    transactions = Transaction.query.filter_by(removed=False).all()
-    bill_list = detect_bills(transactions, date.today())
+    groups, _used_index = groups_for_detection()
+    db.session.commit()
+    bill_list = detect_bills_from_groups(groups, date.today())
 
     accounts = {a.plaid_account_id: a for a in Account.query.all()}
     institution_names = {i.id: i.name for i in Institution.query.all()}

@@ -24,4 +24,14 @@
   guard: an account with metadata but no balances object should still get a row.
   The guard now applies only to the existing-row update path, which is where it
   was always load-bearing.
-- Suite: 266 passed (was 259 on main; +7 new).
+- Suite: 266 passed (260 on main; +6 new).
+
+- [reviewed — clean] completion verification: Verifier `accept`, all 7 pre-merge
+  criteria independently reproduced (it re-ran the suite, re-grepped the rename,
+  traced the `_refresh_balances` reordering against main line by line, and
+  checked for duplicate rows / wrong `institution_id` across the two new
+  creation paths — none found). Criterion 8 accepted as honestly deferred: it
+  turns on this Item's behavior, not on schema, so a sandbox call could not have
+  settled it pre-merge. It corrected the scratchpad's arithmetic — main is 260,
+  not 259, and 6 tests were added, not 7; the two errors cancelled to the right
+  total. Corrected above.

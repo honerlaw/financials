@@ -95,3 +95,4 @@ morning, carrying account balances as well as budget status.
 - [[017-pattern-migration-chain-is-postgres-only]] — see also
   how this unit's migration had to be verified.
 - [[018-decision-on-demand-digest-trigger]] — see also
+- [[022-decision-digest-four-week-spend-history]] — see also

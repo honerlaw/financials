@@ -165,6 +165,21 @@ only the pure message builders, so both texts are byte-identical for the same
 data. `is_configured` is the single soft-disable predicate both the button's
 rendered state and the endpoint must consult; re-deriving it is how they drift.
 
+[[022-decision-digest-four-week-spend-history]] is the first change to what the
+message *says* rather than when or why it sends, and it adds a rule about
+changing message content at all. The body now carries a `Last 4 weeks` block —
+the four **complete** Sun–Sat weeks behind the current one — while the running
+week stays exclusively in the budget line, because it is partial until Saturday
+and a partial week in a column of finished ones reads as a drop that is not
+real. The history reuses `is_spend` rather than aggregating in SQL, keeping one
+spend definition shared with the dashboard
+([[008-decision-dashboard-spend-and-weekly-budget]]), and both aggregates come
+out of a single widened query. The new constraint is external: A2P 10DLC
+registration files sample messages, and traffic that stops matching them is a
+violation, so **anything that changes what the digest says forces those samples
+to be re-filed** — a coupling the doc previously pinned to the `BRAND` constant
+and that now names `digest_body` itself.
+
 ## Configuration and secrets
 
 All config is read through `os.getenv` in `app/__init__.py`, which made moving to
@@ -231,7 +246,9 @@ caller.
 
 ## Limitations
 
-The `synthesis-watermark` above is a new-scope-only floor: it attests that
-entries up to that NNN were considered at synthesis time, not that this
-body reflects later in-place edits to those entries. Entries promoted after
-this synthesis will show as un-synthesized until the next refresh.
+A link here attests synthesis **intent**, not body **content**: an entry can stay
+linked from a narrative that no longer describes it, and nothing detects that.
+Coverage is derived from the links themselves, so in-place edits to an entry this
+file already links — a rewired `## Related` block, a supersession banner — leave
+no signal. Entries promoted after this synthesis show as un-synthesized until the
+next refresh.

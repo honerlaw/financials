@@ -54,14 +54,14 @@ Two further corrections came out of the replan review:
    dated note beneath it records that the premise is false, that the option as
    written has no mechanism, and which sibling options remain valid — so the next
    person to scope this file learns it without the record being altered.
-2. **Keep `proposal.md` and `scratchpad.archive.md` untouched.** Entry 029's
+2. **Keep `proposal.md` and `scratchpad.archive.md` untouched.** Entry 034's
    archaeology cites `016-daily-balance-digest/proposal.md:22` as the propagation
    origin; rewriting it would destroy the evidence.
-3. **Narrow entry 029's Implications bullet** so it states the live-vs-archival
+3. **Narrow entry 034's Implications bullet** so it states the live-vs-archival
    test rather than a blanket `.minerva/work/*` exemption — the too-broad phrasing
    is what produced this miss, and leaving it would teach the same error.
 4. **Propagate the count** (13 → 14 sites, 8 → 9 files) everywhere it appears:
-   the proposal's Goal, its Scope heading, entry 029's `**Summary**` and body.
+   the proposal's Goal, its Scope heading, entry 034's `**Summary**` and body.
    Also fix a pre-existing drift the review caught — the proposal's Open Questions
    still said "10 sites, 7 files" from an earlier revision.
 5. **Restate success criterion 4 as the general test** — no *live* document under

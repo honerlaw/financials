@@ -1,7 +1,7 @@
 # Proposal: page-load-sync-correction
 
 **Date**: 2026-08-24
-**Status**: Draft (replanned 2026-08-24 — see replan.md)
+**Status**: Shipped (2026-08-24) — replanned once; see replan.md
 **Closes**: #44
 
 ## Goal

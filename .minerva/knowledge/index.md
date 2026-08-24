@@ -17,6 +17,7 @@
 - [[016-decision-daily-digest-notifier]] — Threshold budget alerts replaced by one 7am daily digest (budget status + every account balance) — dispatched only from run_daily_sync so page-load syncs never text, deduped per (sent_date, recipient), and scheduled in APP_TIMEZONE because the container is UTC.
 - [[018-decision-on-demand-digest-trigger]] — A dashboard button texts the daily digest on demand via `send_digest_now`, which neither reads nor writes `DailyDigest` so it never interacts with the 7am job in either direction; `is_configured` is the one soft-disable predicate both the button and the endpoint must use.
 - [[021-decision-plaid-vested-value-piggyback-on-sync]] — Vested and unvested equity-compensation totals come from a dedicated `/investments/holdings/get` call after the liability refresh, aggregated per account into two nullable `Account` columns, non-fatally.
+- [[022-decision-digest-four-week-spend-history]] — The digest SMS gained a `Last 4 weeks` block between the budget line and the balances — the four COMPLETE Sun–Sat weeks before the current one, whole dollars, zero-filled; the running week stays exclusively in the budget line, both aggregates come out of one widened query, and the A2P sample messages were regenerated because filed samples must match live traffic.
 
 ## Bugs
 

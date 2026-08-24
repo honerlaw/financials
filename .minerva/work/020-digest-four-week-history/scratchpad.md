@@ -10,4 +10,4 @@
 - [decided] review triage: F1 (malformed `_week_totals` docstring) → FIX, applied. No other findings; spec fidelity and knowledge lenses clean.
 - [decided] promote partition: one PROMOTE (the four-week-history decision), review fix MERGED into the proposal, quick decisions DISCARDed as routine, no new TODOs — the segment-count and 1600-char notes belong to unit 016's existing followups, not a new issue.
 
-→ promoted to .minerva/knowledge/021-decision-digest-four-week-spend-history.md (2026-08-23)
+→ promoted to .minerva/knowledge/022-decision-digest-four-week-spend-history.md (2026-08-23)

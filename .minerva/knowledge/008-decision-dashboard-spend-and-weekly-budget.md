@@ -78,3 +78,4 @@ CDN approach for exactly this reason).
 - [[009-decision-chart-click-window-filter]] — see also
 - [[010-decision-budget-alert-notifier]] — see also
 - [[016-decision-daily-digest-notifier]] — see also
+- [[022-decision-digest-four-week-spend-history]] — see also

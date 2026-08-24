@@ -96,7 +96,10 @@ this user's data is inferred.
 
 - `/subscriptions` and `/bills` perform zero fuzzy merchant matching once the index
   is warm.
-- A sync that changed nothing performs one indexed query and no matching work.
+- A sync that changed nothing performs a small constant number of indexed
+  queries (3) and no fuzzy matching, with the constant independent of corpus
+  size. (Amended 2026-08-24 — see replan.md; the original said "one indexed
+  query", which measurement disproved.)
 - The existing `tests/test_subscriptions.py` and `tests/test_bills.py` fixtures pass
   through **both** the in-memory and the indexed grouping paths.
 - A test asserts that introducing a new merchant never reassigns an existing

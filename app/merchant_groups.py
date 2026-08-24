@@ -250,7 +250,14 @@ def groups_for_detection():
         return grouped_transactions(), True
 
     try:
-        update_index()
+        # Savepoint, not a bare try: on Postgres a statement that fails inside an
+        # open transaction leaves it aborted, and every later statement on that
+        # connection raises until someone rolls back. Without this the fallback
+        # query below would itself raise and the page would go from slow to
+        # broken — the exact outcome this fallback exists to prevent. SQLite is
+        # forgiving here, so no test on this suite's backend would catch it.
+        with db.session.begin_nested():
+            update_index()
     except Exception:
         current_app.logger.exception('merchant group index build failed')
         live = Transaction.query.filter_by(removed=False).all()

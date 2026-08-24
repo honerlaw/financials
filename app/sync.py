@@ -103,7 +103,15 @@ def _sync_institution(client, institution):
         # wrong output.
         try:
             from app.merchant_groups import update_index
-            update_index()
+            # Savepoint for the same reason _create_account_if_missing uses one:
+            # a failure inside this block would otherwise leave the session's
+            # transaction aborted, and the db.session.commit() below would then
+            # raise and escape — discarding the transactions already upserted
+            # for this institution, losing the SyncLog row, and killing the
+            # remaining institutions in the loop. A stale index is a slow page;
+            # a poisoned transaction is a lost sync.
+            with db.session.begin_nested():
+                update_index()
         except Exception as exc:
             current_app.logger.exception('merchant group index update failed')
             errors.append(f'merchant group index: {type(exc).__name__}: {exc}')

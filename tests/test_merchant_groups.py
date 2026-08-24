@@ -7,8 +7,11 @@ contract is written against, and a group assignment never moves once made.
 """
 
 from datetime import date, timedelta
+from unittest import mock
 from decimal import Decimal
 from difflib import SequenceMatcher
+
+from sqlalchemy import event, text
 
 import pytest
 
@@ -223,6 +226,145 @@ def test_cold_index_falls_back_and_warms(app):
             [s['name'] for s in detect_subscriptions(rows, TODAY)]
         assert used_index is True          # built on demand, then used
         assert is_index_usable()
+
+
+def test_build_failure_falls_back_to_in_memory_grouping(app):
+    """The real fallback branch: the index build raises, the page still renders.
+
+    Distinct from test_cold_index_falls_back_and_warms, which exercises
+    warm-on-demand (the build succeeds). This one pins the property that
+    actually protects the user — an index that cannot be built degrades to a
+    slow page, never an empty one.
+    """
+    with app.app_context():
+        rows = _persist(_mixed())
+        for txn in rows:
+            txn.merchant_key = None
+        db.session.commit()
+
+        with mock.patch('app.merchant_groups.update_index',
+                        side_effect=RuntimeError('index build exploded')):
+            groups, used_index = groups_for_detection()
+
+        assert used_index is False
+        streams = detect_subscriptions_from_groups(groups, TODAY)
+        assert [s['name'] for s in streams] == \
+            [s['name'] for s in detect_subscriptions(rows, TODAY)]
+        assert MerchantGroup.query.count() == 0
+
+
+def test_unusable_after_successful_build_still_falls_back(app):
+    """Built without error yet still unusable — serve the slow correct answer."""
+    with app.app_context():
+        rows = _persist(_mixed())
+        db.session.commit()
+
+        with mock.patch('app.merchant_groups.is_index_usable', return_value=False):
+            groups, used_index = groups_for_detection()
+
+        assert used_index is False
+        streams = detect_subscriptions_from_groups(groups, TODAY)
+        assert [s['name'] for s in streams] == \
+            [s['name'] for s in detect_subscriptions(rows, TODAY)]
+
+
+QUIET_SYNC_SELECTS = 3
+"""_stored_algo_version + backfill_missing_keys + _unindexed_keys.
+
+Asserted exactly, not as an upper bound: a slack bound lets a 3->4 regression
+pass silently, which is the same undetected drift that let "one indexed query"
+sit unchallenged in the proposal. Change this deliberately if the
+implementation legitimately changes.
+"""
+
+
+def _count_selects(fn):
+    """Run `fn`, returning (result, number of SELECT statements issued)."""
+    counter = {'n': 0}
+
+    def _tally(conn, cursor, statement, params, context, executemany):
+        if statement.lstrip().upper().startswith('SELECT'):
+            counter['n'] += 1
+
+    engine = db.session.get_bind()
+    event.listen(engine, 'before_cursor_execute', _tally)
+    try:
+        result = fn()
+    finally:
+        event.remove(engine, 'before_cursor_execute', _tally)
+    return result, counter['n']
+
+
+def test_quiet_update_cost_does_not_grow_with_the_corpus(app):
+    """The property C2 actually protects: per-sync cost is O(1) in corpus size.
+
+    Counting queries against a single fixture would only pin "3 for this
+    fixture". Comparing two corpora an order of magnitude apart is what shows
+    the cost is a constant rather than something that scales with merchants.
+    """
+    with app.app_context():
+        _persist(_mixed())
+        update_index()
+        db.session.commit()
+        _, small = _count_selects(update_index)
+        db.session.commit()
+
+        inst = Institution.query.first()
+        for i in range(200):
+            name = 'Merchant %d' % i
+            txn = Transaction(
+                plaid_transaction_id='bulk-%d' % i, institution_id=inst.id,
+                account_id='acc-1', date=date(2026, 5, 20), description=name,
+                merchant_name=name, amount=Decimal('9.00'),
+            )
+            txn.merchant_key = grouping_key(txn)
+            db.session.add(txn)
+        db.session.commit()
+        update_index()
+        db.session.commit()
+        _, large = _count_selects(update_index)
+        db.session.commit()
+
+        assert small == QUIET_SYNC_SELECTS, (
+            'quiet sync issued %d SELECTs, expected %d' % (small, QUIET_SYNC_SELECTS)
+        )
+        assert large == small, (
+            'quiet-sync cost grew from %d to %d SELECTs as the corpus grew; it '
+            'must not scale with merchant count' % (small, large)
+        )
+
+
+def test_sql_failure_during_build_leaves_the_session_usable(app):
+    """A real SQL error, not a mocked function, must not break the page.
+
+    test_build_failure_falls_back_to_in_memory_grouping patches update_index
+    wholesale, so no statement ever reaches the database and the session is
+    never dirtied. That cannot catch the failure that matters: on Postgres a
+    failed statement aborts the surrounding transaction, and without the
+    savepoint in groups_for_detection the fallback's own query would raise.
+    SQLite tolerates this, so this test documents the contract and pins the
+    fallback's output; the savepoint is what makes it hold on Postgres.
+    """
+    with app.app_context():
+        rows = _persist(_mixed())
+        for txn in rows:
+            txn.merchant_key = None
+        db.session.commit()
+
+        def _explode():
+            db.session.execute(text('SELECT * FROM table_that_does_not_exist'))
+
+        with mock.patch('app.merchant_groups.update_index', side_effect=_explode):
+            groups, used_index = groups_for_detection()
+
+        assert used_index is False
+        streams = detect_subscriptions_from_groups(groups, TODAY)
+        assert [s['name'] for s in streams] == \
+            [s['name'] for s in detect_subscriptions(rows, TODAY)]
+
+        # The session must still be usable afterwards — this is the assertion
+        # that would fail on Postgres without the savepoint.
+        assert Transaction.query.count() == len(rows)
 
 
 def test_removed_transactions_do_not_break_the_index(app):

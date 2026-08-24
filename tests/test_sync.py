@@ -1,6 +1,7 @@
 from datetime import date
 from decimal import Decimal
 from unittest.mock import MagicMock, patch
+from sqlalchemy.exc import IntegrityError
 
 import pytest
 from freezegun import freeze_time
@@ -9,7 +10,7 @@ from app.models import db
 from app.sync import (
     sync_all_institutions, run_daily_sync, _upsert_transactions, _mark_removed,
     _upsert_accounts, _refresh_balances, _refresh_liabilities,
-    _refresh_investments,
+    _refresh_investments, _create_account_if_missing,
 )
 
 
@@ -893,3 +894,74 @@ def test_refresh_balances_skips_known_account_with_no_balances(app):
 
         row = Account.query.filter_by(plaid_account_id='acc-001').first()
         assert row.current_balance == Decimal('500.00')
+
+
+def test_refresh_investments_leaves_metadata_alone_for_known_accounts(app):
+    """Create-only on the investments path too.
+
+    Mirrors test_refresh_balances_leaves_metadata_alone_for_known_accounts. The
+    existence guard in `_create_account_if_missing` is the only thing stopping
+    `_refresh_investments` from rewriting metadata on every sync for every
+    investment account, which is what preserves the metadata/balance split of
+    002-decision-plaid-balance-refresh-via-dedicated-endpoint.
+    """
+    inst_id = _make_institution(app)
+    with app.app_context():
+        _upsert_accounts(inst_id, [_mock_account('acc-inv', name='Piggyback Name',
+                                                 mask='1111', type_='investment',
+                                                 subtype='brokerage')])
+        db.session.commit()
+
+        client = MagicMock()
+        client.get_investments.return_value = (
+            [_mock_account('acc-inv', name='Holdings Endpoint Name', mask='2222',
+                           type_='investment', subtype='stock plan')],
+            [_mock_holding('acc-inv', institution_value=1000.00, vested_value=600.00)],
+        )
+        inst = db.session.get(Institution, inst_id)
+        err = _refresh_investments(client, inst)
+        db.session.commit()
+
+        assert err is None
+        row = Account.query.filter_by(plaid_account_id='acc-inv').first()
+        assert row.name == 'Piggyback Name'
+        assert row.mask == '1111'
+        assert row.subtype == 'brokerage'
+        # The vested figures still land — only the metadata is left alone.
+        assert row.vested_value == Decimal('600.00')
+        assert Account.query.count() == 1
+
+
+def test_create_account_if_missing_survives_a_concurrent_insert(app):
+    """A racing sync's INSERT must not abort this one, and must not poison the session.
+
+    plaid_account_id is unique and /api/sync spawns an unsynchronized thread on
+    every dashboard load, so two runs can both see the row missing. The loser's
+    IntegrityError would otherwise escape the refresh's "never re-raises"
+    contract and kill the whole institution's sync.
+
+    The true race needs a second DB session committing between our existence
+    check and our flush, which this suite's single in-memory session cannot
+    stage; the IntegrityError is raised directly instead. What matters is the
+    contract on this side of it: the helper swallows it, and — because the
+    insert ran inside a savepoint — the session is still usable afterwards.
+    Catching the error without the savepoint would leave the session broken and
+    take the sync down anyway, one statement later.
+    """
+    inst_id = _make_institution(app)
+    with app.app_context():
+        acct = _mock_account('acc-race', name='Stock Plan', type_='investment',
+                             subtype='stock plan')
+
+        def racing_insert(institution_id, accounts):
+            raise IntegrityError('INSERT INTO accounts', {}, Exception('duplicate key'))
+
+        with patch('app.sync._upsert_accounts', side_effect=racing_insert):
+            _create_account_if_missing(inst_id, acct)  # must not raise
+
+        # The session survived: it can still query and commit. Without the
+        # savepoint this is where the sync would die instead.
+        assert Account.query.filter_by(plaid_account_id='acc-race').first() is None
+        _upsert_accounts(inst_id, [acct])
+        db.session.commit()
+        assert Account.query.filter_by(plaid_account_id='acc-race').first() is not None

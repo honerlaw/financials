@@ -35,3 +35,48 @@
   settled it pre-merge. It corrected the scratchpad's arithmetic — main is 260,
   not 259, and 6 tests were added, not 7; the two errors cancelled to the right
   total. Corrected above.
+
+## Review triage 2026-08-24
+
+Two finding sets: a minerva audit (spec fidelity + knowledge compliance) run by
+the main model, and a `code-review:code-review` pass at effort `high` over
+`main...HEAD`. Triaged solo.
+
+- **C1 [medium] → SUGGEST (deferred, record strengthened).** An account created
+  only from the holdings payload has its balance written once and never
+  refreshed, while `last_synced_at` is bumped every sync — a stale balance
+  presented as fresh. Already the proposal's open question; the `last_synced_at`
+  half is new and now written into it. Deferred because the fix differs by which
+  way criterion 8 lands, and that resolves minutes after deploy.
+- **C2 [low → FIXED].** Triaged above its reported severity: the new INSERTs can
+  race a concurrent sync (`/api/sync` spawns a thread per dashboard load), and
+  the loser's `IntegrityError` is not a `plaid.ApiException`, so it escapes both
+  refreshes' "never re-raises" contract and `_sync_institution`'s except clause —
+  silently discarding that institution's already-upserted transactions, its
+  SyncLog row, and every institution after it. Extracted
+  `_create_account_if_missing`, which does the insert inside
+  `db.session.begin_nested()` and swallows `IntegrityError`. The savepoint is the
+  load-bearing part: catching the error without one leaves the session broken and
+  the sync dies one statement later.
+- **C3 [low → FIXED].** No test pinned the create-only guard on the investments
+  path, so deleting it as "redundant" would have kept the suite green while
+  reversing 002's metadata/balance split. Added the mirror test.
+- **C4 [low] + M1/M2 → promote phase.** Knowledge 001 ("the piggyback is the sole
+  account source"), 002 ("metadata comes from the piggyback") and 021 (documents
+  `get_investment_holdings`, a method that no longer exists, and asserts the
+  E*TRADE account "showed a single balance on the dashboard" — it never rendered
+  a card at all) are all now wrong or partial. Handled by the promoted entry plus
+  superseded-by pointers, not by code.
+- **M3 → promote phase.** The proposal promises the SyncLog-annotation follow-up
+  is filed; it has to actually be filed.
+- **M4 [low] → IGNORE.** `_create_account_if_missing` queries, then
+  `_upsert_accounts` queries again — only for accounts that do not exist yet, and
+  it mirrors the existing per-account-lookup pattern in both other refreshes.
+
+Note on the race test: the first version tried to stage a real two-writer race
+and passed for the wrong reason — the fake inserted in the same session, so
+`_upsert_accounts` saw the row and updated it and no `IntegrityError` ever
+occurred. A genuine race needs a second session committing between our existence
+check and our flush, which this suite cannot stage. The test now raises the
+error directly and asserts what actually matters on this side of it: the helper
+swallows it *and* the session is still usable afterwards.

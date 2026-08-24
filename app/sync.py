@@ -3,6 +3,7 @@ from decimal import Decimal, ROUND_HALF_UP
 import json
 import plaid
 from flask import current_app
+from sqlalchemy.exc import IntegrityError
 from app.models import db, Institution, Transaction, SyncLog, Account
 from app.plaid_client import PlaidClient
 
@@ -108,6 +109,34 @@ def _sync_institution(client, institution):
     db.session.commit()
 
 
+def _create_account_if_missing(institution_id, acct):
+    """Insert a row for an account no earlier payload created. Never raises.
+
+    `plaid_account_id` is unique, and syncs overlap: /api/sync spawns an
+    unsynchronized thread on every dashboard load, on top of the 7am job and the
+    reconnect trigger. Two runs can both see the row missing for an account that
+    has just appeared, and the loser's INSERT then raises IntegrityError at the
+    next autoflush. That is not a plaid.ApiException, so it would escape both
+    refreshes' documented "never re-raises" contract and _sync_institution's
+    except clause — skipping the commit, discarding the transactions already
+    upserted for this institution, losing the SyncLog row, and killing the
+    remaining institutions in the loop, silently, because the thread just dies.
+
+    The savepoint keeps that race benign: the winner's row is the same row this
+    call would have written, so losing is a no-op.
+    """
+    account_id = getattr(acct, 'account_id', None)
+    if not account_id:
+        return
+    if Account.query.filter_by(plaid_account_id=account_id).first() is not None:
+        return
+    try:
+        with db.session.begin_nested():
+            _upsert_accounts(institution_id, [acct])
+    except IntegrityError:
+        pass
+
+
 def _refresh_balances(client, institution):
     """Force-refresh real-time balances via Plaid's accounts/balance/get.
 
@@ -139,7 +168,7 @@ def _refresh_balances(client, institution):
     for acct in accounts:
         row = Account.query.filter_by(plaid_account_id=acct.account_id).first()
         if row is None:
-            _upsert_accounts(institution.id, [acct])
+            _create_account_if_missing(institution.id, acct)
             continue
         balances = getattr(acct, 'balances', None)
         if balances is None:
@@ -289,11 +318,7 @@ def _refresh_investments(client, institution):
         return f'investment refresh failed: {code}: {e}'
 
     for acct in accounts or []:
-        account_id = getattr(acct, 'account_id', None)
-        if not account_id:
-            continue
-        if Account.query.filter_by(plaid_account_id=account_id).first() is None:
-            _upsert_accounts(institution.id, [acct])
+        _create_account_if_missing(institution.id, acct)
 
     if not holdings:
         return None

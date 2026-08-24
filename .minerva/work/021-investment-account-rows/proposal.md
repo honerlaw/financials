@@ -173,6 +173,14 @@ the account's balance will only ever be written once, at creation — because
 genuine follow-up, and criterion 8's observation of whether the card's balance
 moves on the following sync is what detects it.
 
+Review sharpened this: the vested-totals loop sets `last_synced_at = now` on
+every sync regardless, so in that branch the card and the daily digest would
+present a balance frozen at creation day *as freshly synced*, with no staleness
+signal. That is the part worth acting on if criterion 8 lands that way — the
+misreported freshness, more than the stale number itself. Not fixed here
+because the fix differs depending on the answer (if balance/get does return the
+account, there is nothing to fix), and the answer arrives minutes after deploy.
+
 **Whether E*TRADE reports a `vested_value` at all** remains open from unit 019
 and is untouched by this change. If the card appears with a bare balance and no
 vested split, that is 019's open question surfacing — a separate matter from

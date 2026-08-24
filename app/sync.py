@@ -23,11 +23,10 @@ def _utcnow():
 def run_daily_sync():
     """The 7am scheduled job: sync everything, then text the daily digest.
 
-    This is the ONLY path that notifies. The sync `/api/sync` kicks off on every
-    dashboard page load calls ``sync_all_institutions`` directly and stays
-    silent, so the digest lands at a predictable hour instead of whenever the
-    dashboard is next opened. Syncing first means the balances in the text are
-    as fresh as Plaid can make them.
+    This is the ONLY path that notifies. ``/api/sync`` calls
+    ``sync_all_institutions`` directly and stays silent, so a manual sync never
+    texts and the digest lands at a fixed hour. Syncing first means the balances
+    in the text are as fresh as Plaid can make them.
     """
     sync_all_institutions()
     _send_daily_digest_safe()
@@ -134,8 +133,8 @@ def _create_account_if_missing(institution_id, acct):
     """Insert a row for an account no earlier payload created. Never raises.
 
     `plaid_account_id` is unique, and syncs overlap: /api/sync spawns an
-    unsynchronized thread on every dashboard load, on top of the 7am job and the
-    reconnect trigger. Two runs can both see the row missing for an account that
+    unsynchronized thread on every press of the dashboard's "Sync now" button, on
+    top of the 7am job and the reconnect trigger. Two runs can both see the row missing for an account that
     has just appeared, and the loser's INSERT then raises IntegrityError at the
     next autoflush. That is not a plaid.ApiException, so it would escape both
     refreshes' documented "never re-raises" contract and _sync_institution's

@@ -32,7 +32,7 @@ ship inert and be verified against real spend before any number is wired up.
 lives in the shared Doppler project, where renaming is cross-repo churn.)
 
 Concurrency: dispatch now happens only from the single 7am job (``max_instances=1``),
-not from the per-page-load sync, so overlap is not expected. The body still runs
+not from the button-triggered sync, so overlap is not expected. The body still runs
 under a module-level ``threading.Lock`` as defence in depth, which fully
 serializes check→send→record because the app runs a SINGLE gunicorn worker
 (``entrypoint.sh: --workers 1``) — an invariant the in-process APScheduler

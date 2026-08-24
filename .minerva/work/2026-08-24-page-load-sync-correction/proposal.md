@@ -7,14 +7,14 @@
 ## Goal
 
 Correct the claim that `POST /api/sync` fires on every dashboard page load —
-which was never true — everywhere it appears: four sites in code and tests, six
-in the knowledge wiki. Corrections in the wiki are annotated rather than silently
+which was never true — everywhere it appears: thirteen sites across eight files,
+in code, tests and the knowledge wiki. Corrections in the wiki are annotated rather than silently
 rewritten, following the convention entry 014 already set.
 
 ## Why
 
-Three code comments and four knowledge entries assert that `/api/sync` runs on
-every dashboard page load. It does not. `/api/sync` is POST-only and has exactly
+Three code files, two of them tests, and four wiki files assert that `/api/sync`
+runs on every dashboard page load. It does not. `/api/sync` is POST-only and has exactly
 one caller: `triggerSync(btn)`, wired to a button's `onclick` in
 `app/templates/base.html`.
 
@@ -74,7 +74,7 @@ records, so they are simply corrected.
    containing either substring without being the exact term causes the reciprocal
    back-link to be refused, leaving a warning nothing auto-repairs.
 
-### Scope — 10 sites across 7 files
+### Scope — 13 sites across 8 files
 
 **Code and tests** (corrected outright):
 - `app/sync.py`, `run_daily_sync` docstring — two false clauses: the page-load
@@ -88,6 +88,9 @@ records, so they are simply corrected.
 - `tests/test_sync.py:489` — the function *name* `test_page_load_sync_does_not_text`
   plus its docstring, which restates both false clauses. The assertion itself is
   correct and unchanged; only the name and prose are wrong.
+- `tests/test_sync.py:939` — `test_create_account_if_missing_survives_a_concurrent_insert`'s
+  docstring mirrors `_create_account_if_missing`'s. Found by the criterion-1 grep
+  after both scope reviews had closed; see the note under Success criteria.
 
 **Knowledge** (annotated in place):
 - `016-decision-daily-digest-notifier.md` — three occurrences: `**Summary**`,
@@ -98,6 +101,12 @@ records, so they are simply corrected.
   trigger description is not.
 - `overview.md` — two occurrences.
 - `index.md` — 016's catalog line (hand-edited; see trap 1).
+
+**Left uncorrected on purpose:** the historical `.minerva/work/*/proposal.md`
+files and archived scratchpads that carry the claim — including
+`016-daily-balance-digest/proposal.md:22`, which is where it entered the wiki.
+They record what a unit believed at the time, which is what makes them the
+evidence for the propagation chain; rewriting them would erase it.
 
 **Explicitly out of scope:** a corpus-wide audit for *other* unverified runtime
 claims. Offered to the user at intake and declined. This unit completes the
@@ -130,8 +139,11 @@ sync firing. Both statements survive the correction and must not be swept up.
    and the generalizable failure mode: the only authoritative source for runtime
    behaviour is the call site, and mutually-corroborating documentation is one
    source, not two.
-8. **`knowledge_lint.py` reports the corpus clean**, with every new `## Related`
-   label free of the `DIRECTIONAL_TERMS` substrings.
+8. **`knowledge_lint.py` reports 0 errors**, with any warnings limited to
+   `pending reconciliation` — the expected state on a work-unit branch, since
+   promote is add-only and `minerva:cleanup` writes the reciprocals and catalog
+   lines on the default branch. Every new `## Related` label is free of the
+   `DIRECTIONAL_TERMS` substrings, so none of those reciprocals will be refused.
 
 ## Open Questions
 

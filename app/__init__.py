@@ -44,6 +44,9 @@ def create_app(config=None):
         TWILIO_AUTH_TOKEN=os.getenv('TWILIO_AUTH_TOKEN', ''),
         TWILIO_FROM_NUMBER=os.getenv('TWILIO_FROM_NUMBER', ''),
         BUDGET_ALERT_RECIPIENTS=os.getenv('BUDGET_ALERT_RECIPIENTS', ''),
+        # Accounts kept out of the digest's net-worth total (app/notifications.py).
+        # Comma-separated `institution:account` patterns; unset excludes nothing.
+        NET_WORTH_EXCLUDED_ACCOUNTS=os.getenv('NET_WORTH_EXCLUDED_ACCOUNTS', ''),
     )
 
     if config:

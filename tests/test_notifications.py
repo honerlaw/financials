@@ -8,7 +8,8 @@ from sqlalchemy.exc import OperationalError
 
 from app.models import db, Account, Institution, Transaction, DailyDigest
 from app.notifications import (
-    account_line, budget_line, digest_body, history_line, send_daily_digest,
+    AccountRow, account_line, account_net_worth, budget_line, digest_accounts,
+    digest_body, history_line, net_worth_line, send_daily_digest,
     send_digest_now,
 )
 
@@ -73,7 +74,7 @@ def test_digest_body_contains_budget_week_and_every_account():
     body = digest_body(TODAY, Decimal('750'), [
         ('Amex', 'Platinum', '1004', Decimal('2143.19')),
         ('Truist', 'Checking', '3390', Decimal('4880.02')),
-    ], HISTORY)
+    ], HISTORY, Decimal('7023.21'))
     assert body.startswith('Onerlaw LLC\nGood morning — Sat Aug 8')
     assert 'Budget: $750 of $1,000 (75%) — $250 left' in body
     assert 'Week of Aug 2' in body
@@ -82,7 +83,7 @@ def test_digest_body_contains_budget_week_and_every_account():
 
 
 def test_digest_body_with_no_accounts():
-    body = digest_body(TODAY, Decimal('0'), [], HISTORY)
+    body = digest_body(TODAY, Decimal('0'), [], HISTORY, Decimal('0'))
     assert 'No linked accounts.' in body
 
 
@@ -94,7 +95,7 @@ def test_digest_body_is_branded_and_carries_opt_out(accounts):
     """A2P 10DLC registration requires the business name and opt-out language in
     the body, and carrier traffic has to match the samples filed with the
     campaign — so this holds whether or not any account is linked."""
-    body = digest_body(TODAY, Decimal('750'), accounts, HISTORY)
+    body = digest_body(TODAY, Decimal('750'), accounts, HISTORY, Decimal('12'))
     assert body.startswith('Onerlaw LLC\n')
     assert body.endswith('\nReply STOP to unsubscribe.')
 
@@ -105,7 +106,7 @@ def test_history_line_formats_a_week_in_whole_dollars():
 
 
 def test_digest_body_lists_the_four_completed_weeks_oldest_first():
-    body = digest_body(TODAY, Decimal('750'), [], HISTORY)
+    body = digest_body(TODAY, Decimal('750'), [], HISTORY, Decimal('0'))
     assert 'Last 4 weeks' in body
     for expected in ('Jul 5–11: $842', 'Jul 12–18: $1,130',
                      'Jul 19–25: $0', 'Jul 26 – Aug 1: $1,204'):
@@ -117,7 +118,7 @@ def test_digest_body_lists_the_four_completed_weeks_oldest_first():
 def test_digest_body_puts_the_history_between_budget_and_balances():
     body = digest_body(TODAY, Decimal('750'), [
         ('Truist', 'Checking', '3390', Decimal('4880.02')),
-    ], HISTORY)
+    ], HISTORY, Decimal('4880.02'))
     assert body.index('Week of Aug 2') < body.index('Last 4 weeks') \
         < body.index('Balances')
 
@@ -125,8 +126,201 @@ def test_digest_body_puts_the_history_between_budget_and_balances():
 def test_digest_body_history_never_repeats_the_current_week():
     """The running week is the budget line's job; a partial week in a column of
     finished ones reads as a drop that is not real."""
-    body = digest_body(TODAY, Decimal('750'), [], HISTORY)
+    body = digest_body(TODAY, Decimal('750'), [], HISTORY, Decimal('0'))
     assert 'Aug 2–8' not in body
+
+
+# ── net worth (pure) ──────────────────────────────────────────────────────────
+
+def _row(institution='SoFi', slug='sofi', account='Checking', mask='1234',
+         balance=Decimal('100'), status='active', type='depository',
+         unvested=None):
+    return AccountRow(institution, slug, account, mask, balance, status, type,
+                      unvested)
+
+
+def test_net_worth_line_formats_dollars_and_cents():
+    assert net_worth_line(Decimal('4267.62')) == 'Net worth: $4,267.62'
+    assert net_worth_line(Decimal('0')) == 'Net worth: $0.00'
+
+
+def test_net_worth_line_puts_the_minus_before_the_dollar_sign():
+    """Owing more than you hold is reachable — a mortgage is a loan account."""
+    assert net_worth_line(Decimal('-1234.56')) == 'Net worth: -$1,234.56'
+
+
+def test_asset_contributes_its_balance():
+    assert account_net_worth(_row(balance=Decimal('4880.02'))) == Decimal('4880.02')
+
+
+@pytest.mark.parametrize('acct_type', ['credit', 'loan'])
+def test_liability_balance_is_subtracted(acct_type):
+    """Plaid reports a card's or loan's balance as the amount OWED, positive,
+    and nothing upstream flips the sign — net worth is the only place that
+    knows the difference."""
+    row = _row(balance=Decimal('612.40'), type=acct_type)
+    assert account_net_worth(row) == Decimal('-612.40')
+
+
+def test_liability_type_matching_is_case_insensitive():
+    assert account_net_worth(_row(balance=Decimal('10'), type='CREDIT')) \
+        == Decimal('-10')
+
+
+def test_unknown_or_null_type_counts_as_an_asset():
+    for acct_type in (None, 'other', 'investment'):
+        assert account_net_worth(_row(balance=Decimal('50'), type=acct_type)) \
+            == Decimal('50')
+
+
+def test_null_balance_contributes_nothing():
+    assert account_net_worth(_row(balance=None)) == Decimal('0')
+
+
+def test_unvested_equity_is_netted_out_of_an_asset():
+    """`vested_value` sums only holdings reporting a vested figure, so plain
+    brokerage positions in the same account appear in neither equity total —
+    substituting it would drop them. Subtracting `unvested_value` keeps them."""
+    row = _row(balance=Decimal('84200'), type='investment',
+               unvested=Decimal('52800'))
+    assert account_net_worth(row) == Decimal('31400')
+
+
+def test_unvested_larger_than_the_balance_clamps_at_zero():
+    """The balance and the holdings valuation come from different Plaid
+    endpoints, so a stale price can put unvested above the account's balance."""
+    row = _row(balance=Decimal('100'), type='investment',
+               unvested=Decimal('500'))
+    assert account_net_worth(row) == Decimal('0')
+
+
+# ── exclusion patterns (pure) ─────────────────────────────────────────────────
+
+@pytest.mark.parametrize('pattern', [
+    'sofi:checking',      # slug + account name
+    'SoFi:CHECKING',      # case-insensitive on both halves
+    'sofi:1234',          # account half as an exact mask
+    'so:check',           # substrings on both halves
+    'sofi',               # no account half: the whole institution
+    'sofi:',              # empty account half reads the same way
+])
+def test_patterns_that_name_the_sofi_checking_account(pattern):
+    display, total, unmatched = digest_accounts([_row()], [pattern])
+    assert total == Decimal('0')
+    assert unmatched == []
+    assert display[0][5] is True
+
+
+@pytest.mark.parametrize('pattern', [
+    'truist:checking',    # right account name, wrong bank
+    'sofi:savings',       # right bank, wrong account
+    'sofi:123',           # mask must match exactly, not by substring
+    ':checking',          # an account half alone can never match
+])
+def test_patterns_that_do_not_name_it(pattern):
+    display, total, unmatched = digest_accounts([_row()], [pattern])
+    assert total == Decimal('100')
+    assert unmatched == [pattern]
+    assert display[0][5] is False
+
+
+def test_a_pattern_is_anchored_to_one_institution():
+    """Excluding "the SoFi checking account" must not take the Truist one."""
+    rows = [_row(), _row(institution='Truist', slug='truist', mask='3390',
+                         balance=Decimal('4880.02'))]
+    display, total, _ = digest_accounts(rows, ['sofi:checking'])
+    assert total == Decimal('4880.02')
+    assert [d[5] for d in display] == [True, False]
+
+
+def test_the_institution_display_name_also_matches():
+    row = _row(institution='SoFi Bank', slug='ins_116794')
+    _, total, unmatched = digest_accounts([row], ['sofi bank:checking'])
+    assert total == Decimal('0') and unmatched == []
+
+
+def test_unmatched_patterns_are_returned_rather_than_swallowed():
+    """A typo'd or stale pattern silently counts an account the user believes
+    is excluded — the caller has to be able to say so."""
+    _, total, unmatched = digest_accounts([_row()], ['sofi:checking', 'chase:x'])
+    assert total == Decimal('0')
+    assert unmatched == ['chase:x']
+
+
+def test_an_excluded_account_is_still_displayed():
+    """It stays listed so an over-broad pattern shows up in the morning text."""
+    display, _, _ = digest_accounts([_row()], ['sofi'])
+    assert len(display) == 1
+    assert display[0][:4] == ('SoFi', 'Checking', '1234', Decimal('100'))
+
+
+def test_digest_accounts_totals_assets_against_liabilities():
+    rows = [
+        _row(institution='Truist', slug='truist', balance=Decimal('4880.02')),
+        _row(institution='Citi', slug='citi', account='Double Cash',
+             balance=Decimal('612.40'), type='credit'),
+        _row(institution='SoFi', slug='sofi', balance=Decimal('412.00')),
+    ]
+    _, total, _ = digest_accounts(rows, ['sofi:checking'])
+    assert total == Decimal('4267.62')
+
+
+def test_a_stale_account_still_counts_toward_net_worth():
+    """Its line already says (reconnect needed); dropping the balance entirely
+    would understate net worth far worse than a slightly old number does."""
+    display, total, _ = digest_accounts([_row(status='login_required')], [])
+    assert total == Decimal('100')
+    assert display[0][4] is True
+
+
+# ── the suffixes that explain a line the total does not match ─────────────────
+
+def test_account_line_marks_an_excluded_account():
+    assert account_line('SoFi', 'Checking', '1234', Decimal('412'),
+                        excluded=True) == \
+        'SoFi · Checking ••1234: $412.00 (not counted)'
+
+
+def test_account_line_marks_a_balance_discounted_for_unvested_equity():
+    assert account_line('E*TRADE', 'Stock Plan', '7781', Decimal('84200'),
+                        unvested_discounted=True) == \
+        'E*TRADE · Stock Plan ••7781: $84,200.00 (unvested excluded)'
+
+
+def test_account_line_combines_notes_in_one_parenthetical():
+    assert account_line('SoFi', 'Checking', '1234', Decimal('412'),
+                        stale=True, excluded=True) == \
+        'SoFi · Checking ••1234: $412.00 (reconnect needed, not counted)'
+
+
+def test_exclusion_suppresses_the_unvested_note():
+    """An account contributing nothing need not explain how much was discounted."""
+    line = account_line('E*TRADE', 'Stock Plan', '7781', Decimal('84200'),
+                        excluded=True, unvested_discounted=True)
+    assert line.endswith('(not counted)')
+
+
+def test_digest_accounts_flags_only_accounts_with_unvested_equity():
+    rows = [_row(unvested=Decimal('52800')), _row(unvested=None),
+            _row(unvested=Decimal('0'))]
+    assert [d[6] for d in digest_accounts(rows, [])[0]] == [True, False, False]
+
+
+# ── the net-worth line in the message ─────────────────────────────────────────
+
+def test_digest_body_closes_the_balances_block_with_net_worth():
+    body = digest_body(TODAY, Decimal('750'), [
+        ('Truist', 'Checking', '3390', Decimal('4880.02')),
+    ], HISTORY, Decimal('4267.62'))
+    assert 'Net worth: $4,267.62' in body
+    assert body.index('Balances') < body.index('Truist · Checking') \
+        < body.index('Net worth:') < body.index('Reply STOP')
+
+
+def test_digest_body_omits_net_worth_when_nothing_is_linked():
+    """`Net worth: $0.00` under "No linked accounts." is noise, not information."""
+    body = digest_body(TODAY, Decimal('0'), [], HISTORY, Decimal('0'))
+    assert 'Net worth' not in body
 
 
 # ── send_daily_digest (orchestration) ─────────────────────────────────────────
@@ -157,10 +351,15 @@ def _seed_inst(week_total=None, txn_date=None, name='B', accounts=(),
             account_id='a1', date=txn_date or TODAY, description='x',
             amount=Decimal(week_total), category='FOOD_AND_DRINK',
         ))
-    for i, (acct_name, mask, balance) in enumerate(accounts):
+    for i, spec in enumerate(accounts):
+        # (name, mask, balance[, type[, unvested_value]])
+        acct_name, mask, balance = spec[:3]
+        acct_type = spec[3] if len(spec) > 3 else 'depository'
+        unvested = spec[4] if len(spec) > 4 else None
         db.session.add(Account(
             institution_id=inst.id, plaid_account_id=f'{name}-acct-{i}',
             name=acct_name, mask=mask, current_balance=balance,
+            type=acct_type, unvested_value=unvested,
         ))
     db.session.commit()
     return inst.id
@@ -610,3 +809,108 @@ def test_sender_construction_failure_propagates(app):
                 'TWILIO_AUTH_TOKEN': '0' * 32,
                 'TWILIO_FROM_NUMBER': '+15550000000',
             })
+
+
+# ── net worth through the send paths ──────────────────────────────────────────
+
+def _net_worth_cfg(excluded=''):
+    return {'BUDGET_ALERT_RECIPIENTS': '+1111',
+            'NET_WORTH_EXCLUDED_ACCOUNTS': excluded}
+
+
+def test_scheduled_digest_nets_liabilities_off_assets(app):
+    with app.app_context():
+        _seed_inst('0.00', name='Truist',
+                   accounts=[('Checking', '3390', Decimal('4880.02'))])
+        _seed_inst(None, name='Citi',
+                   accounts=[('Double Cash', '1234', Decimal('612.40'), 'credit')])
+        sender = FakeSender()
+        send_daily_digest(db.session, TODAY, _net_worth_cfg(), sender=sender)
+
+        assert 'Net worth: $4,267.62' in sender.sent[0][1]
+
+
+def test_scheduled_digest_honours_the_exclusion_list(app):
+    with app.app_context():
+        _seed_inst('0.00', name='Truist',
+                   accounts=[('Checking', '3390', Decimal('4880.02'))])
+        _seed_inst(None, name='SoFi',
+                   accounts=[('Checking', '1234', Decimal('412.00'))])
+        sender = FakeSender()
+        send_daily_digest(db.session, TODAY,
+                          _net_worth_cfg('sofi:checking'), sender=sender)
+
+        body = sender.sent[0][1]
+        assert 'SoFi · Checking ••1234: $412.00 (not counted)' in body
+        assert 'Net worth: $4,880.02' in body
+
+
+def test_unset_exclusion_list_counts_every_account(app):
+    with app.app_context():
+        _seed_inst('0.00', name='SoFi',
+                   accounts=[('Checking', '1234', Decimal('412.00'))])
+        sender = FakeSender()
+        send_daily_digest(db.session, TODAY,
+                          {'BUDGET_ALERT_RECIPIENTS': '+1111'}, sender=sender)
+
+        body = sender.sent[0][1]
+        assert 'Net worth: $412.00' in body
+        assert 'not counted' not in body
+
+
+def test_an_exclusion_that_matches_nothing_is_logged(app, caplog):
+    """Silent no-match is the failure this feature cannot afford: the user
+    believes an account is excluded and the total quietly disagrees."""
+    with app.app_context():
+        _seed_inst('0.00', name='Truist',
+                   accounts=[('Checking', '3390', Decimal('10'))])
+        sender = FakeSender()
+        with caplog.at_level('WARNING'):
+            send_daily_digest(db.session, TODAY,
+                              _net_worth_cfg('sofi:checking'), sender=sender)
+
+        assert 'NET_WORTH_EXCLUDED_ACCOUNTS matched no account' in caplog.text
+        assert 'sofi:checking' in caplog.text
+        assert 'Net worth: $10.00' in sender.sent[0][1]
+
+
+def test_unvested_equity_is_netted_out_through_the_send_path(app):
+    with app.app_context():
+        _seed_inst('0.00', name='E*TRADE', accounts=[
+            ('Stock Plan', '7781', Decimal('84200'), 'investment',
+             Decimal('52800')),
+        ])
+        sender = FakeSender()
+        send_daily_digest(db.session, TODAY, _net_worth_cfg(), sender=sender)
+
+        body = sender.sent[0][1]
+        assert 'E*TRADE · Stock Plan ••7781: $84,200.00 (unvested excluded)' in body
+        assert 'Net worth: $31,400.00' in body
+
+
+def test_manual_send_carries_the_same_net_worth_line(app):
+    """The button and the 7am job build one message through one seam."""
+    with app.app_context():
+        _seed_inst('0.00', name='Truist',
+                   accounts=[('Checking', '3390', Decimal('4880.02'))])
+        _seed_inst(None, name='SoFi',
+                   accounts=[('Checking', '1234', Decimal('412.00'))])
+        sender = FakeSender()
+        result = send_digest_now(db.session, TODAY,
+                                 _net_worth_cfg('sofi:checking'), sender=sender)
+
+        assert result['sent'] == ['+1111']
+        body = sender.sent[0][1]
+        assert 'SoFi · Checking ••1234: $412.00 (not counted)' in body
+        assert 'Net worth: $4,880.02' in body
+
+
+def test_a_liability_never_claims_an_unvested_discount():
+    """The note and the arithmetic come from one predicate. A credit row
+    carrying an unvested_value is negated outright — no discount is applied, so
+    the line must not say one was."""
+    row = _row(balance=Decimal('612.40'), type='credit',
+               unvested=Decimal('100'))
+    display, total, _ = digest_accounts([row], [])
+    assert total == Decimal('-612.40')
+    assert display[0][6] is False

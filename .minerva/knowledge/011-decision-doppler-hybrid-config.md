@@ -73,3 +73,4 @@ everything through `os.getenv`, Doppler only has to *populate the environment* �
   contributed the `TWILIO_*` / `BUDGET_ALERT_RECIPIENTS` config now routed through Doppler; shares the `os.getenv` + `--workers 1` deploy shape.
 - [[016-decision-daily-digest-notifier]] — see also
 - [[017-pattern-migration-chain-is-postgres-only]] — see also
+- [[024-decision-digest-net-worth]] — see also

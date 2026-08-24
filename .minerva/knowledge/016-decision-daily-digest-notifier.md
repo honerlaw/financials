@@ -96,3 +96,4 @@ morning, carrying account balances as well as budget status.
   how this unit's migration had to be verified.
 - [[018-decision-on-demand-digest-trigger]] — see also
 - [[022-decision-digest-four-week-spend-history]] — see also
+- [[024-decision-digest-net-worth]] — see also

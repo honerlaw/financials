@@ -77,3 +77,4 @@ against four $1,200 weeks.
   the `is_spend` definition and Sun–Sat week boundaries the history is computed with.
 - [[018-decision-on-demand-digest-trigger]] — see also
   why the "Text me this" button picked the new block up for free.
+- [[024-decision-digest-net-worth]] — see also

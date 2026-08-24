@@ -35,7 +35,7 @@ providing dedup.
    kicks off when the dashboard's "Sync now" button is pressed — near-real-time,
    not once-a-day. (Originally written as "on every page load", which was never
    true; see
-   [[029-pattern-only-the-call-site-is-authoritative-for-runtime-behaviour]].) The hook is
+   [[034-pattern-only-the-call-site-is-authoritative-for-runtime-behaviour]].) The hook is
    **non-fatal**: the import *and* the call sit inside one `try/except` logging
    via `current_app.logger` (never `SyncLog.error`), mirroring the
    `_refresh_balances` contract ([[007-decision-plaid-reconnect-update-mode]]).

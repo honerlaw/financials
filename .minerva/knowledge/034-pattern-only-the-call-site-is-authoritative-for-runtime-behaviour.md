@@ -2,12 +2,12 @@
 
 **Date**: 2026-08-24
 **Type**: pattern
-**Summary**: A claim that `/api/sync` fired on every dashboard page load lived at thirteen sites across eight files — code, tests and the knowledge wiki — and was never true in any revision; it spread because each new author read it from the previous document rather than the call site, so the usual "check a second source" mitigation confirmed it instead of catching it.
+**Summary**: A claim that `/api/sync` fired on every dashboard page load lived at fourteen sites across nine files — code, tests and the knowledge wiki — and was never true in any revision; it spread because each new author read it from the previous document rather than the call site, so the usual "check a second source" mitigation confirmed it instead of catching it.
 **Context**: .minerva/work/2026-08-24-page-load-sync-correction
 
 ## The claim, and the archaeology
 
-Thirteen places in this repo stated that `POST /api/sync` runs on every dashboard
+Fourteen places in this repo stated that `POST /api/sync` runs on every dashboard
 page load. `/api/sync` is POST-only and has exactly one caller: `triggerSync(btn)`
 in `app/templates/base.html`, behind a button's `onclick`.
 
@@ -25,7 +25,7 @@ every other document that repeated it.
 
 ## How it spread
 
-Thirteen sites across eight files, none of them verified once. Five in code and
+Fourteen sites across nine files, none of them verified once. Five in code and
 tests:
 
 - `app/sync.py`, `run_daily_sync` docstring — the claim, plus a contrast drawn
@@ -46,6 +46,11 @@ And eight in the wiki:
   bullet
 - `overview.md`, twice
 - `index.md`, in the catalog line mirroring 016's Summary
+
+And one in a live work-unit record:
+
+- `016-daily-balance-digest/followups.md`, proposing deferred work built on the
+  path that does not exist
 
 Each author had a plausible source: the previous document. The chain is still on
 disk. `.minerva/work/016-daily-balance-digest/proposal.md:22` states it as
@@ -97,10 +102,11 @@ Two further habits this incident argues for:
   something every future agent reads as settled.
 - **When correcting such a claim, grep for every form of it before declaring
   done — do not work from a list.** This one was inventoried at three sites, then
-  ten, then thirteen. The first revision came from one independent reviewer, the
-  second from another, and the *last* site was found by neither: it surfaced only
-  when a mechanical repo-wide sweep was run as an acceptance check. Three careful
-  readers each produced an incomplete list. A partial correction is worse than
+  ten, then thirteen, then fourteen. Four counts, four undercounts: two
+  independent reviewers each found sites the previous pass had missed, a
+  mechanical repo-wide sweep found one both had missed, and a completion check
+  found a fourteenth that the sweep's own exclusion rule had wrongly filtered
+  out — the sweep was correct, its exclusion was not. A partial correction is worse than
   none, because it leaves the surviving copies looking freshly confirmed.
 
 ## Implications
@@ -116,10 +122,20 @@ Two further habits this incident argues for:
   [[023-bug-transactions-sync-is-not-the-only-account-source]] is likewise real —
   overlapping syncs come from the 7am job, the reconnect trigger, and repeated
   button presses.
-- The historical `.minerva/work/*/proposal.md` and archived scratchpads that
-  carry the claim were left uncorrected on purpose. They record what a unit
-  believed at the time, which is exactly what makes them evidence here; rewriting
-  them would erase the propagation chain this entry documents.
+- **Correcting a record depends on whether it is live or archival — not on which
+  directory it sits in.** That distinction is easy to get wrong: this unit first
+  exempted all of `.minerva/work/` as historical and missed a live site inside it.
+  `proposal.md` and `scratchpad.archive.md` describe what a unit once believed and
+  are evidence, so they were deliberately left carrying the claim. `followups.md`
+  is a standing worklist that `minerva:review`, `minerva:promote` and every
+  `propose-ship-*` orchestrator re-read when scoping work — a false premise there
+  is a live instruction, not archaeology. `016-daily-balance-digest/followups.md`
+  proposed building "a bounded catch-up on the page-load sync path", work with no
+  substrate at all.
+  Its correction was **appended, not written in place**: `backfill-followups`
+  specifies that `followups.md` files are "appended to, never rewritten". The
+  in-place annotation convention that applies to wiki entries does not transfer
+  to every record.
 - `index.md`'s catalog lines do **not** regenerate from an entry's `**Summary**`.
   `knowledge_fix.py::plan_index` preserves each surviving line verbatim and only
   adds lines for entries that lack one, and no lint check compares the two. A

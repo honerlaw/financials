@@ -19,7 +19,7 @@ carrying account balances as well as budget status.
 repeated it in the Summary and in Decision 2 below. That was never true — the
 endpoint has only ever been called from a button's `onclick`. The unpredictable
 *timing* that motivated this decision was real, but its stated cause was not.
-See [[029-pattern-only-the-call-site-is-authoritative-for-runtime-behaviour]].)
+See [[034-pattern-only-the-call-site-is-authoritative-for-runtime-behaviour]].)
 
 ## Decisions
 

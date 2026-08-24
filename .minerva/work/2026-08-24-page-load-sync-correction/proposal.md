@@ -1,14 +1,14 @@
 # Proposal: page-load-sync-correction
 
 **Date**: 2026-08-24
-**Status**: Draft
+**Status**: Draft (replanned 2026-08-24 — see replan.md)
 **Closes**: #44
 
 ## Goal
 
 Correct the claim that `POST /api/sync` fires on every dashboard page load —
-which was never true — everywhere it appears: thirteen sites across eight files,
-in code, tests and the knowledge wiki. Corrections in the wiki are annotated rather than silently
+which was never true — everywhere it appears: fourteen sites across nine files,
+in code, tests, the knowledge wiki and one live work-unit record. Corrections in the wiki are annotated rather than silently
 rewritten, following the convention entry 014 already set.
 
 ## Why
@@ -74,7 +74,7 @@ records, so they are simply corrected.
    containing either substring without being the exact term causes the reciprocal
    back-link to be refused, leaving a warning nothing auto-repairs.
 
-### Scope — 13 sites across 8 files
+### Scope — 14 sites across 9 files
 
 **Code and tests** (corrected outright):
 - `app/sync.py`, `run_daily_sync` docstring — two false clauses: the page-load
@@ -102,11 +102,20 @@ records, so they are simply corrected.
 - `overview.md` — two occurrences.
 - `index.md` — 016's catalog line (hand-edited; see trap 1).
 
-**Left uncorrected on purpose:** the historical `.minerva/work/*/proposal.md`
-files and archived scratchpads that carry the claim — including
-`016-daily-balance-digest/proposal.md:22`, which is where it entered the wiki.
-They record what a unit believed at the time, which is what makes them the
-evidence for the propagation chain; rewriting them would erase it.
+**Live work-unit records** (corrected by appending, not rewriting):
+- `.minerva/work/016-daily-balance-digest/followups.md` — proposes "a bounded
+  catch-up on the page-load sync path", deferred work with no substrate. A dated
+  correction note is appended beneath the original, which stays exactly as
+  written: `backfill-followups` specifies `followups.md` files are "appended to,
+  never rewritten". Added after the completion gate; see `replan.md`.
+
+**Left uncorrected on purpose:** the *archival* records — `proposal.md` files and
+`scratchpad.archive.md` — that carry the claim, including
+`016-daily-balance-digest/proposal.md:22`, where it entered the wiki. They record
+what a unit believed at the time, which is what makes them the evidence for the
+propagation chain; rewriting them would erase it. The distinction is live vs
+archival, **not** which directory the file sits in — drawing it by directory is
+what caused the 14th site to be missed.
 
 **Explicitly out of scope:** a corpus-wide audit for *other* unverified runtime
 claims. Offered to the user at intake and declined. This unit completes the
@@ -130,16 +139,20 @@ sync firing. Both statements survive the correction and must not be swept up.
    and 010's "fires from the sync path, every sync" are unchanged; only their
    premises are corrected. The concurrency rationale in
    `_create_account_if_missing` and in 023 still motivates its savepoint.
-4. **`app/sync.py` and `app/notifications.py` diffs are docstring/comment only** —
+4. **No live document under `.minerva/work/` asserts the claim unannotated.**
+   "Live" means the tooling re-reads it when scoping work — `followups.md`, an
+   active `scratchpad.md`, a `replan.md`. Archival records (`proposal.md`,
+   `scratchpad.archive.md`) deliberately still carry it, as evidence.
+5. **`app/sync.py` and `app/notifications.py` diffs are docstring/comment only** —
    no executable line changes in either.
-5. **The test still passes and still asserts the same thing.** Only its name and
+6. **The test still passes and still asserts the same thing.** Only its name and
    docstring change; `sync_all_institutions()` must still be shown not to notify.
-6. **Full suite green.**
-7. **A new `Type: pattern` knowledge entry** records the archaeology (`7043b4e`)
+7. **Full suite green.**
+8. **A new `Type: pattern` knowledge entry** records the archaeology (`7043b4e`)
    and the generalizable failure mode: the only authoritative source for runtime
    behaviour is the call site, and mutually-corroborating documentation is one
    source, not two.
-8. **`knowledge_lint.py` reports 0 errors**, with any warnings limited to
+9. **`knowledge_lint.py` reports 0 errors**, with any warnings limited to
    `pending reconciliation` — the expected state on a work-unit branch, since
    promote is add-only and `minerva:cleanup` writes the reciprocals and catalog
    lines on the default branch. Every new `## Related` label is free of the
@@ -152,7 +165,8 @@ broader corpus audit.
 
 One thing the user should know rather than discover in the diff: the option they
 approved was previewed as "3 files, prose only, no executable line changes". Both
-scope gates found the inventory materially larger — 10 sites, 7 files — and
-renaming a test function is an executable line change. The direction is unchanged;
-the extent grew because leaving five sites asserting the false claim would
-reproduce the exact failure #44 exists to prevent.
+scope gates found the inventory materially larger, and the acceptance sweep and
+the completion gate each grew it again — 14 sites across 9 files, against the 3
+the issue named — and renaming a test function is an executable line change. The
+direction is unchanged; the extent grew because every site left asserting the
+false claim reproduces the exact failure #44 exists to prevent.

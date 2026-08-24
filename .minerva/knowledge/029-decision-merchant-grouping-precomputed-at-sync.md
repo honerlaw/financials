@@ -73,3 +73,5 @@ build got 5.8x cheaper.
 - [[005-decision-bills-inactive-override]] — why /bills shares the same grouping and therefore the same fix
 - [[030-bug-derived-index-needs-a-nothing-to-compute-state]] — a failure mode this index shipped with and had to fix
 - [[032-constraint-plaid-entity-ids-must-never-fuzzy-merge]] — the rule that keeps the indexed and in-memory paths agreeing
+- [[031-pattern-version-stamp-must-invalidate-derived-inputs]] — see also
+- [[033-pattern-sqlite-tests-cannot-catch-postgres-transaction-aborts]] — see also

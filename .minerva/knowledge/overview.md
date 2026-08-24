@@ -144,6 +144,56 @@ infinite-scroll pages, and the account-totals strip (via
 month-scoped so it remains a stable picker. A day-bar click filters to *all*
 transactions that day, not only spend-classified ones.
 
+All three views were computed live on every request until the grouping behind
+`/subscriptions` and `/bills` outgrew that.
+[[029-decision-merchant-grouping-precomputed-at-sync]] records the change and
+the measurements that forced it, and is picked up under *Derived state and its
+invalidation* below.
+
+## Derived state and its invalidation
+
+The first thing in this project to be genuinely precomputed rather than derived
+per request is merchant grouping, and most of what was learned doing it is about
+invalidation rather than speed.
+[[029-decision-merchant-grouping-precomputed-at-sync]] records the decision.
+Grouping compared every distinct merchant key against every group found so far —
+one `SequenceMatcher` per pair, 99.4% of page compute, and 20s at 2000 distinct
+merchants growing to 45s at 3000. The cost tracked *distinct merchants*, not
+transaction count, so it degraded permanently as one-off purchases accumulated
+and no retention policy would have helped. Grouping now happens once at sync
+time into `merchant_groups` / `merchant_group_keys`, and a warm page load
+measures 0.06s. Deliberately **not** stored: anything date-dependent — `active`,
+`next_date`, bills' `payment_status` — because the refresh trigger is
+"transactions changed", which never fires for a subscription that simply stopped
+being charged.
+
+Two of the three correctness bugs found in that work are the same mistake at
+different layers, and both are worth reading before building another cache.
+[[030-bug-derived-index-needs-a-nothing-to-compute-state]]: a lazily-computed
+column needs three states, not two — computed, not-computed, and
+*not-applicable*. Collapsing the third into the second made an unsatisfiable
+precondition, and one transaction with no usable merchant name left the index
+permanently unusable, so every page load paid a failed rebuild *plus* the
+original quadratic scan. The symptom was silent degradation, never an error.
+[[031-pattern-version-stamp-must-invalidate-derived-inputs]]: the version stamp
+guarding the index deleted the groups but regrouped the stale per-row keys the
+old normalizer had produced, so a rebuild reported success while reproducing
+exactly the grouping it existed to replace. When invalidating, enumerate every
+artifact downstream of what changed — "delete the output and recompute" is only
+correct when the inputs were not themselves derived by the code that changed.
+
+The third is about running one rule twice.
+[[032-constraint-plaid-entity-ids-must-never-fuzzy-merge]] records that the
+persisted path could merge two distinct `merchant_entity_id`s whose display
+names fuzzy-matched, while the in-memory grouper never compares entity groups
+against each other — so two sub-threshold streams became one that cleared
+`MIN_OCCURRENCES`, and a subscription existed or not depending on cache warmth.
+A `merchant_entity_id` is an identity assertion from Plaid, not a display
+string. The general lesson: where the same rule is implemented twice, the
+divergences are not where the differences were designed, and both found here
+came from differential-testing the two paths against identical corpora rather
+than from reading them.
+
 ## Acting on synced data: the daily digest
 
 Beyond deriving views, the app sends outbound SMS. The shape of that notifier has
@@ -382,6 +432,19 @@ green ships the regression the contract existed to catch. The asymmetry is the
 whole point, and it cuts both ways: refusing to edit *any* test forces real
 formatting work to be abandoned or faked. Classify before you edit, and say in
 the diff which kind you decided it was.
+
+[[033-pattern-sqlite-tests-cannot-catch-postgres-transaction-aborts]] is the
+fifth, and it is the backend itself. Tests run on SQLite, production on
+Postgres, and the two disagree about what a failed statement does to an open
+transaction: Postgres aborts it, so every later statement raises until someone
+rolls back, while SQLite carries on. A bare `try/except` around a best-effort
+write is therefore not error handling on production — it is a second, worse
+failure, and the suite passes with and without the fix (verified by removing the
+savepoint and re-running). Wrap best-effort DB steps in
+`db.session.begin_nested()`; `_create_account_if_missing` is the reference
+implementation. This is the same SQLite-vs-Postgres gap
+[[017-pattern-migration-chain-is-postgres-only]] describes for migrations,
+reaching runtime behaviour instead of schema.
 
 ## Limitations
 

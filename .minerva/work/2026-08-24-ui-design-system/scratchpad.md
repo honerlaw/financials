@@ -132,3 +132,51 @@ filter means editing `app/__init__.py` (the app registers no template filters at
 all), which the coordination contract barred. One definition beats 15 call sites;
 worth doing once `2026-08-24-merchant-group-index` has merged and the contract
 lapses. Low priority — the current form is correct, just repetitive.
+
+## Review triage 2026-08-24 (code quality pass, 8 findings)
+
+Seven fixed, one rejected.
+
+- **#1 HIGH — `--text-subtle` failed WCAG AA. FIXED, by deleting the tier.**
+  Measured it rather than trusting the report: `#98a2b3` gave **2.58:1** on
+  `--surface` and **2.34:1** on `--surface-2`, against a 4.5:1 AA floor — and it
+  was applied to *every table header on every page*, the eyebrow labels, and the
+  week-divider rows. A real regression: the Bootstrap `.text-muted` it replaced
+  measured 4.69:1.
+  The arithmetic then killed the tier outright. Clearing 4.5:1 on `--surface-2`
+  needs a value no lighter than `--text-muted` (`#667085` = 4.51:1), so a third,
+  lighter text tier could only ever have existed by failing contrast. Deleted
+  `--text-subtle` and the `.subtle` class; the 10 call sites now use `.muted`.
+  Two text tiers, both AA-clean. The token block records why, so nobody
+  reintroduces a "subtle" grey for small text.
+- **#2 MEDIUM — `.retry-btn` was a dead rule. FIXED.** `chat.css` defined it to
+  replace Bootstrap's `ms-2` margin, but `chat.js:115` never applied it, so the
+  retry button sat flush against the error text. Exactly the dead-class failure
+  mode the earlier sweep was looking for, and it slipped through because the
+  class existed in CSS — the sweep checked markup→CSS, not CSS→markup.
+- **#3 MEDIUM — `/` lost its only heading. FIXED.** The rewrite turned
+  `<h2>Spending · …</h2>` into a `<div class="eyebrow">`. Every other page gained
+  an `<h1>`; the busiest one silently lost heading navigation. Now an `<h1>`
+  carrying the same `.eyebrow` styling.
+- **#4 MEDIUM — budget tiles and chart bars had no keyboard path. FIXED,
+  deliberately widening the proposal.** Pre-existing rather than a regression —
+  but these elements were rewritten line-for-line in this change, and carrying a
+  keyboard trap forward through a full rewrite is how it becomes permanent. Added
+  `role="button" tabindex="0"` + `aria-label`, and one delegated `keydown`
+  listener translating Enter/Space into a click (a div, unlike a button, does not
+  synthesise one). This is the single exception to the proposal's "changes no
+  behaviour" claim: additive keyboard activation, no existing path altered.
+- **#5/#6 LOW — dead `.gap-4`, dead `.text-accent`, unconsumed `--shadow-md`.
+  FIXED** (deleted).
+- **#8 LOW — `.btn-warn:hover` at 4.17:1. FIXED.** Darkened `--warn`
+  `#b54708` → `#93370d`: 5.78:1 on the hover background, 7.21:1 on the resting
+  one.
+- **#7 LOW — "delete the redundant `.table td.empty`". REJECTED — the finding is
+  wrong, and wrong in exactly the way #1's sibling bug was.** It claims bare
+  `.empty` already produces the result. It does not: `.table td` sets padding at
+  specificity (0,1,1) and beats `.empty` at (0,1,0), which is precisely why the
+  qualified rule was added. Both rules are load-bearing and neither is redundant
+  — `.empty` also styles a non-table `<div>` in `settings.html`. Deleting it
+  would have silently restored cramped padding on every empty-state table cell.
+  Verified by reading the cascade, not by re-running the suite: no test can see
+  this.

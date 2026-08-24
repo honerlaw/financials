@@ -25,8 +25,12 @@
 
   /* Text ----------------------------------------------------------------- */
   --text: #101828;
+  /* Two text tiers only. A third, lighter tier was tried (#98a2b3) and removed:
+     small text on --surface-2 needs >=4.5:1 for WCAG AA, and at that background
+     nothing lighter than --text-muted clears it — so a "subtle" tier could only
+     have existed by failing contrast. Bootstrap's .text-muted, which this
+     replaced, measured 4.69:1; the discarded token measured 2.34:1. */
   --text-muted: #667085;
-  --text-subtle: #98a2b3;
 
   /* Accents -------------------------------------------------------------- */
   --accent: #2563eb;
@@ -41,7 +45,7 @@
   --neg: #b42318;
   --neg-bg: #fef3f2;
   --neg-border: #fecdca;
-  --warn: #b54708;
+  --warn: #93370d;
   --warn-bg: #fffaeb;
   --warn-border: #fedf89;
 
@@ -67,7 +71,6 @@
   --r-lg: 14px;
   --r-pill: 999px;
   --shadow-sm: 0 1px 2px rgb(16 24 40 / 0.05);
-  --shadow-md: 0 1px 3px rgb(16 24 40 / 0.10), 0 1px 2px rgb(16 24 40 / 0.06);
 
   --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica,
           Arial, sans-serif;
@@ -85,7 +88,6 @@
 
     --text: #edeff2;
     --text-muted: #98a2b3;
-    --text-subtle: #6c7684;
 
     --accent: #5b8def;
     --accent-text: #84adf7;
@@ -103,7 +105,6 @@
     --warn-border: #4d3a12;
 
     --shadow-sm: 0 1px 2px rgb(0 0 0 / 0.40);
-    --shadow-md: 0 1px 3px rgb(0 0 0 / 0.50), 0 1px 2px rgb(0 0 0 / 0.40);
   }
 }
 
@@ -144,7 +145,7 @@ a:hover { text-decoration: underline; }
 .wrap    { flex-wrap: wrap; }
 .grow    { flex: 1 1 auto; min-width: 0; }
 .gap-1 { gap: var(--sp-1); } .gap-2 { gap: var(--sp-2); }
-.gap-3 { gap: var(--sp-3); } .gap-4 { gap: var(--sp-4); }
+.gap-3 { gap: var(--sp-3); }
 .mb-2 { margin-bottom: var(--sp-2); } .mb-3 { margin-bottom: var(--sp-3); }
 .mb-4 { margin-bottom: var(--sp-4); } .mb-5 { margin-bottom: var(--sp-5); }
 .mt-1 { margin-top: var(--sp-1); }
@@ -217,13 +218,12 @@ a:hover { text-decoration: underline; }
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: var(--text-subtle);
+  color: var(--text-muted);
 }
 
 /* ── Typography helpers ───────────────────────────────────────────────────── */
 
 .muted   { color: var(--text-muted); }
-.subtle  { color: var(--text-subtle); }
 .small   { font-size: var(--fs-sm); }
 .xs      { font-size: var(--fs-xs); }
 .strong  { font-weight: 600; }
@@ -331,7 +331,7 @@ a:hover { text-decoration: underline; }
   border-radius: var(--r-sm);
   line-height: 1.2;
 }
-.field::placeholder { color: var(--text-subtle); }
+.field::placeholder { color: var(--text-muted); }
 .field:focus, .select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-bg); }
 .select {
   appearance: none;
@@ -353,7 +353,7 @@ a:hover { text-decoration: underline; }
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: var(--text-subtle);
+  color: var(--text-muted);
   background: var(--surface-2);
   border-bottom: 1px solid var(--border);
   white-space: nowrap;
@@ -382,7 +382,7 @@ a:hover { text-decoration: underline; }
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: var(--text-subtle);
+  color: var(--text-muted);
 }
 .table tr.section:hover > td { background: var(--surface-2); }
 
@@ -485,7 +485,6 @@ a:hover { text-decoration: underline; }
 .text-danger  { color: var(--neg); }
 .text-success { color: var(--pos); }
 .text-warn    { color: var(--warn); }
-.text-accent  { color: var(--accent-text); }
 
 /* ── Login ────────────────────────────────────────────────────────────────── */
 

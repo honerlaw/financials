@@ -112,7 +112,7 @@
       const errBubble = bubble('error');
       errBubble.textContent = `Connection error: ${err.message}. Click retry to resend.`;
       const retry = document.createElement('button');
-      retry.className = 'btn btn-sm btn-danger';
+      retry.className = 'btn btn-sm btn-danger retry-btn';
       retry.textContent = 'Retry';
       retry.onclick = () => {
         history.splice(historyLengthBefore);

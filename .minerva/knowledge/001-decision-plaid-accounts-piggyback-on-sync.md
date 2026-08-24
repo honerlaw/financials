@@ -49,3 +49,5 @@ snapshot.
 ## Related
 - [[002-decision-plaid-balance-refresh-via-dedicated-endpoint]] — see also
 - [[014-decision-plaid-liabilities-piggyback-on-sync]] — see also
+- [[023-bug-transactions-sync-is-not-the-only-account-source]] — superseded in part by
+  the piggyback is no longer the sole account feed; the no-`accounts/get` decision stands.

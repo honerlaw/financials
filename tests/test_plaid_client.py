@@ -144,16 +144,22 @@ def test_get_liabilities(MockApi):
 
 
 @patch('app.plaid_client.plaid_api.PlaidApi')
-def test_get_investment_holdings(MockApi):
+def test_get_investments(MockApi):
     api = MockApi.return_value
     holdings = [MagicMock(account_id='acc-1'), MagicMock(account_id='acc-2')]
-    api.investments_holdings_get.return_value = MagicMock(holdings=holdings)
+    accounts = [MagicMock(account_id='acc-1')]
+    api.investments_holdings_get.return_value = MagicMock(
+        accounts=accounts, holdings=holdings,
+    )
 
     client = _make_client()
     client._client = api
-    result = client.get_investment_holdings('access-token-xyz')
+    result_accounts, result_holdings = client.get_investments('access-token-xyz')
 
-    assert result is holdings
+    assert result_holdings is holdings
+    # The accounts array is the only payload guaranteed to carry the Item's
+    # investment accounts; transactions/sync never returns them.
+    assert result_accounts is accounts
     assert api.investments_holdings_get.call_count == 1
     request = api.investments_holdings_get.call_args[0][0]
     assert request.access_token == 'access-token-xyz'

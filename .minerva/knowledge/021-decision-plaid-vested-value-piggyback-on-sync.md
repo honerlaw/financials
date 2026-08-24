@@ -12,6 +12,11 @@ and no vested/unvested split. It could not: the app had never touched Plaid's
 `investments` product, so the only account data it had was what
 `transactions/sync` returns.
 
+**Correction (2026-08-24):** the premise of that first sentence was wrong. The
+account never rendered a card at all — `transactions/sync` returns nothing for
+an investment-only Item, so no `Account` row existed to render. See
+[[023-bug-transactions-sync-is-not-the-only-account-source]].
+
 Plaid does report the figures. Each `Holding` from `/investments/holdings/get`
 carries `vested_quantity` / `vested_value` alongside `institution_value`,
 populated for equity holdings at institutions that track equity compensation.
@@ -21,6 +26,8 @@ populated for equity holdings at institutions that track equity compensation.
 - `PlaidClient.get_investment_holdings(access_token)` wraps
   `/investments/holdings/get` and returns the response's `holdings` list. Each
   holding ties back to an `Account` by `account_id`.
+  **Renamed 2026-08-24** to `get_investments`, now returning
+  `(accounts, holdings)` — see [[023-bug-transactions-sync-is-not-the-only-account-source]].
 - `Account` gained two nullable columns (migration `e9c2b7d41a58`):
   `vested_value`, `unvested_value`.
 - `_sync_institution` calls `_refresh_investments(...)` after
@@ -74,3 +81,5 @@ populated for equity holdings at institutions that track equity compensation.
   the original dedicated-endpoint refresh the shape descends from.
 - [[017-pattern-migration-chain-is-postgres-only]] — see also
   how migration `e9c2b7d41a58` was verified without a Postgres.
+- [[023-bug-transactions-sync-is-not-the-only-account-source]] — corrected by
+  two factual errors here: the account never showed a card, and `get_investment_holdings` has been renamed.

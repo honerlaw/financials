@@ -1,6 +1,7 @@
 from datetime import date
 from decimal import Decimal
 from unittest.mock import MagicMock, patch
+from sqlalchemy.exc import IntegrityError
 
 import pytest
 from freezegun import freeze_time
@@ -8,7 +9,8 @@ from app.models import Institution, Transaction, SyncLog, Account
 from app.models import db
 from app.sync import (
     sync_all_institutions, run_daily_sync, _upsert_transactions, _mark_removed,
-    _upsert_accounts, _refresh_liabilities, _refresh_investments,
+    _upsert_accounts, _refresh_balances, _refresh_liabilities,
+    _refresh_investments, _create_account_if_missing,
 )
 
 
@@ -132,6 +134,7 @@ def test_sync_all_institutions_happy_path(MockPlaidClient, app):
             [_mock_txn('txn-new')], [], [], 'new-cursor', [],
         )
         mock_client.get_balances.return_value = []
+        mock_client.get_investments.return_value = ([], [])
         MockPlaidClient.return_value = mock_client
 
         sync_all_institutions()
@@ -213,6 +216,7 @@ def test_sync_all_institutions_persists_accounts(MockPlaidClient, app):
             [_mock_account('acc-001'), _mock_account('acc-002', name='Freedom')],
         )
         mock_client.get_balances.return_value = []
+        mock_client.get_investments.return_value = ([], [])
         MockPlaidClient.return_value = mock_client
 
         sync_all_institutions()
@@ -234,6 +238,7 @@ def test_sync_refreshes_balances_via_balance_endpoint(MockPlaidClient, app):
         mock_client.get_balances.return_value = [
             _mock_account('acc-001', current=150.75, available=849.25),
         ]
+        mock_client.get_investments.return_value = ([], [])
         MockPlaidClient.return_value = mock_client
 
         sync_all_institutions()
@@ -262,6 +267,7 @@ def test_sync_handles_balance_endpoint_error(MockPlaidClient, app):
         api_exc = plaid.ApiException(status=429)
         api_exc.body = json.dumps({'error_code': 'RATE_LIMIT_EXCEEDED', 'error_message': 'slow down'})
         mock_client.get_balances.side_effect = api_exc
+        mock_client.get_investments.return_value = ([], [])
         MockPlaidClient.return_value = mock_client
 
         sync_all_institutions()
@@ -311,6 +317,7 @@ def test_sync_populates_liability_fields(MockPlaidClient, app):
             credit=[_mock_credit_liability('acc-001', due_date=date(2026, 8, 15),
                                            statement=432.10, minimum=35.00)]
         )
+        mock_client.get_investments.return_value = ([], [])
         MockPlaidClient.return_value = mock_client
 
         sync_all_institutions()
@@ -367,6 +374,7 @@ def test_sync_ignores_benign_liability_error(MockPlaidClient, app):
             {'error_code': 'PRODUCTS_NOT_SUPPORTED', 'error_message': 'no liabilities'}
         )
         mock_client.get_liabilities.side_effect = api_exc
+        mock_client.get_investments.return_value = ([], [])
         MockPlaidClient.return_value = mock_client
 
         sync_all_institutions()
@@ -401,6 +409,7 @@ def test_sync_ignores_additional_consent_required(MockPlaidClient, app):
             'error_message': 'consent required for liabilities',
         })
         mock_client.get_liabilities.side_effect = api_exc
+        mock_client.get_investments.return_value = ([], [])
         MockPlaidClient.return_value = mock_client
 
         sync_all_institutions()
@@ -430,6 +439,7 @@ def test_sync_logs_unexpected_liability_error(MockPlaidClient, app):
             {'error_code': 'RATE_LIMIT_EXCEEDED', 'error_message': 'slow down'}
         )
         mock_client.get_liabilities.side_effect = api_exc
+        mock_client.get_investments.return_value = ([], [])
         MockPlaidClient.return_value = mock_client
 
         sync_all_institutions()
@@ -454,6 +464,7 @@ def test_sync_sets_login_required_on_error(MockPlaidClient, app):
         api_exc = plaid.ApiException(status=400)
         api_exc.body = json.dumps({'error_code': 'ITEM_LOGIN_REQUIRED', 'error_message': 'test'})
         mock_client.sync_transactions.side_effect = api_exc
+        mock_client.get_investments.return_value = ([], [])
         MockPlaidClient.return_value = mock_client
 
         sync_all_institutions()
@@ -546,10 +557,10 @@ def test_sync_populates_vested_fields(MockPlaidClient, app):
         mock_client.get_balances.return_value = []
         mock_client.get_liabilities.return_value = None
         # Two equity-comp lots on one account: totals are summed.
-        mock_client.get_investment_holdings.return_value = [
+        mock_client.get_investments.return_value = ([], [
             _mock_holding('acc-inv', institution_value=1000.00, vested_value=600.00),
             _mock_holding('acc-inv', institution_value=500.00, vested_value=125.00),
-        ]
+        ])
         MockPlaidClient.return_value = mock_client
 
         sync_all_institutions()
@@ -570,10 +581,10 @@ def test_refresh_investments_derives_vested_from_quantity(app):
         db.session.commit()
 
         client = MagicMock()
-        client.get_investment_holdings.return_value = [
+        client.get_investments.return_value = ([], [
             _mock_holding('acc-inv', institution_value=1000.00, vested_value=None,
                           vested_quantity=40, institution_price=10.00),
-        ]
+        ])
         inst = db.session.get(Institution, inst_id)
         err = _refresh_investments(client, inst)
         db.session.commit()
@@ -593,10 +604,10 @@ def test_refresh_investments_rounds_derived_value_to_cents(app):
         db.session.commit()
 
         client = MagicMock()
-        client.get_investment_holdings.return_value = [
+        client.get_investments.return_value = ([], [
             _mock_holding('acc-inv', institution_value=1000.00, vested_value=None,
                           vested_quantity=33.333, institution_price=12.34),
-        ]
+        ])
         inst = db.session.get(Institution, inst_id)
         err = _refresh_investments(client, inst)
         db.session.commit()
@@ -617,10 +628,10 @@ def test_refresh_investments_ignores_holdings_with_no_vested_figure(app):
         db.session.commit()
 
         client = MagicMock()
-        client.get_investment_holdings.return_value = [
+        client.get_investments.return_value = ([], [
             _mock_holding('acc-inv', institution_value=5000.00, vested_value=None,
                           vested_quantity=None, institution_price=None),
-        ]
+        ])
         inst = db.session.get(Institution, inst_id)
         err = _refresh_investments(client, inst)
         db.session.commit()
@@ -640,9 +651,9 @@ def test_refresh_investments_clamps_negative_unvested(app):
         db.session.commit()
 
         client = MagicMock()
-        client.get_investment_holdings.return_value = [
+        client.get_investments.return_value = ([], [
             _mock_holding('acc-inv', institution_value=100.00, vested_value=150.00),
-        ]
+        ])
         inst = db.session.get(Institution, inst_id)
         err = _refresh_investments(client, inst)
         db.session.commit()
@@ -677,7 +688,7 @@ def test_sync_ignores_benign_investment_error(MockPlaidClient, app, error_code):
         api_exc.body = json.dumps({
             'error_code': error_code, 'error_message': 'no investments',
         })
-        mock_client.get_investment_holdings.side_effect = api_exc
+        mock_client.get_investments.side_effect = api_exc
         MockPlaidClient.return_value = mock_client
 
         sync_all_institutions()
@@ -707,7 +718,7 @@ def test_sync_logs_unexpected_investment_error(MockPlaidClient, app):
         api_exc.body = json.dumps(
             {'error_code': 'RATE_LIMIT_EXCEEDED', 'error_message': 'slow down'}
         )
-        mock_client.get_investment_holdings.side_effect = api_exc
+        mock_client.get_investments.side_effect = api_exc
         MockPlaidClient.return_value = mock_client
 
         sync_all_institutions()
@@ -719,3 +730,238 @@ def test_sync_logs_unexpected_investment_error(MockPlaidClient, app):
         assert 'RATE_LIMIT_EXCEEDED' in log.error
         inst = db.session.get(Institution, inst_id)
         assert inst.status == 'active'
+
+
+# ── Accounts transactions/sync never returns ──────────────────────────────────
+#
+# An investment-only Item (the linked E*TRADE stock plan) has no
+# transactions-covered accounts, so transactions/sync returns an empty accounts
+# array and the piggyback creates nothing. Before unit 021 the dedicated
+# refreshes all skipped the unknown account, so it never got a row and never
+# rendered a dashboard card.
+
+
+@patch('app.sync.PlaidClient')
+def test_sync_creates_account_seen_only_in_balance_payload(MockPlaidClient, app):
+    """accounts/balance/get returns every account on the Item — create the row."""
+    inst_id = _make_institution(app)
+    with app.app_context():
+        mock_client = MagicMock()
+        mock_client.sync_transactions.return_value = ([], [], [], 'cursor-x', [])
+        mock_client.get_balances.return_value = [
+            _mock_account('acc-etrade', name='Stock Plan', mask='9999',
+                          type_='investment', subtype='stock plan',
+                          current=42000.00, available=None),
+        ]
+        mock_client.get_liabilities.return_value = None
+        mock_client.get_investments.return_value = ([], [])
+        MockPlaidClient.return_value = mock_client
+
+        sync_all_institutions()
+
+        row = Account.query.filter_by(plaid_account_id='acc-etrade').first()
+        assert row is not None
+        assert row.institution_id == inst_id
+        assert row.name == 'Stock Plan'
+        assert row.mask == '9999'
+        assert row.type == 'investment'
+        assert row.subtype == 'stock plan'
+        assert row.current_balance == Decimal('42000.00')
+        log = SyncLog.query.first()
+        assert log.error is None
+
+
+@patch('app.sync.PlaidClient')
+def test_sync_creates_account_seen_only_in_holdings_payload(MockPlaidClient, app):
+    """The holdings response's accounts array is the guaranteed investment source."""
+    inst_id = _make_institution(app)
+    with app.app_context():
+        mock_client = MagicMock()
+        mock_client.sync_transactions.return_value = ([], [], [], 'cursor-x', [])
+        # Neither the piggyback nor balance/get surfaces it.
+        mock_client.get_balances.return_value = []
+        mock_client.get_liabilities.return_value = None
+        mock_client.get_investments.return_value = (
+            [_mock_account('acc-etrade', name='Stock Plan', mask='9999',
+                           type_='investment', subtype='stock plan',
+                           current=42000.00, available=None)],
+            [_mock_holding('acc-etrade', institution_value=42000.00,
+                           vested_value=18000.00)],
+        )
+        MockPlaidClient.return_value = mock_client
+
+        sync_all_institutions()
+
+        row = Account.query.filter_by(plaid_account_id='acc-etrade').first()
+        assert row is not None
+        assert row.institution_id == inst_id
+        assert row.name == 'Stock Plan'
+        # The row exists, so the vested figures now land instead of being dropped.
+        assert row.vested_value == Decimal('18000.00')
+        assert row.unvested_value == Decimal('24000.00')
+
+
+@patch('app.sync.PlaidClient')
+def test_sync_creates_investment_account_with_no_holdings(MockPlaidClient, app):
+    """The accounts upsert runs before the empty-holdings early return."""
+    _make_institution(app)
+    with app.app_context():
+        mock_client = MagicMock()
+        mock_client.sync_transactions.return_value = ([], [], [], 'cursor-x', [])
+        mock_client.get_balances.return_value = []
+        mock_client.get_liabilities.return_value = None
+        mock_client.get_investments.return_value = (
+            [_mock_account('acc-empty', name='Brokerage', type_='investment',
+                           subtype='brokerage')],
+            [],
+        )
+        MockPlaidClient.return_value = mock_client
+
+        sync_all_institutions()
+
+        row = Account.query.filter_by(plaid_account_id='acc-empty').first()
+        assert row is not None
+        assert row.vested_value is None
+        assert row.unvested_value is None
+
+
+def test_refresh_balances_leaves_metadata_alone_for_known_accounts(app):
+    """Create-only: an existing row still takes the balance-only update path."""
+    inst_id = _make_institution(app)
+    with app.app_context():
+        _upsert_accounts(inst_id, [_mock_account('acc-001', name='Piggyback Name',
+                                                 mask='1111')])
+        db.session.commit()
+
+        client = MagicMock()
+        client.get_balances.return_value = [
+            _mock_account('acc-001', name='Balance Endpoint Name', mask='2222',
+                          current=99.00, available=88.00),
+        ]
+        inst = db.session.get(Institution, inst_id)
+        err = _refresh_balances(client, inst)
+        db.session.commit()
+
+        assert err is None
+        row = Account.query.filter_by(plaid_account_id='acc-001').first()
+        # Balances refreshed…
+        assert row.current_balance == Decimal('99.00')
+        assert row.available_balance == Decimal('88.00')
+        # …metadata still owned by the transactions/sync piggyback.
+        assert row.name == 'Piggyback Name'
+        assert row.mask == '1111'
+        assert Account.query.count() == 1
+
+
+def test_refresh_balances_preserves_currency_when_payload_omits_it(app):
+    """iso_currency_code is only written when non-null.
+
+    Plaid nulls iso_currency_code whenever unofficial_currency_code is
+    populated, so an unconditional write would clobber a known code.
+    """
+    inst_id = _make_institution(app)
+    with app.app_context():
+        _upsert_accounts(inst_id, [_mock_account('acc-001')])
+        db.session.commit()
+
+        acct = _mock_account('acc-001', current=10.00, available=5.00)
+        acct.balances.iso_currency_code = None
+        client = MagicMock()
+        client.get_balances.return_value = [acct]
+        inst = db.session.get(Institution, inst_id)
+        _refresh_balances(client, inst)
+        db.session.commit()
+
+        row = Account.query.filter_by(plaid_account_id='acc-001').first()
+        assert row.iso_currency_code == 'USD'
+        assert row.current_balance == Decimal('10.00')
+
+
+def test_refresh_balances_skips_known_account_with_no_balances(app):
+    """A payload with no balances object must not null a known balance."""
+    inst_id = _make_institution(app)
+    with app.app_context():
+        _upsert_accounts(inst_id, [_mock_account('acc-001', current=500.00)])
+        db.session.commit()
+
+        acct = _mock_account('acc-001')
+        acct.balances = None
+        client = MagicMock()
+        client.get_balances.return_value = [acct]
+        inst = db.session.get(Institution, inst_id)
+        _refresh_balances(client, inst)
+        db.session.commit()
+
+        row = Account.query.filter_by(plaid_account_id='acc-001').first()
+        assert row.current_balance == Decimal('500.00')
+
+
+def test_refresh_investments_leaves_metadata_alone_for_known_accounts(app):
+    """Create-only on the investments path too.
+
+    Mirrors test_refresh_balances_leaves_metadata_alone_for_known_accounts. The
+    existence guard in `_create_account_if_missing` is the only thing stopping
+    `_refresh_investments` from rewriting metadata on every sync for every
+    investment account, which is what preserves the metadata/balance split of
+    002-decision-plaid-balance-refresh-via-dedicated-endpoint.
+    """
+    inst_id = _make_institution(app)
+    with app.app_context():
+        _upsert_accounts(inst_id, [_mock_account('acc-inv', name='Piggyback Name',
+                                                 mask='1111', type_='investment',
+                                                 subtype='brokerage')])
+        db.session.commit()
+
+        client = MagicMock()
+        client.get_investments.return_value = (
+            [_mock_account('acc-inv', name='Holdings Endpoint Name', mask='2222',
+                           type_='investment', subtype='stock plan')],
+            [_mock_holding('acc-inv', institution_value=1000.00, vested_value=600.00)],
+        )
+        inst = db.session.get(Institution, inst_id)
+        err = _refresh_investments(client, inst)
+        db.session.commit()
+
+        assert err is None
+        row = Account.query.filter_by(plaid_account_id='acc-inv').first()
+        assert row.name == 'Piggyback Name'
+        assert row.mask == '1111'
+        assert row.subtype == 'brokerage'
+        # The vested figures still land — only the metadata is left alone.
+        assert row.vested_value == Decimal('600.00')
+        assert Account.query.count() == 1
+
+
+def test_create_account_if_missing_survives_a_concurrent_insert(app):
+    """A racing sync's INSERT must not abort this one, and must not poison the session.
+
+    plaid_account_id is unique and /api/sync spawns an unsynchronized thread on
+    every dashboard load, so two runs can both see the row missing. The loser's
+    IntegrityError would otherwise escape the refresh's "never re-raises"
+    contract and kill the whole institution's sync.
+
+    The true race needs a second DB session committing between our existence
+    check and our flush, which this suite's single in-memory session cannot
+    stage; the IntegrityError is raised directly instead. What matters is the
+    contract on this side of it: the helper swallows it, and — because the
+    insert ran inside a savepoint — the session is still usable afterwards.
+    Catching the error without the savepoint would leave the session broken and
+    take the sync down anyway, one statement later.
+    """
+    inst_id = _make_institution(app)
+    with app.app_context():
+        acct = _mock_account('acc-race', name='Stock Plan', type_='investment',
+                             subtype='stock plan')
+
+        def racing_insert(institution_id, accounts):
+            raise IntegrityError('INSERT INTO accounts', {}, Exception('duplicate key'))
+
+        with patch('app.sync._upsert_accounts', side_effect=racing_insert):
+            _create_account_if_missing(inst_id, acct)  # must not raise
+
+        # The session survived: it can still query and commit. Without the
+        # savepoint this is where the sync would die instead.
+        assert Account.query.filter_by(plaid_account_id='acc-race').first() is None
+        _upsert_accounts(inst_id, [acct])
+        db.session.commit()
+        assert Account.query.filter_by(plaid_account_id='acc-race').first() is not None

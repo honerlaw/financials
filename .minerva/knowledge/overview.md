@@ -27,6 +27,14 @@ error set. What it adds is that the endpoint's payload is per-*holding* while
 the columns are per-*account*, so the refresh aggregates: only holdings the
 institution reports a vested figure for participate at all, and unvested is
 the clamped remainder of `institution_value` rather than a field Plaid returns.
+That aggregation sets a trap for its consumers, and
+[[024-decision-digest-net-worth]] is where one was caught before shipping:
+because only equity-comp holdings participate, `vested_value` is **not** "this
+account's balance, vested-adjusted" — a plain brokerage position in the same
+account lands in neither total. Anything that *substitutes* the column for the
+balance therefore deletes that position silently. Subtracting `unvested_value`
+is the operation that composes; substituting `vested_value` is the one that
+looks equivalent and is not.
 
 [[023-bug-transactions-sync-is-not-the-only-account-source]] is where the
 layering broke, and it inverts one assumption the three entries above share.
@@ -202,6 +210,33 @@ registration files sample messages, and traffic that stops matching them is a
 violation, so **anything that changes what the digest says forces those samples
 to be re-filed** — a coupling the doc previously pinned to the `BRAND` constant
 and that now names `digest_body` itself.
+
+[[024-decision-digest-net-worth]] is the second change to what the message says,
+and it closes the Balances block with the number that block was implicitly
+asking for. Three of its decisions generalise past the digest. **A total cannot
+stay sign-agnostic**: every other surface prints `current_balance` raw and never
+flips a sign (016 above), but Plaid reports a card's or a loan's balance as the
+amount *owed*, so net worth is the first place in the app to read `Account.type`
+for meaning — a deliberate exception to the raw-printing rule rather than a
+violation of it, and one pinned by fixture-backed tests precisely because it is
+the only one. **A note and the arithmetic it describes must come off the same
+predicate**: the display flag marking a discounted balance was first derived
+independently of the sign check, so a liability carrying an unvested value would
+have advertised a discount the total never applied; one shared `_is_liability`
+is the fix, and the shape recurs anywhere a message annotates a number it also
+computes. **Two failure modes, two different mitigations**: an exclusion pattern
+matching *nothing* is logged, because a silently-counted account is the failure
+this feature exists to prevent, while a pattern matching *too much* is caught by
+the excluded account staying in the message marked `(not counted)` — which is
+why excluded accounts are not hidden. Configuration follows
+[[011-decision-doppler-hybrid-config]], with the operational consequence that
+the list must be set in Doppler and not merely documented; until it is, the
+feature fails *open* and counts everything.
+
+It also widens 022's external constraint. Re-filing A2P samples is not only
+about adding or removing a section: a new parenthetical on one balance line is a
+body-shape change too, and the campaign **description** moves with the samples,
+since both are filed claims about what the traffic contains.
 
 ## Configuration and secrets
 

@@ -1,7 +1,5 @@
 # Knowledge overview
 
-<!-- synthesis-watermark: 020 -->
-
 ## Plaid data flow: piggyback, then refresh
 
 Account metadata is never fetched on its own round-trip:
@@ -17,12 +15,23 @@ the sync schedule; balance freshness is not.
 [[014-decision-plaid-liabilities-piggyback-on-sync]] extends the same shape a
 third time: due dates and statement balances are liability attributes that
 exist on no other payload, so a `/liabilities/get` call follows the balance
-refresh and writes three nullable `Account` columns. The recurring contract
-across all three layers is that **a post-sync refresh is never fatal** — a
-Plaid `ApiException` annotates `SyncLog.error` and the transactions still
-land. The corollary is a noise problem: an error that recurs on every sync for
-a structural reason buries the real ones, so "this Item has no liabilities"
-responses are classified benign and dropped.
+refresh and writes three nullable `Account` columns.
+[[021-decision-plaid-vested-value-piggyback-on-sync]] is the fourth and, by
+now, a template rather than a fresh design — `/investments/holdings/get` after
+the liability refresh, two more nullable `Account` columns, the same benign
+error set. What it adds is that the endpoint's payload is per-*holding* while
+the columns are per-*account*, so the refresh aggregates: only holdings the
+institution reports a vested figure for participate at all, and unvested is
+the clamped remainder of `institution_value` rather than a field Plaid returns.
+
+The recurring contract across all four layers is that **a post-sync refresh is
+never fatal** — a Plaid `ApiException` annotates `SyncLog.error` and the
+transactions still land. The corollary is a noise problem: an error that
+recurs on every sync for a structural reason buries the real ones, so "this
+Item has no liabilities" responses are classified benign and dropped. A second
+corollary, visible once the columns are nullable across three features at
+once: **null means "not applicable", never zero**. A $0 vested balance would
+read as "nothing has vested"; a null renders no row at all.
 
 ## Plaid product consent, and update mode as the tool for both
 
@@ -52,6 +61,13 @@ whenever a new product is consented. The entry also corrects 014's guess at
 which error code the never-consented case returns, and notes the cost of
 suppressing it: nothing now signals *which* institutions still lack consent,
 only that their liability columns stay null.
+
+[[021-decision-plaid-vested-value-piggyback-on-sync]] is that rule applied
+prospectively rather than discovered — consenting to `investments` shipped
+with `ADDITIONAL_CONSENT_REQUIRED` already in the benign set and the
+per-Item re-connect named in the proposal, so the second product cost no
+log-noise incident. That is what 015 was for: the migration step is now
+budgeted at design time, not diagnosed from production logs.
 
 ## Deriving views from stored transactions
 

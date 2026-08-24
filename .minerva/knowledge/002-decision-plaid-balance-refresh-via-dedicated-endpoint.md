@@ -69,3 +69,4 @@ non-empty.
 - [[010-decision-budget-alert-notifier]] — see also
 - [[014-decision-plaid-liabilities-piggyback-on-sync]] — see also
 - [[016-decision-daily-digest-notifier]] — see also
+- [[021-decision-plaid-vested-value-piggyback-on-sync]] — see also

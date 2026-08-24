@@ -1,5 +1,4 @@
 # Knowledge index
-<!-- index-watermark: 020 -->
 
 ## Decisions
 
@@ -17,6 +16,7 @@
 - [[015-decision-liability-consent-requires-update-mode]] — Plaid consent is fixed at link time: Items linked before a product was consented return `ADDITIONAL_CONSENT_REQUIRED` and can only be re-consented through update mode.
 - [[016-decision-daily-digest-notifier]] — Threshold budget alerts replaced by one 7am daily digest (budget status + every account balance) — dispatched only from run_daily_sync so page-load syncs never text, deduped per (sent_date, recipient), and scheduled in APP_TIMEZONE because the container is UTC.
 - [[018-decision-on-demand-digest-trigger]] — A dashboard button texts the daily digest on demand via `send_digest_now`, which neither reads nor writes `DailyDigest` so it never interacts with the 7am job in either direction; `is_configured` is the one soft-disable predicate both the button and the endpoint must use.
+- [[021-decision-plaid-vested-value-piggyback-on-sync]] — Vested and unvested equity-compensation totals come from a dedicated `/investments/holdings/get` call after the liability refresh, aggregated per account into two nullable `Account` columns, non-fatally.
 
 ## Bugs
 
@@ -30,3 +30,5 @@
 - [[020-pattern-injected-fakes-hide-construction-failures]] — Every notifier test injected a fake sender, so `_sender_from_config` — the line that actually threw in production — was never executed and the whole suite passed with `twilio` uninstalled; a dependency built behind a seam needs at least one test that builds the real thing.
 
 ## Constraints
+
+## References

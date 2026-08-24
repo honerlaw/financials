@@ -6,7 +6,11 @@ Account metadata is never fetched on its own round-trip:
 [[001-decision-plaid-accounts-piggyback-on-sync]] established that
 `transactions/sync` already carries the accounts array, so the sync path
 upserts accounts from its last non-empty page instead of calling
-`accounts/get`. The piggybacked balances are treated as cached snapshots —
+`accounts/get`. That decision still stands, but read it with
+[[023-bug-transactions-sync-is-not-the-only-account-source]] beside it: the
+premise that the piggyback sees *every* account turned out to be false, and the
+paragraph below is the correction. The piggybacked balances are treated as
+cached snapshots —
 [[002-decision-plaid-balance-refresh-via-dedicated-endpoint]] layers a
 dedicated `/accounts/balance/get` call after sync to overwrite balance
 fields with authoritative values. Together: metadata freshness is bounded by
@@ -23,6 +27,25 @@ error set. What it adds is that the endpoint's payload is per-*holding* while
 the columns are per-*account*, so the refresh aggregates: only holdings the
 institution reports a vested figure for participate at all, and unvested is
 the clamped remainder of `institution_value` rather than a field Plaid returns.
+
+[[023-bug-transactions-sync-is-not-the-only-account-source]] is where the
+layering broke, and it inverts one assumption the three entries above share.
+Each of them treats the piggyback as the thing that *creates* accounts and the
+dedicated endpoint as the thing that *decorates* them — so all three refreshes
+skipped any `account_id` they had no row for. Plaid's transactions product does
+not cover brokerage accounts, so an investment-only Item's accounts arrive on no
+payload the piggyback can see, and the account was structurally unreachable:
+connected, syncing `✓ OK` hourly, and absent from the dashboard for as long as it
+had been linked. `/accounts/balance/get` and `/investments/holdings/get` are
+therefore account **sources**, not just field refreshers, and both now create the
+rows they used to discard. Two details generalise. The creates are deliberately
+**create-only** — an existing row still takes the old update path — which is what
+keeps 002's metadata/balance ownership split intact instead of silently
+reversing it. And **creating rows introduced a write race that updating never
+had**: `plaid_account_id` is unique and syncs overlap, so the losing INSERT's
+`IntegrityError` — not a `plaid.ApiException` — would have escaped the
+never-fatal contract below and taken the whole institution's sync down with it.
+The savepoint around the insert, not the `except`, is what makes that safe.
 
 The recurring contract across all four layers is that **a post-sync refresh is
 never fatal** — a Plaid `ApiException` annotates `SyncLog.error` and the
@@ -243,6 +266,17 @@ behaviour *given* a working dependency, never that one can be built. Stub the
 third-party module in `sys.modules` and assert both halves — construction
 succeeds with complete config, and a construction failure propagates to the
 caller.
+
+[[023-bug-transactions-sync-is-not-the-only-account-source]] is the same blind
+spot in its fixture form, and it also let a real bug ship. Every investments test
+seeded the brokerage account into the `transactions/sync` accounts array by hand,
+so the suite exercised — and passed against — code that could never create that
+account itself. Where 020's fake stood in for a dependency that was never built,
+here the fixture stood in for a payload Plaid never sends. The general rule is one
+step up from both: **a test that supplies the thing whose absence is the bug
+cannot detect the bug**. The unit that shipped it had asserted the payload's
+contents in its proposal as fact, without checking; the correction was verified
+against the live production dashboard, not against a mock.
 
 ## Limitations
 

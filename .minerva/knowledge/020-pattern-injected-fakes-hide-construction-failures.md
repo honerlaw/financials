@@ -53,3 +53,4 @@ whether the caller handles it — here, it did not).
   the production bug this gap allowed to ship.
 - [[010-decision-budget-alert-notifier]] — see also
   the deliberate lazy `twilio` import that makes an absent dependency invisible until runtime.
+- [[023-bug-transactions-sync-is-not-the-only-account-source]] — see also

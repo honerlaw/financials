@@ -47,8 +47,14 @@ def week_start(d):
     return d - timedelta(days=(d.weekday() + 1) % 7)
 
 
-def _week_label(ws):
-    """Short 'Mon D–D' / 'Mon D – Mon D' label for a Sun-start week."""
+def week_label(ws):
+    """Short 'Mon D–D' / 'Mon D – Mon D' label for a Sun-start week.
+
+    Public because the daily digest labels its week rows with it too, so a week
+    is named the same way in the SMS and in the dashboard's weekly tracker.
+    (``routes._week_label`` is a separate, year-carrying variant for the
+    transactions table.)
+    """
     we = ws + timedelta(days=6)
     if ws.month != we.month:
         return f"{ws.strftime('%b %-d')} – {we.strftime('%b %-d')}"
@@ -94,6 +100,37 @@ def week_spend(transactions, today):
     return total
 
 
+def recent_week_spend(transactions, today, weeks=4):
+    """``[(week_start, total)]`` for the ``weeks`` COMPLETE weeks before ``today``'s.
+
+    Oldest first. The week containing ``today`` is excluded — it is still
+    running, and the digest reports it separately as the budget line; a partial
+    week sitting in a column of finished ones reads as a drop that is not real.
+
+    A week with no spend is emitted with ``Decimal('0')`` rather than skipped,
+    the same way ``daily_spend`` emits empty days, so the caller always gets
+    exactly ``weeks`` entries and a quiet week is visible as a quiet week.
+    Filters the input defensively, so a caller may pass a wider fetch.
+    """
+    current = week_start(today)
+    first = current - timedelta(days=7 * weeks)
+
+    totals = {}
+    for txn in transactions:
+        if not is_spend(txn):
+            continue
+        if first <= txn.date < current:
+            ws = week_start(txn.date)
+            totals[ws] = totals.get(ws, Decimal('0')) + txn.amount
+
+    series = []
+    ws = first
+    while ws < current:
+        series.append((ws, totals.get(ws, Decimal('0'))))
+        ws += timedelta(days=7)
+    return series
+
+
 def weekly_budget(transactions, month_start, month_end_exclusive, today,
                   budget=WEEKLY_BUDGET):
     """Per-week spend vs ``budget`` for the Sun–Sat weeks overlapping the month.
@@ -132,7 +169,7 @@ def weekly_budget(transactions, month_start, month_end_exclusive, today,
         weeks.append({
             'week_start': ws,
             'week_end': ws + timedelta(days=6),
-            'label': _week_label(ws),
+            'label': week_label(ws),
             'spent': spent,
             'budget': budget,
             'remaining': remaining,

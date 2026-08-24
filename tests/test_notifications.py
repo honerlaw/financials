@@ -8,13 +8,22 @@ from sqlalchemy.exc import OperationalError
 
 from app.models import db, Account, Institution, Transaction, DailyDigest
 from app.notifications import (
-    account_line, budget_line, digest_body, send_daily_digest, send_digest_now,
+    account_line, budget_line, digest_body, history_line, send_daily_digest,
+    send_digest_now,
 )
 
 
 # 2026-08-08 is a Saturday; its Sun–Sat week starts Aug 2 (a Sunday).
 TODAY = date(2026, 8, 8)
 WS = date(2026, 8, 2)
+# The four completed weeks behind it, oldest first — what recent_week_spend
+# hands digest_body.
+HISTORY = [
+    (date(2026, 7, 5), Decimal('842')),
+    (date(2026, 7, 12), Decimal('1130')),
+    (date(2026, 7, 19), Decimal('0')),
+    (date(2026, 7, 26), Decimal('1204')),
+]
 
 
 # ── message building (pure) ───────────────────────────────────────────────────
@@ -64,7 +73,7 @@ def test_digest_body_contains_budget_week_and_every_account():
     body = digest_body(TODAY, Decimal('750'), [
         ('Amex', 'Platinum', '1004', Decimal('2143.19')),
         ('Truist', 'Checking', '3390', Decimal('4880.02')),
-    ])
+    ], HISTORY)
     assert body.startswith('Onerlaw LLC\nGood morning — Sat Aug 8')
     assert 'Budget: $750 of $1,000 (75%) — $250 left' in body
     assert 'Week of Aug 2' in body
@@ -73,7 +82,7 @@ def test_digest_body_contains_budget_week_and_every_account():
 
 
 def test_digest_body_with_no_accounts():
-    body = digest_body(TODAY, Decimal('0'), [])
+    body = digest_body(TODAY, Decimal('0'), [], HISTORY)
     assert 'No linked accounts.' in body
 
 
@@ -85,9 +94,39 @@ def test_digest_body_is_branded_and_carries_opt_out(accounts):
     """A2P 10DLC registration requires the business name and opt-out language in
     the body, and carrier traffic has to match the samples filed with the
     campaign — so this holds whether or not any account is linked."""
-    body = digest_body(TODAY, Decimal('750'), accounts)
+    body = digest_body(TODAY, Decimal('750'), accounts, HISTORY)
     assert body.startswith('Onerlaw LLC\n')
     assert body.endswith('\nReply STOP to unsubscribe.')
+
+
+def test_history_line_formats_a_week_in_whole_dollars():
+    assert history_line(date(2026, 7, 5), Decimal('842.47')) == 'Jul 5–11: $842'
+    assert history_line(date(2026, 7, 26), Decimal('1204')) == 'Jul 26 – Aug 1: $1,204'
+
+
+def test_digest_body_lists_the_four_completed_weeks_oldest_first():
+    body = digest_body(TODAY, Decimal('750'), [], HISTORY)
+    assert 'Last 4 weeks' in body
+    for expected in ('Jul 5–11: $842', 'Jul 12–18: $1,130',
+                     'Jul 19–25: $0', 'Jul 26 – Aug 1: $1,204'):
+        assert expected in body
+    assert body.index('Jul 5–11') < body.index('Jul 12–18') \
+        < body.index('Jul 19–25') < body.index('Jul 26 – Aug 1')
+
+
+def test_digest_body_puts_the_history_between_budget_and_balances():
+    body = digest_body(TODAY, Decimal('750'), [
+        ('Truist', 'Checking', '3390', Decimal('4880.02')),
+    ], HISTORY)
+    assert body.index('Week of Aug 2') < body.index('Last 4 weeks') \
+        < body.index('Balances')
+
+
+def test_digest_body_history_never_repeats_the_current_week():
+    """The running week is the budget line's job; a partial week in a column of
+    finished ones reads as a drop that is not real."""
+    body = digest_body(TODAY, Decimal('750'), [], HISTORY)
+    assert 'Aug 2–8' not in body
 
 
 # ── send_daily_digest (orchestration) ─────────────────────────────────────────
@@ -365,6 +404,58 @@ def test_concurrent_calls_do_not_double_send(tmp_path):
     with app.app_context():
         assert len(sender.sent) == 1
         assert DailyDigest.query.filter_by(recipient='+1111').count() == 1
+
+
+def _seed_txn(inst_id, txn_date, amount, category='FOOD_AND_DRINK'):
+    db.session.add(Transaction(
+        plaid_transaction_id=f'h-{txn_date}-{amount}', institution_id=inst_id,
+        account_id='a1', date=txn_date, description='x',
+        amount=Decimal(amount), category=category,
+    ))
+    db.session.commit()
+
+
+def test_digest_history_is_built_from_real_transactions(app):
+    """End to end: prior weeks bucket into the history, the current week does not."""
+    with app.app_context():
+        inst_id = _seed_inst('750.00')            # current week (Aug 2–8)
+        _seed_txn(inst_id, date(2026, 7, 7), '842.00')    # Jul 5–11
+        _seed_txn(inst_id, date(2026, 7, 30), '1204.00')  # Jul 26 – Aug 1
+        _seed_txn(inst_id, date(2026, 6, 30), '999.00')   # before the window
+        sender = FakeSender()
+        send_daily_digest(db.session, TODAY,
+                          {'BUDGET_ALERT_RECIPIENTS': '+1111'}, sender=sender)
+
+        body = sender.sent[0][1]
+        assert 'Jul 5–11: $842' in body
+        assert 'Jul 12–18: $0' in body
+        assert 'Jul 26 – Aug 1: $1,204' in body
+        assert '$999' not in body                 # outside the four-week window
+        assert 'Budget: $750 of $1,000' in body   # current week still its own line
+
+
+def test_digest_history_still_costs_one_transaction_query(app):
+    """Budget line and history come out of a single fetch, not one per week."""
+    from sqlalchemy import event
+
+    with app.app_context():
+        _seed_inst('750.00')
+        queries = []
+
+        def record(conn, cursor, statement, params, context, executemany):
+            if 'FROM transactions' in statement:
+                queries.append(statement)
+
+        engine = db.session.get_bind()
+        event.listen(engine, 'before_cursor_execute', record)
+        try:
+            send_daily_digest(db.session, TODAY,
+                              {'BUDGET_ALERT_RECIPIENTS': '+1111'},
+                              sender=FakeSender())
+        finally:
+            event.remove(engine, 'before_cursor_execute', record)
+
+        assert len(queries) == 1, queries
 
 
 # ── send_digest_now (manual trigger) ──────────────────────────────────────────

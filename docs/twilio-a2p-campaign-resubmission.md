@@ -135,8 +135,10 @@ Campaign review is quoted at **two to three weeks**, currently running 10–15 d
 
 ## 5. After approval
 
-Confirm real traffic still matches the filed samples. `BRAND` in `app/notifications.py` is
-the coupling: changing it changes every message, so it means re-filing samples.
+Confirm real traffic still matches the filed samples. `digest_body` in
+`app/notifications.py` is the coupling: anything that changes what the message says —
+`BRAND`, the opt-out line, adding or dropping a section — changes every message, so it
+means re-filing samples.
 
 ---
 
@@ -172,7 +174,7 @@ Recurring operational notifications about the state of a user's own account. Not
 ## Campaign description
 
 ```
-Onerlaw LLC operates Onerlaw, a web-based personal finance dashboard. Users link their bank and credit card accounts to the platform through Plaid, and the platform tracks their spending against a weekly budget they set. This campaign sends operational account notifications to registered users of that platform who have opted in to receive them. Each morning the platform sends one message reporting the user's spending so far that week against their budget, followed by the current balance of each linked account. A user can also trigger that same summary for themselves from inside the dashboard. Volume is about seven messages per user per week. The messages are transactional only, contain no marketing or promotional content, identify Onerlaw LLC as the sender, and carry STOP opt-out instructions.
+Onerlaw LLC operates Onerlaw, a web-based personal finance dashboard. Users link their bank and credit card accounts to the platform through Plaid, and the platform tracks their spending against a weekly budget they set. This campaign sends operational account notifications to registered users of that platform who have opted in to receive them. Each morning the platform sends one message reporting the user's spending so far that week against their budget, the total they spent in each of the four previous weeks, and the current balance of each linked account. A user can also trigger that same summary for themselves from inside the dashboard. Volume is about seven messages per user per week. The messages are transactional only, contain no marketing or promotional content, identify Onerlaw LLC as the sender, and carry STOP opt-out instructions.
 ```
 
 Describes the software, who it serves, and what the messages contain — the three things
@@ -192,6 +194,12 @@ Good morning — Sat Aug 8
 Budget: $750 of $1,000 (75%) — $250 left
 Week of Aug 2
 
+Last 4 weeks
+Jul 5–11: $842
+Jul 12–18: $1,130
+Jul 19–25: $655
+Jul 26 – Aug 1: $1,204
+
 Balances
 Truist · Checking ••3390: $4,880.02
 Citi · Double Cash ••1234: $612.40
@@ -208,6 +216,12 @@ Good morning — Sat Aug 15
 Budget: $1,043 of $1,000 (104%) — $43 OVER
 Week of Aug 9
 
+Last 4 weeks
+Jul 12–18: $1,130
+Jul 19–25: $655
+Jul 26 – Aug 1: $1,204
+Aug 2–8: $918
+
 Balances
 Truist · Checking ••3390: $4,206.11
 
@@ -223,14 +237,22 @@ Good morning — Mon Aug 17
 Budget: $120 of $1,000 (12%) — $880 left
 Week of Aug 16
 
+Last 4 weeks
+Jul 19–25: $655
+Jul 26 – Aug 1: $1,204
+Aug 2–8: $918
+Aug 9–15: $1,043
+
 Balances
 Truist · Checking ••3390: $4,206.11 (reconnect needed)
 
 Reply STOP to unsubscribe.
 ```
 
-Generated from `digest_body` in `app/notifications.py`, not written by hand. `BRAND` there
-is `Onerlaw LLC`; changing it means re-filing these samples.
+Generated from `digest_body` in `app/notifications.py`, not written by hand. Regenerate
+them whenever the message shape changes — a new section, a reworded line, a different
+`BRAND` — because filed samples that no longer match live traffic are a violation even
+after approval. The `Last 4 weeks` block is work unit 020.
 
 ## Content flags
 

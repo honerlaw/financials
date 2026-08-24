@@ -1,11 +1,11 @@
-"""Daily digest SMS — weekly-budget status plus every account balance.
+"""Daily digest SMS — weekly-budget status, recent weeks, and every balance.
 
 Once a day, right after the 7am sync (``app.sync.run_daily_sync``), every
 configured recipient is texted one message: where the current Sun–Sat week's
-household spend stands against ``WEEKLY_BUDGET``, and the current balance of
-each linked account. The message building is pure and unit-tested
-(``digest_body`` and friends); the Twilio send and the ``DailyDigest`` writes are
-the impure shell.
+household spend stands against ``WEEKLY_BUDGET``, what each of the four
+completed weeks behind it totalled, and the current balance of every linked
+account. The message building is pure and unit-tested (``digest_body`` and
+friends); the Twilio send and the ``DailyDigest`` writes are the impure shell.
 
 Cadence: exactly one text per recipient per calendar day, deduped on
 ``(sent_date, recipient)``. Nothing here is threshold-driven — a quiet week
@@ -41,7 +41,9 @@ from flask import current_app
 from sqlalchemy.exc import IntegrityError
 
 from app.models import Account, DailyDigest, Institution, Transaction
-from app.spending import WEEKLY_BUDGET, week_spend, week_start
+from app.spending import (
+    WEEKLY_BUDGET, recent_week_spend, week_label, week_spend, week_start,
+)
 
 # The registered A2P 10DLC brand, carried as the first line of every message.
 # Campaign registration requires the business name to appear in the body, and
@@ -54,6 +56,11 @@ from app.spending import WEEKLY_BUDGET, week_spend, week_start
 # campaign title and this constant are deliberately the same string.
 BRAND = 'Onerlaw LLC'
 OPT_OUT_LINE = 'Reply STOP to unsubscribe.'
+
+# How many COMPLETED weeks of spend history ride along behind the budget line.
+# Four is the smallest window that reads as a trend rather than as a comparison
+# against one prior week.
+HISTORY_WEEKS = 4
 
 # Serializes send_daily_digest across any concurrent callers. Correct only
 # under a single worker process (see module docstring); the DB unique constraint
@@ -95,11 +102,26 @@ def account_line(institution_name, account_name, mask, balance, stale=False):
     return f'{label}: {amount}{suffix}'
 
 
-def digest_body(today, spent, accounts, budget=WEEKLY_BUDGET):
+def history_line(ws, total):
+    """``Jul 5–11: $842`` — one completed week of the trailing history.
+
+    Whole dollars, like ``budget_line`` and unlike the balance lines: a weekly
+    total is a magnitude to compare at a glance, and cents on four extra rows
+    are noise. ``week_label`` is the dashboard tracker's labeller, so a week is
+    named identically in the text and in the app.
+    """
+    return f'{week_label(ws)}: ${total:,.0f}'
+
+
+def digest_body(today, spent, accounts, history, budget=WEEKLY_BUDGET):
     """The full SMS text.
 
     ``accounts`` is an iterable of ``(institution_name, account_name, mask,
     balance[, stale])`` tuples — plain data, not ORM rows, so this stays pure.
+    ``history`` is ``[(week_start, total)]`` for the completed weeks behind this
+    one, oldest first (see ``spending.recent_week_spend``). It is required
+    rather than defaulted: a default would turn a caller that forgot it into a
+    silently short digest instead of a ``TypeError``.
 
     Opens with ``BRAND`` and closes with ``OPT_OUT_LINE`` because A2P 10DLC
     registration requires both in the body; they are part of the message
@@ -113,8 +135,10 @@ def digest_body(today, spent, accounts, budget=WEEKLY_BUDGET):
         budget_line(spent, budget),
         f"Week of {week_start(today).strftime('%b %-d')}",
         '',
-        'Balances',
+        f'Last {len(history)} weeks',
     ]
+    lines.extend(history_line(ws, total) for ws, total in history)
+    lines.extend(['', 'Balances'])
     account_lines = [account_line(*a) for a in accounts]
     lines.extend(account_lines or ['No linked accounts.'])
     lines.extend(['', OPT_OUT_LINE])
@@ -175,16 +199,23 @@ def _sender_from_config(config):
                         config['TWILIO_FROM_NUMBER'])
 
 
-def _week_spent(session, today):
-    """This week's household spend — no institution filter, same math as the dashboard."""
-    ws = week_start(today)
+def _week_totals(session, today, weeks=HISTORY_WEEKS):
+    """This week's spend, plus ``[(week_start, total)]`` for the ``weeks`` before it.
+
+    One query spanning the whole window, not one per week: both aggregates
+    re-filter what they are handed, so a single wide fetch cannot inflate
+    either. No institution filter — same household math as the dashboard.
+    """
+    current = week_start(today)
+    first = current - timedelta(days=7 * weeks)
     txns = (
         session.query(Transaction)
         .filter(Transaction.removed.is_(False))
-        .filter(Transaction.date >= ws, Transaction.date < ws + timedelta(days=7))
+        .filter(Transaction.date >= first,
+                Transaction.date < current + timedelta(days=7))
         .all()
     )
-    return week_spend(txns, today)
+    return week_spend(txns, today), recent_week_spend(txns, today, weeks)
 
 
 def _account_balances(session):
@@ -236,9 +267,8 @@ def send_daily_digest(session, today, config, sender=None):
         if not pending:
             return
 
-        body = digest_body(
-            today, _week_spent(session, today), _account_balances(session),
-        )
+        spent, history = _week_totals(session, today)
+        body = digest_body(today, spent, _account_balances(session), history)
 
         for recipient in pending:
             try:
@@ -296,9 +326,8 @@ def send_digest_now(session, today, config, sender=None):
         return {'configured': False, 'sent': [], 'failed': []}
 
     with _send_lock:
-        body = digest_body(
-            today, _week_spent(session, today), _account_balances(session),
-        )
+        spent, history = _week_totals(session, today)
+        body = digest_body(today, spent, _account_balances(session), history)
         sent, failed = [], []
         for recipient in recipients:
             try:

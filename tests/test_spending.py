@@ -2,7 +2,8 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 from app.spending import (
-    is_spend, week_start, daily_spend, weekly_budget, week_spend, WEEKLY_BUDGET,
+    is_spend, week_start, daily_spend, weekly_budget, week_spend,
+    recent_week_spend, week_label, WEEKLY_BUDGET,
 )
 from app.models import db, Institution, Transaction
 
@@ -243,3 +244,61 @@ def test_week_spend_excludes_inflows_and_transfers():
 
 def test_week_spend_empty_is_zero():
     assert week_spend([], _WS_TODAY) == Decimal('0')
+
+
+# ── recent_week_spend ─────────────────────────────────────────────────────────
+
+def test_recent_week_spend_returns_the_four_completed_weeks_oldest_first():
+    """The week containing `today` is excluded — it is still running."""
+    weeks = recent_week_spend([], _WS_TODAY)
+    assert [ws for ws, _ in weeks] == [
+        date(2026, 6, 7), date(2026, 6, 14), date(2026, 6, 21), date(2026, 6, 28),
+    ]
+    assert week_start(_WS_TODAY) not in [ws for ws, _ in weeks]
+
+
+def test_recent_week_spend_buckets_by_week():
+    txns = [
+        FakeTxn(date(2026, 6, 7), '100.00'),   # first week, Sunday edge
+        FakeTxn(date(2026, 6, 13), '25.00'),   # first week, Saturday edge
+        FakeTxn(date(2026, 6, 30), '40.00'),   # last completed week
+    ]
+    assert recent_week_spend(txns, _WS_TODAY) == [
+        (date(2026, 6, 7), Decimal('125.00')),
+        (date(2026, 6, 14), Decimal('0')),
+        (date(2026, 6, 21), Decimal('0')),
+        (date(2026, 6, 28), Decimal('40.00')),
+    ]
+
+
+def test_recent_week_spend_excludes_the_current_and_pre_window_weeks():
+    """A wider fetch must not leak into the history in either direction."""
+    txns = [
+        FakeTxn(date(2026, 6, 6), '999.00'),   # Saturday before the window
+        FakeTxn(date(2026, 7, 5), '999.00'),   # current week, Sunday
+        FakeTxn(date(2026, 7, 8), '999.00'),   # current week, today
+        FakeTxn(date(2026, 6, 30), '10.00'),   # the only in-window spend
+    ]
+    assert [total for _, total in recent_week_spend(txns, _WS_TODAY)] == [
+        Decimal('0'), Decimal('0'), Decimal('0'), Decimal('10.00'),
+    ]
+
+
+def test_recent_week_spend_uses_the_same_spend_definition():
+    txns = [
+        FakeTxn(date(2026, 6, 30), '40.00'),
+        FakeTxn(date(2026, 6, 30), '-200.00'),                          # inflow
+        FakeTxn(date(2026, 6, 30), '500.00', category='TRANSFER_OUT'),  # transfer
+        FakeTxn(date(2026, 6, 30), '300.00', category='LOAN_PAYMENTS'), # loan
+    ]
+    assert recent_week_spend(txns, _WS_TODAY)[-1] == (date(2026, 6, 28), Decimal('40.00'))
+
+
+def test_recent_week_spend_window_is_configurable():
+    weeks = recent_week_spend([], _WS_TODAY, weeks=2)
+    assert [ws for ws, _ in weeks] == [date(2026, 6, 21), date(2026, 6, 28)]
+
+
+def test_week_label_is_public_and_spans_months():
+    assert week_label(date(2026, 7, 5)) == 'Jul 5–11'
+    assert week_label(date(2026, 6, 28)) == 'Jun 28 – Jul 4'

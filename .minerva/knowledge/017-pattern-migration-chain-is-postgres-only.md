@@ -43,3 +43,4 @@ builds still needs a real Postgres.
   `DATABASE_ADMIN_URL`, the privileged URL the production `flask db upgrade` runs under.
 - [[021-decision-plaid-vested-value-piggyback-on-sync]] — see also
 - [[025-decision-hand-authored-design-system]] — see also
+- [[033-pattern-sqlite-tests-cannot-catch-postgres-transaction-aborts]] — see also

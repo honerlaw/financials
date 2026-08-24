@@ -45,3 +45,4 @@ in the codebase.
 ## Related
 - [[006-decision-bills-payment-status-algorithm]] — see also
 - [[025-decision-hand-authored-design-system]] — see also
+- [[029-decision-merchant-grouping-precomputed-at-sync]] — see also

@@ -60,3 +60,5 @@ Three interlocking decisions, validated by `tests/test_subscriptions.py`:
   why the detector takes its reference date as a parameter instead of calling `date.today()`.
 - [[006-decision-bills-payment-status-algorithm]] — see also
 - [[008-decision-dashboard-spend-and-weekly-budget]] — see also
+- [[029-decision-merchant-grouping-precomputed-at-sync]] — see also
+- [[032-constraint-plaid-entity-ids-must-never-fuzzy-merge]] — see also

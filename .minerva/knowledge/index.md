@@ -20,11 +20,13 @@
 - [[022-decision-digest-four-week-spend-history]] — The digest SMS gained a `Last 4 weeks` block between the budget line and the balances — the four COMPLETE Sun–Sat weeks before the current one, whole dollars, zero-filled; the running week stays exclusively in the budget line, both aggregates come out of one widened query, and the A2P sample messages were regenerated because filed samples must match live traffic.
 - [[024-decision-digest-net-worth]] — The digest SMS closes its Balances block with one `Net worth:` line — assets minus `credit`/`loan` balances, with unvested equity netted out by SUBTRACTING `unvested_value` rather than substituting `vested_value`, and with accounts named by `NET_WORTH_EXCLUDED_ACCOUNTS` kept out of the total but still printed as `(not counted)`.
 - [[025-decision-hand-authored-design-system]] — Bootstrap 5 was replaced by `app/static/app.css` — CSS custom properties defining a light and a dark token set, consumed by component rules that contain no literal colours — chosen over Tailwind because this repo has no Node toolchain and because two Bootstrap class names are hard-coded in a JSON payload the CSS cannot rename.
+- [[029-decision-merchant-grouping-precomputed-at-sync]] — `/subscriptions` and `/bills` grouped merchants with an O(distinct-merchants²) fuzzy match on every request (20s at 2000 merchants); grouping now happens once at sync time into `merchant_groups`/`merchant_group_keys`, while everything date-dependent stays uncached.
 
 ## Bugs
 
 - [[019-bug-non-json-response-conflated-with-session-expiry]] — The digest button redirected to `/login` on every press because its `fetch` treated any non-JSON response as session expiry, so an unhandled 500 rendered as a phantom logout; the precise expiry signal is `res.redirected` plus the final URL, and API endpoints must fail as JSON.
 - [[023-bug-transactions-sync-is-not-the-only-account-source]] — `Account` rows were only ever created from `transactions/sync`'s accounts array, which omits brokerage accounts, so an investment-only Item never got a row and never rendered a dashboard card; `_refresh_balances` and `_refresh_investments` now create the rows they used to skip.
+- [[030-bug-derived-index-needs-a-nothing-to-compute-state]] — One transaction whose merchant name normalized to nothing kept `merchant_key` NULL, which the index read as outstanding work — making the index permanently unusable and sending every page load down the O(n²) path it was built to remove.
 
 ## Patterns
 
@@ -34,9 +36,12 @@
 - [[020-pattern-injected-fakes-hide-construction-failures]] — Every notifier test injected a fake sender, so `_sender_from_config` — the line that actually threw in production — was never executed and the whole suite passed with `twilio` uninstalled; a dependency built behind a seam needs at least one test that builds the real thing.
 - [[027-pattern-utility-classes-lose-to-element-qualified-rules]] — `.table th { text-align: left }` has specificity (0,1,1) and beats a bare `.right` utility at (0,1,0), so the utility appears to do nothing — a failure invisible to a suite that asserts on rendered text rather than layout, and only found by looking at a screenshot.
 - [[028-pattern-byte-assertions-are-contracts-or-snapshots]] — `tests/test_routes.py` asserts literal substrings of rendered HTML, and those assertions are two different things — semantic contracts whose failure means the change is wrong, and formatting snapshots whose failure is a decision to make; editing the first to get green is how a real regression ships.
+- [[031-pattern-version-stamp-must-invalidate-derived-inputs]] — The merchant index's algo-version rebuild deleted the groups but regrouped the stale per-row keys the old algorithm had produced — reporting a successful rebuild while reproducing exactly the grouping it existed to replace.
+- [[033-pattern-sqlite-tests-cannot-catch-postgres-transaction-aborts]] — A missing savepoint around a best-effort write is invisible to this suite — SQLite keeps the session usable after a failed statement where Postgres aborts the whole transaction, so the test passes with and without the fix.
 
 ## Constraints
 
 - [[026-constraint-css-class-names-cross-the-json-boundary]] — `app/routes.py:261` puts the literal strings `text-danger` / `text-success` into the `/api/transactions` payload and the infinite-scroll script applies them verbatim to appended rows, so those two class names are a cross-layer contract that no test asserts and no framework migration may quietly rename.
+- [[032-constraint-plaid-entity-ids-must-never-fuzzy-merge]] — The persisted merchant index could merge two different Plaid entity ids whose display names fuzzy-matched, while the in-memory grouper never compares entity groups against each other — so the same data produced different subscriptions depending on whether the index was warm.
 
 ## References

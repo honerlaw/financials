@@ -54,3 +54,4 @@ whether the caller handles it — here, it did not).
 - [[010-decision-budget-alert-notifier]] — see also
   the deliberate lazy `twilio` import that makes an absent dependency invisible until runtime.
 - [[023-bug-transactions-sync-is-not-the-only-account-source]] — see also
+- [[034-pattern-only-the-call-site-is-authoritative-for-runtime-behaviour]] — see also

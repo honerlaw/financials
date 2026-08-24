@@ -104,3 +104,4 @@ See [[034-pattern-only-the-call-site-is-authoritative-for-runtime-behaviour]].)
 - [[018-decision-on-demand-digest-trigger]] — see also
 - [[022-decision-digest-four-week-spend-history]] — see also
 - [[024-decision-digest-net-worth]] — see also
+- [[034-pattern-only-the-call-site-is-authoritative-for-runtime-behaviour]] — see also

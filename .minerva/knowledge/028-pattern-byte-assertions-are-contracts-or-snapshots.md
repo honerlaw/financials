@@ -77,3 +77,4 @@ formatting work to be abandoned or faked.
 - [[026-constraint-css-class-names-cross-the-json-boundary]] — a contract the suite checks only the key of, never the value.
 - [[021-decision-plaid-vested-value-piggyback-on-sync]] — the null-is-not-zero decision several contract assertions guard.
 - [[004-pattern-seed-relative-dates-in-time-sensitive-tests]] — see also, another way these tests encode more than they appear to.
+- [[034-pattern-only-the-call-site-is-authoritative-for-runtime-behaviour]] — see also

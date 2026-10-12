@@ -1,7 +1,7 @@
 # Proposal: uv-locked-dependencies
 
 **Date**: 2026-10-12
-**Status**: Draft
+**Status**: Shipped (2026-10-12)
 **Closes**: #52
 
 ## Goal
@@ -20,6 +20,8 @@ driver the image did not install, and the deploy of #51 crashed and rolled back 
 package; every other dependency still floats.
 
 ## Approach
+
+*(Rewritten at promote: implemented as planned. The conditional reseeding in step 2 was not needed — the first lock already matched production. Review added `**/.venv/` and `.minerva/worktrees/` to `.dockerignore` and a console note in the Dockerfile.)*
 
 1. **`pyproject.toml`** — a non-packaged uv project (`[tool.uv] package = false`; the app is
    run from the source tree, not installed). `[project] dependencies` carries every runtime
@@ -53,7 +55,8 @@ package; every other dependency still floats.
    `requires-python`; `UV_LINK_MODE=copy` and `UV_COMPILE_BYTECODE=1` for a no-cache image
    build. The pip-installed `uv` stays in the image's system site-packages (harmless; it is
    the tool `uv sync` ran with, and bumping it is a deliberate change). `.venv/` is added to `.dockerignore` so a local environment is never copied over the
-   image's. Rollback is a plain revert of the PR: the Dockerfile and `requirements.txt`
+   image's — along with `**/.venv/` and `.minerva/worktrees/`, so a local build from a
+   checkout with active worktrees does not ship their environments. Rollback is a plain revert of the PR: the Dockerfile and `requirements.txt`
    change together.
 4. **Delete `requirements.txt`.** Historical plan documents under `docs/superpowers/` that
    mention it are records of past work and are left alone.

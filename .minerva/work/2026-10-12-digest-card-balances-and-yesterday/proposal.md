@@ -1,7 +1,7 @@
 # Proposal: digest-card-balances-and-yesterday
 
 **Date**: 2026-10-12
-**Status**: Draft
+**Status**: Shipped (2026-10-12)
 **Closes**: #37
 
 ## Goal
@@ -66,6 +66,8 @@ day's activity away; nothing in the current text says what was bought yesterday.
 
 ## Approach
 
+*(Rewritten at promote to describe what shipped; the Yesterday date key follows `replan.md`.)*
+
 1. **One spend definition, one query (knowledge 022 decision 3).** "Purchase" means
    `spending.is_spend` (positive amount, not `TRANSFER*` / `LOAN_PAYMENTS`) over
    non-removed transactions, pending included — the budget line's definition and
@@ -77,16 +79,17 @@ day's activity away; nothing in the current text says what was bought yesterday.
    `authorized_date` on its pending and posted rows; see `replan.md` for the
    residuals.
 
-   The existing `_week_totals` fetch spans `[week_start(today) - 4 weeks,
-   week_start(today) + 7 days)`; yesterday is always `>= week_start(today) - 1 day`,
-   inside that window, so **the already-fetched rows contain yesterday**.
-   `_week_totals` returns only aggregates today, so it is refactored to also hand
-   back the yesterday aggregate from the same row list (one fetch, three
-   derivations). A new pure `spending.day_spend(transactions, day)` re-filters to the
-   day (the defensive re-filter every aggregate here does) and returns a small
-   NamedTuple: `count`, `total`, `large` (`[(label, amount)]` for amount > 100,
-   descending), `by_category` (`[(category, total)]`, descending, ties by name). The
-   digest keeps costing exactly one transaction query.
+   The digest's one fetch spans `[week_start(today) - 4 weeks, week_start(today) + 7
+   days)`; a row purchased yesterday has `date` of yesterday or today (assuming
+   Plaid's `authorized_date <= date`), so **the already-fetched rows contain it**.
+   `_week_totals` became `_spend_totals`, returning the week spend, the history and
+   the yesterday aggregate from the same row list (one fetch, three derivations).
+   The pure `spending.day_spend(transactions, day)` re-filters on `purchase_date` and
+   returns a `DaySpend` NamedTuple: `day`, `count`, `total`, `large` (`[(label,
+   amount)]` for amount > 100, descending), `by_category` (`[(category, total)]`,
+   descending, ties by name). `DaySpend.day` drives the section header, so the label
+   and the numbers come from one value. The digest still costs exactly one
+   transaction query.
 2. **Formatting rules.**
    - Over $100 is strict (`amount > 100`). Label = `merchant_name`, falling back to
      `description`, truncated to 32 characters (31 + `…`). At most 10 lines; beyond
@@ -124,10 +127,12 @@ day's activity away; nothing in the current text says what was bought yesterday.
    read. `AccountRow` drops `slug` and `unvested`. Open issue #37 ("Set
    NET_WORTH_EXCLUDED_ACCOUNTS in Doppler", verified open 2026-10-12) becomes moot
    and is closed by this PR.
-5. **`digest_body` signature** becomes `digest_body(today, spent, history, cards,
+5. **`digest_body` signature** is `digest_body(today, spent, history, cards,
    card_total, yesterday, budget=WEEKLY_BUDGET)` — every content argument required,
    per the knowledge 022/024 rule that a default turns a forgotten argument into a
-   silently short digest. `_digest_parts` stays the single seam both send paths call.
+   silently short digest. `_digest_parts(session, today)` stays the single seam both
+   send paths call; it lost its `config` parameter, since nothing in the message reads
+   config any more.
 6. **A2P coupling (knowledge 022 decision 5).** Regenerate the three sample messages
    in `docs/twilio-a2p-campaign-resubmission.md` from the new `digest_body` — between
    them covering a full day with a `(reconnect needed)` card, a day with purchases but
@@ -140,13 +145,13 @@ day's activity away; nothing in the current text says what was bought yesterday.
    yesterday's purchases. The script lives outside this repo and is not edited here,
    but if the campaign is already filed, the description and samples must be
    re-submitted and the terms page brought in line.
-7. Update the `app/notifications.py` module docstring to describe the new content.
-8. **At promote:** write a new decision entry for this change that supersedes
-   knowledge 024 (supersession marker + `## Related` link), noting that 016 decision
-   5 (raw balances, no sign flip) stays in force and that 016/022's "every account"
-   descriptions of the balances block no longer hold.
+7. The `app/notifications.py` and `app/spending.py` module docstrings and the
+   `.env.example` Twilio comment describe the new content.
+8. Knowledge: `2026-10-12-decision-digest-credit-cards-and-yesterday` supersedes
+   knowledge 024; `2026-10-12-constraint-plaid-date-is-the-posting-date` records why
+   the Yesterday section keys on `authorized_date`.
 
-### Candidate approaches considered
+### Candidate approaches considered (at propose time)
 
 - **A (chosen) — pure aggregation over the existing single fetch.** As above.
 - **B — SQL aggregates for yesterday** (`GROUP BY category`, `WHERE amount > 100`).

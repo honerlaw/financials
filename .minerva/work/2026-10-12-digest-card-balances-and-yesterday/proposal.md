@@ -2,6 +2,7 @@
 
 **Date**: 2026-10-12
 **Status**: Draft
+**Closes**: #37
 
 ## Goal
 

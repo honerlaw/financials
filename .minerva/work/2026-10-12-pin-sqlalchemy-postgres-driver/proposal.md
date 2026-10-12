@@ -1,7 +1,7 @@
 # Proposal: pin-sqlalchemy-postgres-driver
 
 **Date**: 2026-10-12
-**Status**: Draft
+**Status**: Shipped (2026-10-12)
 
 ## Goal
 
@@ -30,6 +30,8 @@ Diagnosed this session (minerva:debug, Confirmed):
 
 ## Approach
 
+*(Rewritten at promote: implemented as planned; review fixes were docstring-only.)*
+
 1. **Pin** `SQLAlchemy>=2.0,<2.1` in `requirements.txt`, with a comment naming the reason
    (2.1 changes the default PostgreSQL driver; the test suite runs on SQLite and cannot
    vouch for Postgres behaviour under 2.1) and noting that every other requirement still
@@ -52,7 +54,8 @@ Diagnosed this session (minerva:debug, Confirmed):
    `SQLALCHEMY_DATABASE_URI` to `postgresql+psycopg2://…` and its engine's dialect driver
    is `psycopg2` (no connection is made). Under the 2.0 pin the driver assertion would
    pass even without step 2, so the URI assertion is the in-repo regression guard; that
-   the fix works under 2.1 is shown by a **one-off manual run** of the new test file in a
+   the fix works under 2.1 is shown by a **one-off manual run** (done: 7 passed on the
+   branch; `main`'s `create_app` raised `No module named 'psycopg'`) of the new test file in a
    scratch venv with SQLAlchemy 2.1.4 and `psycopg2-binary` (so a pass cannot be a missing
    driver), before merge, recorded in the scratchpad (failing
    on `main`'s `create_app`, passing on the branch).
@@ -94,6 +97,7 @@ Diagnosed this session (minerva:debug, Confirmed):
 
 ## Open Questions
 
-- None blocking. Every other requirement still floats (`>=`), so this failure mode remains
-  possible for other packages; a lockfile / full pinning is a separate decision, recorded
-  at promote.
+- None blocking. Every other requirement still floats (`>=`); see Deferred work.
+
+## Deferred work
+- #52 — every build re-resolves floating dependencies, so any upstream release can crash the container at boot (priority: high)

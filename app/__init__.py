@@ -6,13 +6,33 @@ from flask_migrate import Migrate
 db = SQLAlchemy()
 migrate = Migrate()
 
+# Bare schemes that leave the DBAPI choice to SQLAlchemy's default.
+_BARE_POSTGRES_SCHEMES = ('postgres://', 'postgresql://')
+
+
+def _database_url(raw):
+    """Name the psycopg2 driver on a bare Postgres URL — pure.
+
+    ``postgres://`` (the Heroku-style form) and ``postgresql://`` (what
+    ``.env.example`` documents) both become ``postgresql+psycopg2://``, with the rest
+    of the URL — query string included — left as is. Without a named driver,
+    SQLAlchemy picks its default DBAPI, and that default changed in 2.1 from
+    psycopg2 to psycopg (v3), which this image does not install. This app is
+    psycopg2-only unless the URL names a driver itself, so a URL that already
+    does (``postgresql+…://``), or is not Postgres at all, passes through
+    untouched. Matching is a case-sensitive prefix: both forms are written in
+    lowercase, and anything unrecognised is left for SQLAlchemy to reject.
+    """
+    for scheme in _BARE_POSTGRES_SCHEMES:
+        if raw.startswith(scheme):
+            return 'postgresql+psycopg2://' + raw[len(scheme):]
+    return raw
+
 
 def create_app(config=None):
     app = Flask(__name__)
 
-    db_url = os.getenv('DATABASE_URL', 'sqlite:///financials.db')
-    if db_url.startswith('postgres://'):
-        db_url = db_url.replace('postgres://', 'postgresql://', 1)
+    db_url = _database_url(os.getenv('DATABASE_URL', 'sqlite:///financials.db'))
 
     app.config.update(
         SQLALCHEMY_DATABASE_URI=db_url,

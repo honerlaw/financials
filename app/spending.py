@@ -1,7 +1,9 @@
 """Dashboard spend aggregation and weekly-budget tracking.
 
-Pure functions computing (a) a daily spend series for the dashboard chart and
-(b) a per-week running total against a fixed weekly budget. Like bills.py and
+Pure functions computing (a) a daily spend series for the dashboard chart,
+(b) a per-week running total against a fixed weekly budget, and (c) the
+daily digest's aggregates — the running week, the completed weeks behind it,
+and one day's purchases (``day_spend``). Like bills.py and
 subscriptions.py these take the reference date as a parameter rather than
 calling date.today() internally, so tests stay deterministic
 (see .minerva/knowledge: seed-relative-dates-in-time-sensitive-tests).
@@ -24,10 +26,14 @@ spend-like aggregation for the LLM tool path; this definition is intentionally
 independent.)
 """
 
-from datetime import timedelta
+from datetime import date, timedelta
 from decimal import Decimal
+from typing import NamedTuple
 
 WEEKLY_BUDGET = Decimal('1000')
+
+# A purchase strictly above this is itemised by the daily digest.
+LARGE_PURCHASE = Decimal('100')
 
 # Plaid personal_finance_category primaries excluded from spend. Prefix-matched
 # so detailed variants (TRANSFER_IN/TRANSFER_OUT) are covered by one entry.
@@ -98,6 +104,66 @@ def week_spend(transactions, today):
         if is_spend(txn) and ws <= txn.date < week_end_exclusive:
             total += txn.amount
     return total
+
+
+def purchase_date(txn):
+    """The day a purchase was made: ``authorized_date``, else ``date``.
+
+    For a POSTED transaction Plaid's ``date`` is the posting date, which can
+    trail the purchase by days. Keying a per-day report on it would show a
+    purchase once while pending (under its purchase day) and again once posted
+    (under its posting day). Week totals deliberately stay on ``date``; only
+    the digest's Yesterday section keys on this. ``getattr`` so a
+    transaction-like object without the field falls back to ``date``.
+    """
+    return getattr(txn, 'authorized_date', None) or txn.date
+
+
+class DaySpend(NamedTuple):
+    """One day's purchases, as ``day_spend`` aggregates them.
+
+    ``day`` is the date aggregated, carried so a caller printing it cannot
+    disagree with the numbers. ``large`` is ``[(label, amount)]`` for every purchase over
+    ``LARGE_PURCHASE``, largest first. ``by_category`` is ``[(category,
+    total)]``, largest first, where ``category`` is the Plaid primary as stored
+    (upper-cased) or ``None`` when the row has none.
+    """
+    day: date
+    count: int
+    total: Decimal
+    large: list
+    by_category: list
+
+
+def day_spend(transactions, day, large_over=LARGE_PURCHASE):
+    """Aggregate the ``is_spend`` transactions purchased on ``day`` — pure.
+
+    The same spend definition the budget line and weekly history use, keyed on
+    ``purchase_date`` rather than ``date``, so a purchase is reported under the
+    day it was made and is not reported again when its pending row is replaced
+    by the posted one (provided Plaid gives both the same ``authorized_date``).
+    Every row counted here is still in some week total the digest prints,
+    though possibly a different week than ``day`` falls in. Filters the input
+    defensively, like every aggregate here, so a caller may pass a wider fetch.
+    Ties sort by label / category name so the output is stable.
+    """
+    count = 0
+    total = Decimal('0')
+    large = []
+    categories = {}
+    for txn in transactions:
+        if purchase_date(txn) != day or not is_spend(txn):
+            continue
+        count += 1
+        total += txn.amount
+        if txn.amount > large_over:
+            large.append((txn.merchant_name or txn.description, txn.amount))
+        key = (txn.category or '').upper() or None
+        categories[key] = categories.get(key, Decimal('0')) + txn.amount
+    large.sort(key=lambda item: (-item[1], item[0]))
+    by_category = sorted(categories.items(),
+                         key=lambda item: (-item[1], item[0] or ''))
+    return DaySpend(day, count, total, large, by_category)
 
 
 def recent_week_spend(transactions, today, weeks=4):

@@ -3,16 +3,20 @@ from decimal import Decimal
 
 from app.spending import (
     is_spend, week_start, daily_spend, weekly_budget, week_spend,
-    recent_week_spend, week_label, WEEKLY_BUDGET,
+    recent_week_spend, week_label, day_spend, purchase_date, WEEKLY_BUDGET,
 )
 from app.models import db, Institution, Transaction
 
 
 class FakeTxn:
-    def __init__(self, txn_date, amount='50.00', category='FOOD_AND_DRINK'):
+    def __init__(self, txn_date, amount='50.00', category='FOOD_AND_DRINK',
+                 merchant_name=None, description='x', authorized_date=None):
         self.date = txn_date
+        self.authorized_date = authorized_date
         self.amount = Decimal(amount)
         self.category = category
+        self.merchant_name = merchant_name
+        self.description = description
 
 
 # ── is_spend ──────────────────────────────────────────────────────────────────
@@ -302,3 +306,89 @@ def test_recent_week_spend_window_is_configurable():
 def test_week_label_is_public_and_spans_months():
     assert week_label(date(2026, 7, 5)) == 'Jul 5–11'
     assert week_label(date(2026, 6, 28)) == 'Jun 28 – Jul 4'
+
+
+# ── day_spend (the digest's Yesterday section) ────────────────────────────────
+
+DAY = date(2026, 8, 7)
+
+
+def test_day_spend_counts_and_totals_only_that_days_purchases():
+    txns = [
+        FakeTxn(DAY, '40.00'),
+        FakeTxn(DAY, '142.18', merchant_name='Whole Foods'),
+        FakeTxn(DAY, '600.00', category='TRANSFER_OUT'),     # not spend
+        FakeTxn(DAY, '-25.00'),                              # refund
+        FakeTxn(DAY + timedelta(days=1), '99.00'),           # today
+        FakeTxn(DAY - timedelta(days=2), '77.00'),           # two days ago
+    ]
+    result = day_spend(txns, DAY)
+    assert result.count == 2
+    assert result.total == Decimal('182.18')
+
+
+def test_day_spend_lists_purchases_over_100_largest_first():
+    txns = [
+        FakeTxn(DAY, '100.00', merchant_name='Exactly 100'),   # not OVER 100
+        FakeTxn(DAY, '142.18', merchant_name='Whole Foods'),
+        FakeTxn(DAY, '310.00', merchant_name=None, description='DELTA AIR'),
+        FakeTxn(DAY, '500.00', category='LOAN_PAYMENTS'),      # not spend
+    ]
+    assert day_spend(txns, DAY).large == [
+        ('DELTA AIR', Decimal('310.00')),
+        ('Whole Foods', Decimal('142.18')),
+    ]
+
+
+def test_day_spend_sums_by_category_largest_first():
+    txns = [
+        FakeTxn(DAY, '20.00', category='GENERAL_MERCHANDISE'),
+        FakeTxn(DAY, '30.00', category='FOOD_AND_DRINK'),
+        FakeTxn(DAY, '25.00', category='FOOD_AND_DRINK'),
+        FakeTxn(DAY, '5.00', category=None),
+        FakeTxn(DAY, '5.00', category=''),
+    ]
+    assert day_spend(txns, DAY).by_category == [
+        ('FOOD_AND_DRINK', Decimal('55.00')),
+        ('GENERAL_MERCHANDISE', Decimal('20.00')),
+        (None, Decimal('10.00')),
+    ]
+
+
+def test_day_spend_empty_day():
+    result = day_spend([FakeTxn(DAY - timedelta(days=1), '50.00')], DAY)
+    assert result == (DAY, 0, Decimal('0'), [], [])
+
+
+def test_day_spend_breaks_ties_by_label_and_category_name():
+    """Equal amounts sort by name, so the text is stable from run to run;
+    uncategorized ('' as a sort key) sorts ahead of named categories."""
+    txns = [
+        FakeTxn(DAY, '150.00', category='TRAVEL', merchant_name='Zipcar'),
+        FakeTxn(DAY, '150.00', category='FOOD_AND_DRINK', merchant_name='Alamo'),
+        FakeTxn(DAY, '150.00', category=None, merchant_name='Hertz'),
+    ]
+    result = day_spend(txns, DAY)
+    assert [label for label, _ in result.large] == ['Alamo', 'Hertz', 'Zipcar']
+    assert [c for c, _ in result.by_category] == [None, 'FOOD_AND_DRINK', 'TRAVEL']
+
+
+def test_day_spend_keys_on_the_purchase_date_not_the_posting_date():
+    """A posted row's `date` is when it posted; `authorized_date` is when it
+    was bought. Yesterday's report is about what was bought yesterday."""
+    txns = [
+        FakeTxn(DAY + timedelta(days=3), '150.00', authorized_date=DAY,
+                merchant_name='Posted later'),
+        FakeTxn(DAY, '20.00', authorized_date=DAY - timedelta(days=2),
+                merchant_name='Bought earlier'),
+    ]
+    assert day_spend(txns, DAY).large == [('Posted later', Decimal('150.00'))]
+    assert day_spend(txns, DAY).count == 1
+
+
+def test_purchase_date_falls_back_to_date():
+    assert purchase_date(FakeTxn(DAY)) == DAY
+
+    class Bare:          # a transaction-like object with no authorized_date
+        date = DAY
+    assert purchase_date(Bare()) == DAY

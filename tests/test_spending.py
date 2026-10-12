@@ -3,16 +3,19 @@ from decimal import Decimal
 
 from app.spending import (
     is_spend, week_start, daily_spend, weekly_budget, week_spend,
-    recent_week_spend, week_label, WEEKLY_BUDGET,
+    recent_week_spend, week_label, day_spend, WEEKLY_BUDGET,
 )
 from app.models import db, Institution, Transaction
 
 
 class FakeTxn:
-    def __init__(self, txn_date, amount='50.00', category='FOOD_AND_DRINK'):
+    def __init__(self, txn_date, amount='50.00', category='FOOD_AND_DRINK',
+                 merchant_name=None, description='x'):
         self.date = txn_date
         self.amount = Decimal(amount)
         self.category = category
+        self.merchant_name = merchant_name
+        self.description = description
 
 
 # ── is_spend ──────────────────────────────────────────────────────────────────
@@ -302,3 +305,55 @@ def test_recent_week_spend_window_is_configurable():
 def test_week_label_is_public_and_spans_months():
     assert week_label(date(2026, 7, 5)) == 'Jul 5–11'
     assert week_label(date(2026, 6, 28)) == 'Jun 28 – Jul 4'
+
+
+# ── day_spend (the digest's Yesterday section) ────────────────────────────────
+
+DAY = date(2026, 8, 7)
+
+
+def test_day_spend_counts_and_totals_only_that_days_purchases():
+    txns = [
+        FakeTxn(DAY, '40.00'),
+        FakeTxn(DAY, '142.18', merchant_name='Whole Foods'),
+        FakeTxn(DAY, '600.00', category='TRANSFER_OUT'),     # not spend
+        FakeTxn(DAY, '-25.00'),                              # refund
+        FakeTxn(DAY + timedelta(days=1), '99.00'),           # today
+        FakeTxn(DAY - timedelta(days=2), '77.00'),           # two days ago
+    ]
+    result = day_spend(txns, DAY)
+    assert result.count == 2
+    assert result.total == Decimal('182.18')
+
+
+def test_day_spend_lists_purchases_over_100_largest_first():
+    txns = [
+        FakeTxn(DAY, '100.00', merchant_name='Exactly 100'),   # not OVER 100
+        FakeTxn(DAY, '142.18', merchant_name='Whole Foods'),
+        FakeTxn(DAY, '310.00', merchant_name=None, description='DELTA AIR'),
+        FakeTxn(DAY, '500.00', category='LOAN_PAYMENTS'),      # not spend
+    ]
+    assert day_spend(txns, DAY).large == [
+        ('DELTA AIR', Decimal('310.00')),
+        ('Whole Foods', Decimal('142.18')),
+    ]
+
+
+def test_day_spend_sums_by_category_largest_first():
+    txns = [
+        FakeTxn(DAY, '20.00', category='GENERAL_MERCHANDISE'),
+        FakeTxn(DAY, '30.00', category='FOOD_AND_DRINK'),
+        FakeTxn(DAY, '25.00', category='FOOD_AND_DRINK'),
+        FakeTxn(DAY, '5.00', category=None),
+        FakeTxn(DAY, '5.00', category=''),
+    ]
+    assert day_spend(txns, DAY).by_category == [
+        ('FOOD_AND_DRINK', Decimal('55.00')),
+        ('GENERAL_MERCHANDISE', Decimal('20.00')),
+        (None, Decimal('10.00')),
+    ]
+
+
+def test_day_spend_empty_day():
+    result = day_spend([FakeTxn(DAY - timedelta(days=1), '50.00')], DAY)
+    assert result == (0, Decimal('0'), [], [])

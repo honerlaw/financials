@@ -18,3 +18,36 @@
     - fix (arbiter/skeptic): opt-in/terms wording drift called out explicitly; A2P samples cover no-purchases and none-over-$100 days
     - fix (arbiter/skeptic): negative per-card balance format specified (`$-X`, unchanged) and tested; pending inclusion stated as deliberate (sync flags the pending row removed — verified app/sync.py:_mark_removed)
     - fix (proponent): deletion targets named; whole-dollar vs cents rounding accepted
+
+## Work notes
+
+- A2P sample fixtures (criterion 9). The three samples in `docs/twilio-a2p-campaign-resubmission.md` are the verbatim output of this script, run from the worktree root with `PYTHONPATH=.`; a substring check confirmed the doc contains them byte-for-byte:
+
+```python
+import sys
+from datetime import date
+from decimal import Decimal as D
+from app.notifications import digest_body
+from app.spending import DaySpend
+
+H = lambda *pairs: [(date(2026, m, d), D(t)) for m, d, t in pairs]
+hist1 = H((9, 13, '842'), (9, 20, '1130'), (9, 27, '655'), (10, 4, '918'))
+cards = [('Amex', 'Gold Card', '1008', D('1204.33')),
+         ('Citi', 'Double Cash', '1234', D('612.40'), True)]
+s1 = digest_body(date(2026, 10, 12), D('412'), hist1, cards, D('1816.73'),
+                 DaySpend(6, D('287.40'), [('Whole Foods Market', D('142.18'))],
+                          [('FOOD_AND_DRINK', D('201.30')), ('GENERAL_MERCHANDISE', D('86.10'))]))
+cards2 = [('Amex', 'Gold Card', '1008', D('1247.61')),
+          ('Citi', 'Double Cash', '1234', D('612.40'))]
+s2 = digest_body(date(2026, 10, 13), D('455'), hist1, cards2, D('1860.01'),
+                 DaySpend(2, D('43.28'), [], [('FOOD_AND_DRINK', D('43.28'))]))
+hist3 = H((9, 20, '1130'), (9, 27, '655'), (10, 4, '918'), (10, 11, '1043'))
+cards3 = [('Citi', 'Double Cash', '1234', D('204.17'))]
+s3 = digest_body(date(2026, 10, 19), D('0'), hist3, cards3, D('204.17'),
+                 DaySpend(0, D('0'), [], []))
+for i, s in enumerate((s1, s2, s3), 1):
+    print(f'## Sample message #{i}\n\n```\n{s}\n```\n')
+```
+
+- Opt-in script drift (compliance flag for the final report): the consent script quoted at docs/twilio-a2p-campaign-resubmission.md (published at onerlaw.com/terms) still says the text carries "the balances of your linked accounts". It is the published wording, so the repo copy is left matching the live page; if the campaign is filed, re-submit the description + samples and bring the terms page in line.
+- `_week_totals` renamed `_spend_totals`; it now returns a third aggregate (`day_spend` for yesterday) from the same row list. `_digest_parts` lost its `config` parameter — nothing in the message reads config any more.

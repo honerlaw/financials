@@ -207,7 +207,7 @@ The near-misses in that dropdown, and why each loses:
 ## Campaign description
 
 ```
-Onerlaw LLC operates Onerlaw, a web-based personal finance dashboard. Users link their bank and credit card accounts to the platform through Plaid, and the platform tracks their spending against a weekly budget they set. This campaign sends operational account notifications to registered users of that platform who have opted in to receive them. Each morning the platform sends one message reporting the user's spending so far that week against their budget, the total they spent in each of the four previous weeks, the current balance of each linked account, and the combined net worth of those accounts. A user can also trigger that same summary for themselves from inside the dashboard. Volume is about seven messages per user per week. The messages are transactional only, contain no marketing or promotional content, identify Onerlaw LLC as the sender, and carry STOP opt-out instructions.
+Onerlaw LLC operates Onerlaw, a web-based personal finance dashboard. Users link their bank and credit card accounts to the platform through Plaid, and the platform tracks their spending against a weekly budget they set. This campaign sends operational account notifications to registered users of that platform who have opted in to receive them. Each morning the platform sends one message reporting the user's spending so far that week against their budget, the total they spent in each of the four previous weeks, the current balance of each linked credit card and the total owed across those cards, and a summary of the previous day's purchases: how many and their total, each purchase over $100, and spending by category. A user can also trigger that same summary for themselves from inside the dashboard. Volume is about seven messages per user per week. The messages are transactional only, contain no marketing or promotional content, identify Onerlaw LLC as the sender, and carry STOP opt-out instructions.
 ```
 
 Describes the software, who it serves, and what the messages contain — the three things
@@ -222,23 +222,29 @@ just because the description reads more cleanly without it.
 
 ```
 Onerlaw LLC
-Good morning — Sat Aug 8
+Good morning — Mon Oct 12
 
-Budget: $750 of $1,000 (75%) — $250 left
-Week of Aug 2
+Budget: $412 of $1,000 (41%) — $588 left
+Week of Oct 11
 
 Last 4 weeks
-Jul 5–11: $842
-Jul 12–18: $1,130
-Jul 19–25: $655
-Jul 26 – Aug 1: $1,204
+Sep 13–19: $842
+Sep 20–26: $1,130
+Sep 27 – Oct 3: $655
+Oct 4–10: $918
 
-Balances
-Truist · Checking ••3390: $4,880.02
-Citi · Double Cash ••1234: $612.40
-SoFi · Checking ••7742: $412.00 (not counted)
+Credit cards
+Amex · Gold Card ••1008: $1,204.33
+Citi · Double Cash ••1234: $612.40 (reconnect needed)
+Total card debt: $1,816.73
 
-Net worth: $4,267.62
+Yesterday — Sun Oct 11
+6 purchases: $287
+Over $100
+Whole Foods Market: $142.18
+By category
+Food and drink: $201
+General merchandise: $86
 
 Reply STOP to unsubscribe.
 ```
@@ -247,22 +253,27 @@ Reply STOP to unsubscribe.
 
 ```
 Onerlaw LLC
-Good morning — Sat Aug 15
+Good morning — Tue Oct 13
 
-Budget: $1,043 of $1,000 (104%) — $43 OVER
-Week of Aug 9
+Budget: $455 of $1,000 (45%) — $545 left
+Week of Oct 11
 
 Last 4 weeks
-Jul 12–18: $1,130
-Jul 19–25: $655
-Jul 26 – Aug 1: $1,204
-Aug 2–8: $918
+Sep 13–19: $842
+Sep 20–26: $1,130
+Sep 27 – Oct 3: $655
+Oct 4–10: $918
 
-Balances
-E*TRADE · Stock Plan ••7781: $84,200.00 (unvested excluded)
-Truist · Checking ••3390: $4,206.11
+Credit cards
+Amex · Gold Card ••1008: $1,247.61
+Citi · Double Cash ••1234: $612.40
+Total card debt: $1,860.01
 
-Net worth: $35,606.11
+Yesterday — Mon Oct 12
+2 purchases: $43
+Over $100: none
+By category
+Food and drink: $43
 
 Reply STOP to unsubscribe.
 ```
@@ -271,21 +282,23 @@ Reply STOP to unsubscribe.
 
 ```
 Onerlaw LLC
-Good morning — Mon Aug 17
+Good morning — Mon Oct 19
 
-Budget: $120 of $1,000 (12%) — $880 left
-Week of Aug 16
+Budget: $0 of $1,000 (0%) — $1,000 left
+Week of Oct 18
 
 Last 4 weeks
-Jul 19–25: $655
-Jul 26 – Aug 1: $1,204
-Aug 2–8: $918
-Aug 9–15: $1,043
+Sep 20–26: $1,130
+Sep 27 – Oct 3: $655
+Oct 4–10: $918
+Oct 11–17: $1,043
 
-Balances
-Truist · Checking ••3390: $4,206.11 (reconnect needed)
+Credit cards
+Citi · Double Cash ••1234: $204.17
+Total card debt: $204.17
 
-Net worth: $4,206.11
+Yesterday — Sun Oct 18
+No purchases.
 
 Reply STOP to unsubscribe.
 ```
@@ -293,14 +306,18 @@ Reply STOP to unsubscribe.
 Generated from `digest_body` in `app/notifications.py`, not written by hand. Regenerate
 them whenever the message shape changes — a new section, a reworded line, a different
 `BRAND` — because filed samples that no longer match live traffic are a violation even
-after approval. The `Last 4 weeks` block is work unit 020; the `Net worth` line and
-the parenthetical account notes are work unit 022.
+after approval. The `Last 4 weeks` block is work unit 020; the `Credit cards` block and
+the `Yesterday` section are work unit 2026-10-12-digest-card-balances-and-yesterday, which
+also retired the earlier net-worth line and its `(not counted)` / `(unvested excluded)`
+notes.
 
-Between them the three samples show every parenthetical the digest can attach to a
-balance line — `(not counted)` for an account configuration keeps out of the total,
-`(unvested excluded)` for one whose printed balance is larger than what it
-contributes, and `(reconnect needed)` for a bank that stopped syncing — so a reviewer
-never sees a suffix in live traffic that no filed sample contains.
+Between them the three samples show every shape the variable parts of the digest can
+take — a card flagged `(reconnect needed)` for a bank that stopped syncing (the only
+parenthetical a line can now carry), a day with purchases over $100, a day with purchases
+but none over $100 (`Over $100: none`), and a day with no purchases at all — so a reviewer
+never sees a shape in live traffic that no filed sample contains. (`No linked credit
+cards.`, `+N more` on a long purchase list and an `Other` category line are the remaining
+rare variants; all three are plain text.)
 
 ## Content flags
 

@@ -1,6 +1,12 @@
 plaid-python>=26.0.0
 flask>=3.0.0
 flask-sqlalchemy>=3.1.0
+# Pinned below 2.1, which made psycopg (v3) the default driver for postgresql://
+# URLs; this image installs only psycopg2-binary, and an unpinned build resolving
+# 2.1.4 crashed the container at create_app. The suite runs on SQLite, so it cannot
+# vouch for Postgres behaviour under 2.1 either — moving to 2.1 / psycopg 3 is its
+# own change. Every other requirement here still floats (>=).
+SQLAlchemy>=2.0,<2.1
 flask-migrate>=4.0.0
 APScheduler>=3.10.0
 # zoneinfo's IANA database — the python:3.12-slim base image is not guaranteed to

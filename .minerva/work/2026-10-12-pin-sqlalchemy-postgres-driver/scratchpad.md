@@ -12,3 +12,8 @@
 - [reviewed — clean] approach: A — pin SQLAlchemy<2.1 + explicit psycopg2 driver; rejected B (stay on 2.1: untested Postgres semantics, knowledge 033), C (pin only: next bump re-breaks), D (psycopg 3: driver migration in a hotfix) (tier: reviewer — production DB connection path, not provably small; parallel wave). Noted-but-dismissed: floating transitive deps (lockfile out of scope), sslmode/query-string and test-guard verification notes folded via whole-proposal
 - [reviewed — folded] whole-proposal: criterion 3 unsatisfiable in-repo under the pin (driver assertion passes without the fix) → version-independent URI assertion + one-off 2.1.4 scratch-venv run; criterion 5 passed on the rollback build → deployment cause must name the merge commit, ACTIVE, no rollback, logged-in GET / (tier: reviewer; parallel wave)
 - [rechecked — residual folded] whole-proposal: item 4 partially addressed — sslmode row added to criterion 2, uppercase schemes explicitly declined; low new concerns folded (psycopg2-binary in the scratch venv, credentials source)
+
+## Work notes
+- Criterion 1: fresh venv + `pip install -r requirements.txt` → sqlalchemy 2.0.54, alembic 1.20.0; full suite 328 passed on that fresh resolve.
+- Criterion 3 one-off (scratch venv: sqlalchemy 2.1.4, psycopg2 2.9.13): branch `tests/test_app_config.py` → 7 passed; `main`'s `create_app()` with `DATABASE_URL=postgresql://u:p@h/d?sslmode=require` → `ModuleNotFoundError No module named 'psycopg'` (the production crash, reproduced through the real factory).
+- `create_app` builds the engine at `init_app` and imports the DBAPI there without connecting — which is why the crash happens at boot (in `flask db upgrade`, before gunicorn) rather than on the first request.

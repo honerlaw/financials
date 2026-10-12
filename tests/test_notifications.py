@@ -27,7 +27,7 @@ HISTORY = [
     (date(2026, 7, 19), Decimal('0')),
     (date(2026, 7, 26), Decimal('1204')),
 ]
-NO_SPEND = DaySpend(0, Decimal('0'), [], [])
+NO_SPEND = DaySpend(YESTERDAY, 0, Decimal('0'), [], [])
 CARDS = [
     ('Amex', 'Gold Card', '1008', Decimal('1204.33')),
     ('Citi', 'Double Cash', '1234', Decimal('612.40')),
@@ -217,7 +217,7 @@ def test_digest_body_without_cards_says_so_and_prints_no_total():
 # ── yesterday (pure) ──────────────────────────────────────────────────────────
 
 def _spend(count=3, total=Decimal('287.40'), large=(), by_category=()):
-    return DaySpend(count, total, list(large), list(by_category))
+    return DaySpend(YESTERDAY, count, total, list(large), list(by_category))
 
 
 def test_category_name_humanizes_the_plaid_primary():
@@ -227,7 +227,7 @@ def test_category_name_humanizes_the_plaid_primary():
 
 
 def test_yesterday_section_with_purchases():
-    lines = yesterday_lines(YESTERDAY, _spend(
+    lines = yesterday_lines(_spend(
         count=6, total=Decimal('287.40'),
         large=[('Whole Foods Market', Decimal('142.18'))],
         by_category=[('FOOD_AND_DRINK', Decimal('201.30')),
@@ -245,28 +245,28 @@ def test_yesterday_section_with_purchases():
 
 
 def test_yesterday_section_with_one_purchase_uses_the_singular():
-    lines = yesterday_lines(YESTERDAY, _spend(
+    lines = yesterday_lines(_spend(
         count=1, total=Decimal('40'), by_category=[(None, Decimal('40'))]))
     assert lines[1] == '1 purchase: $40'
     assert lines[-1] == 'Uncategorized: $40'
 
 
 def test_yesterday_section_with_nothing_over_100():
-    lines = yesterday_lines(YESTERDAY, _spend(
+    lines = yesterday_lines(_spend(
         by_category=[('FOOD_AND_DRINK', Decimal('287.40'))]))
     assert 'Over $100: none' in lines
     assert 'Over $100' not in lines
 
 
 def test_yesterday_section_with_no_purchases():
-    assert yesterday_lines(YESTERDAY, NO_SPEND) == [
+    assert yesterday_lines(NO_SPEND) == [
         'Yesterday — Fri Aug 7', 'No purchases.',
     ]
 
 
 def test_the_large_purchase_list_is_capped_with_a_count_of_the_rest():
     large = [(f'Shop {i}', Decimal(500 - i)) for i in range(13)]
-    lines = yesterday_lines(YESTERDAY, _spend(large=large))
+    lines = yesterday_lines(_spend(large=large))
     start = lines.index('Over $100') + 1
     end = lines.index('By category')
     shown = lines[start:end]
@@ -277,7 +277,7 @@ def test_the_large_purchase_list_is_capped_with_a_count_of_the_rest():
 
 def test_a_long_merchant_label_is_truncated():
     label = 'A' * 50
-    lines = yesterday_lines(YESTERDAY, _spend(large=[(label, Decimal('150'))]))
+    lines = yesterday_lines(_spend(large=[(label, Decimal('150'))]))
     line = next(l for l in lines if l.endswith(': $150.00'))
     name = line[:-len(': $150.00')]
     assert len(name) == 32
@@ -286,7 +286,7 @@ def test_a_long_merchant_label_is_truncated():
 
 def test_the_category_list_is_capped_with_an_other_line():
     cats = [(f'CAT_{i}', Decimal(100 - i)) for i in range(8)]
-    lines = yesterday_lines(YESTERDAY, _spend(by_category=cats))
+    lines = yesterday_lines(_spend(by_category=cats))
     shown = lines[lines.index('By category') + 1:]
     assert len(shown) == 6
     assert shown[:5] == ['Cat 0: $100', 'Cat 1: $99', 'Cat 2: $98',
@@ -296,7 +296,7 @@ def test_the_category_list_is_capped_with_an_other_line():
 
 def test_six_categories_are_shown_without_an_other_line():
     cats = [(f'CAT_{i}', Decimal(10)) for i in range(6)]
-    lines = yesterday_lines(YESTERDAY, _spend(by_category=cats))
+    lines = yesterday_lines(_spend(by_category=cats))
     assert not any(l.startswith('Other') for l in lines)
 
 
@@ -903,3 +903,48 @@ def test_yesterday_on_a_sunday_reaches_back_into_last_week(app):
         body = sender.sent[0][1]
         assert 'Yesterday — Sat Aug 8\n1 purchase: $123' in body
         assert 'x: $123.45' in body
+
+
+def test_a_purchase_is_reported_once_across_its_pending_and_posted_rows(app):
+    """Bought Fri, reported pending in Saturday's text; it posts Monday with the
+    same authorized_date, so Tuesday's "Yesterday — Mon" must not repeat it.
+    A posted row Plaid gives no authorized_date falls back to its posting date
+    (the accepted residual)."""
+    with app.app_context():
+        inst_id = _seed_inst(None)
+        db.session.add(Transaction(
+            plaid_transaction_id='pend', institution_id=inst_id, account_id='a1',
+            date=YESTERDAY, authorized_date=YESTERDAY, description='SHOP',
+            merchant_name='Pending Shop', amount=Decimal('150.00'),
+            category='GENERAL_MERCHANDISE', pending=True,
+        ))
+        db.session.commit()
+        saturday = FakeSender()
+        send_digest_now(db.session, TODAY, CFG, sender=saturday)
+        assert 'Pending Shop: $150.00' in saturday.sent[0][1]
+
+        # Monday's sync: the pending row is removed, the posted row arrives.
+        pending = Transaction.query.filter_by(plaid_transaction_id='pend').one()
+        pending.removed = True
+        monday = date(2026, 8, 10)
+        db.session.add(Transaction(
+            plaid_transaction_id='post', institution_id=inst_id, account_id='a1',
+            date=monday, authorized_date=YESTERDAY, description='SHOP',
+            merchant_name='Pending Shop', amount=Decimal('150.00'),
+            category='GENERAL_MERCHANDISE', pending_transaction_id='pend',
+        ))
+        db.session.add(Transaction(
+            plaid_transaction_id='noauth', institution_id=inst_id,
+            account_id='a1', date=monday, authorized_date=None,
+            description='CAFE', merchant_name='No Auth Cafe',
+            amount=Decimal('120.00'), category='FOOD_AND_DRINK',
+        ))
+        db.session.commit()
+        tuesday = FakeSender()
+        send_digest_now(db.session, date(2026, 8, 11), CFG, sender=tuesday)
+
+        body = tuesday.sent[0][1]
+        assert 'Yesterday — Mon Aug 10\n1 purchase: $120' in body
+        assert 'Pending Shop' not in body
+        assert 'No Auth Cafe: $120.00' in body
+

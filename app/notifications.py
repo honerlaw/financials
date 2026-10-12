@@ -203,8 +203,8 @@ def _truncate(label, limit=LABEL_MAX):
     return label if len(label) <= limit else label[:limit - 1] + '…'
 
 
-def yesterday_lines(day, spend):
-    """The ``Yesterday`` section for ``day``, from a ``spending.DaySpend``.
+def yesterday_lines(spend):
+    """The ``Yesterday`` section, from the ``spending.DaySpend`` for that day.
 
     Individual purchases print dollars and cents — each is a specific amount,
     like a balance. The day's total and the category totals print whole
@@ -213,7 +213,7 @@ def yesterday_lines(day, spend):
     so a busy day cannot push the message past Twilio's length limit; what the
     cap hides is still counted, as ``+N more`` or an ``Other`` line.
     """
-    lines = [f"Yesterday — {day.strftime('%a %b %-d')}"]
+    lines = [f"Yesterday — {spend.day.strftime('%a %b %-d')}"]
     if not spend.count:
         lines.append('No purchases.')
         return lines
@@ -283,7 +283,7 @@ def digest_body(today, spent, history, cards, card_total, yesterday,
     if card_lines:
         lines.append(card_total_line(card_total))
     lines.append('')
-    lines.extend(yesterday_lines(today - timedelta(days=1), yesterday))
+    lines.extend(yesterday_lines(yesterday))
     lines.extend(['', OPT_OUT_LINE])
     return '\n'.join(lines)
 
@@ -347,10 +347,12 @@ def _spend_totals(session, today, weeks=HISTORY_WEEKS):
 
     One query spanning the whole window, not one per aggregate: every
     aggregate re-filters what it is handed, so a single wide fetch cannot
-    inflate any of them. Yesterday is always inside the window — at earliest
-    it is the Saturday before this week's Sunday, and the window reaches back
-    ``weeks`` whole weeks before that. No institution filter — same household
-    math as the dashboard.
+    inflate any of them. Every row purchased yesterday is inside the window:
+    Plaid's ``authorized_date`` does not follow ``date``, so such a row has
+    ``date`` of yesterday or today, and yesterday is at earliest the Saturday
+    before this week's Sunday, with the window reaching back ``weeks`` whole
+    weeks before that. No institution filter — same household math as the
+    dashboard.
     """
     current = week_start(today)
     first = current - timedelta(days=7 * weeks)

@@ -68,12 +68,14 @@ day's activity away; nothing in the current text says what was bought yesterday.
 
 1. **One spend definition, one query (knowledge 022 decision 3).** "Purchase" means
    `spending.is_spend` (positive amount, not `TRANSFER*` / `LOAN_PAYMENTS`) over
-   non-removed transactions with `Transaction.date == yesterday`, pending included —
-   the exact definition and filter behind the budget line, so yesterday's total is
-   always part of a week total printed in the text (the budget week, or the newest
-   history week when yesterday was a Saturday). Pending rows are included
-   deliberately: sync replaces a pending row with its posted one by flagging the
-   pending row `removed`, so a purchase is never counted twice.
+   non-removed transactions, pending included — the budget line's definition and
+   filter. *(Superseded by replan 2026-10-12:)* the Yesterday section selects rows
+   **purchased** yesterday — `spending.purchase_date(txn)` = `authorized_date or date`
+   — while the budget line and history stay keyed on `date`. Every Yesterday row is
+   still counted in some printed week total, possibly in a different week bucket than
+   its label implies. A purchase is never shown twice when Plaid supplies the same
+   `authorized_date` on its pending and posted rows; see `replan.md` for the
+   residuals.
 
    The existing `_week_totals` fetch spans `[week_start(today) - 4 weeks,
    week_start(today) + 7 days)`; yesterday is always `>= week_start(today) - 1 day`,
@@ -164,9 +166,12 @@ day's activity away; nothing in the current text says what was bought yesterday.
    with `Total card debt:` equal to their sum, and the body contains no `Net worth`.
 2. A no-card fixture renders `No linked credit cards.` and no total line; a negative
    card total renders `-$`; a negative card balance renders `$-` on its line.
-3. With fixture transactions dated yesterday, today and two days ago — plus a
-   transfer and a refund yesterday — the `Yesterday` summary counts and totals only
-   yesterday's `is_spend` rows; `Over $100` lists exactly yesterday's spend rows with
+3. With fixture transactions purchased (`authorized_date`, else `date`) yesterday,
+   today and two days ago — plus a transfer and a refund yesterday — the `Yesterday`
+   summary counts and totals only yesterday's `is_spend` rows; a pending row and its
+   posted replacement (same `authorized_date`) yield one Yesterday entry across the two
+   digests, a posted row with null `authorized_date` falls back to `date`, and a removed
+   pending row is excluded; `Over $100` lists exactly yesterday's spend rows with
    amount > 100, largest first; `By category` sums yesterday's spend rows per
    humanized category, largest first, null → `Uncategorized`.
 4. A day with no purchases renders `No purchases.`; a day with purchases but none over
@@ -200,5 +205,7 @@ Interpretation choices made without asking (autonomous run); each is cheap to re
   the budget line's definition.
 - The over-$100 list and the category summary are scoped to **yesterday**, like the
   summary line they follow (not the current week).
-- A purchase that first appears after the 7am sync with yesterday's date is never
-  shown in any `Yesterday` block (it still counts in the week totals). Accepted.
+- *(Superseded by replan 2026-10-12, residuals a–c:)* a purchase first synced after
+  its purchase day has passed is never shown in any `Yesterday` block (it still counts
+  in the week totals); a posted row without `authorized_date`, or with one differing
+  from its pending row's, can be shown a second time under its posting day. Accepted.

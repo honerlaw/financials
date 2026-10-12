@@ -1,5 +1,7 @@
 venv/
 .venv/
+**/.venv/
+.minerva/worktrees/
 .git/
 .gitignore
 __pycache__/

@@ -13,6 +13,8 @@
 - [reviewed — folded] approach: A (pyproject + uv.lock, uv sync --locked --no-dev); rejected B (uv pip compile → requirements.lock), C (uv export at build), D (pip-tools) — none use uv as asked. Folded: lock seeded from production's installed set instead of a fresh resolve (lock-time float = the SQLAlchemy failure class); uv from PyPI (pip install uv==0.10.7) instead of ghcr.io (new registry in the build path); requires-python <3.13; UV_PYTHON_PREFERENCE=only-system, UV_LINK_MODE=copy, UV_COMPILE_BYTECODE=1; .python-version copied; CLAUDE.md warns on bare `uv lock --upgrade`; revert note (tier: reviewer — interface-clause doubt on deleting requirements.txt passed to the Skeptic; answered no: only consumer is the Dockerfile, rewritten here; parallel wave)
 - [rechecked — clean] approach: fold-audit — all 8 items addressed; new concerns low (marker-conditional packages, mechanical dev-only set) — folded as criterion-2 wording
 - [reviewed — clean] whole-proposal (restart): first-wave review stale because the approach fold rewrote ## Success criteria (criterion 2); re-reviewed at reviewer tier — accept. Write-up clarifications applied, decision unchanged: criterion 2 names the exact 7-package dev-only difference + normalization; baseline recorded here; seeding step marked conditional; local arm64 docker build labelled a proxy (tier: reviewer; parallel wave restart)
+- [reviewed — clean] completion verification: Verifier reproduced C1–C5 (bounds name-by-name, recomputed C2 diff = the 7 dev-only packages, 328 passed, image checks, stale-lock build failure in a scratch copy); C6 deferred post-merge (tier: reviewer floor — no interface beyond what the proposal approved; code review alongside)
+- [solo] review triage: 4 FIX / 0 SUGGEST / 2 IGNORE (tier: default-solo row — each had one dominant disposition)
 
 ## Work notes
 - Production baseline (deployment d249aa0d, commit b6ead9d, from `doctl apps logs <app> financials --deployment d249aa0d-896f-4d1c-98cc-50580fdcf853 --type build`, "Successfully installed" line):
@@ -22,3 +24,12 @@
 - Criterion 4 (local arm64 build, a proxy for amd64): no `pytest` module; sqlalchemy 2.0.54, psycopg2 2.9.13; `flask`/`gunicorn` resolve to /app/.venv/bin; gunicorn 26.2.0; `flask --app wsgi --help` lists `db`; uv 0.10.7 present. Extra: gunicorn booted from the image served `GET /login` 200 (SQLite URL, migrations skipped — the chain is Postgres-only, knowledge 017).
 - Criterion 5: scratch copy with `twilio>=9.0.0,<9.5` and the unchanged lock → `docker build` fails at `RUN uv sync --locked --no-dev --no-cache` (exit 1). Not committed.
 - The old 3.13 `venv/` is now unused; `.venv/` (3.12) is the dev environment.
+
+## Review triage 2026-10-12
+Minerva audit (inline): no findings. Code review (local-diff, fresh-context subagent) additionally built the image for linux/amd64 and booted it against a throwaway postgres:16 — entrypoint ran the full migration chain from the venv, gunicorn served GET /login 200.
+- [FIXED]   #1 low .dockerignore — `**/.venv/` and `.minerva/worktrees/` (a `docker build .` from the main checkout shipped worktrees' macOS .venv into the context)
+- [FIXED]   #2 low pyproject.toml — bounds are constraints, not ceilings
+- [FIXED]   #3 low Dockerfile — console note: system pip / `uv run` are not the app's environment
+- [FIXED]   #4 low CLAUDE.md — trailing blank line
+- [IGNORED] #5 low doppler-run path untested — needs a real token; PATH inheritance unchanged, and the amd64 + Postgres boot covers the plain path
+- [IGNORED] #6 low knowledge 025 / overview.md say "clean pip install" — past-tense records; promote is add-only, the new entry states the current build

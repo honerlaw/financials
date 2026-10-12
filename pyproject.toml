@@ -2,8 +2,9 @@
 #
 # `uv.lock` pins the exact set production installs: the Dockerfile runs
 # `uv sync --locked --no-dev`, which fails the build if this file and the lock
-# disagree instead of re-resolving. A bound here is a ceiling for `uv lock`, not
-# what gets installed — bump a package with `uv lock --upgrade-package <name>`.
+# disagree instead of re-resolving. A bound here only constrains what `uv lock`
+# may pick; the lock decides what gets installed — bump a package with
+# `uv lock --upgrade-package <name>`.
 # See CLAUDE.md § Development.
 
 [project]

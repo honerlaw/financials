@@ -36,7 +36,10 @@ RUN pip install --no-cache-dir "uv==$UV_VERSION"
 COPY pyproject.toml uv.lock .python-version ./
 RUN uv sync --locked --no-dev --no-cache
 # entrypoint.sh calls bare `flask` and `gunicorn` (also through `doppler run`,
-# which inherits PATH), so the project environment goes first on PATH.
+# which inherits PATH), so the project environment goes first on PATH. In a
+# console, the system `pip` is NOT the app's environment (/app/.venv has no pip),
+# and `uv run` would sync the dev group into it — inspect with
+# `uv pip list --python /app/.venv` instead.
 ENV PATH="/app/.venv/bin:$PATH"
 
 COPY . .

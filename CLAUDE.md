@@ -16,4 +16,3 @@ Dependencies are managed with [uv](https://docs.astral.sh/uv/): `pyproject.toml`
 - `uv add <pkg>` / `uv add --dev <pkg>` — add a dependency; commit `pyproject.toml` and `uv.lock` together.
 - `uv lock --upgrade-package <pkg>` — bump one package deliberately. A bare `uv lock --upgrade` moves **every** package at once — the way an unpinned SQLAlchemy 2.1 once crashed a deploy — so avoid it.
 - Build the image (`docker build .`) before merging any change to `uv.lock`: production deploys on every push to `main`.
-

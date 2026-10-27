@@ -23,6 +23,7 @@ transactions, so the index cannot go stale merely because the calendar moved.
 from collections import Counter, defaultdict
 
 from flask import current_app
+from sqlalchemy import select
 
 from app import db
 from app.models import MerchantGroup, MerchantGroupKey, Transaction
@@ -34,6 +35,27 @@ from app.subscriptions import (
     normalize_merchant,
 )
 from difflib import SequenceMatcher
+
+
+# The only columns the detectors read. Detection is duck-typed over attribute
+# access, so plain result rows serve it: hydrating full ORM instances (every row
+# decoding two JSON columns nothing here looks at) was most of a page load, and a
+# plain row cannot lazy-load — /bills once spent ~20 s re-SELECTing expired ORM
+# rows one at a time. A column read here and missing from this list fails loudly.
+_DETECTION_COLUMNS = (
+    Transaction.date, Transaction.amount,
+    Transaction.description, Transaction.merchant_name,
+    Transaction.merchant_entity_id, Transaction.merchant_key,
+    Transaction.institution_id, Transaction.account_id, Transaction.removed,
+    Transaction.category, Transaction.category_detailed,
+)
+
+
+def _detection_rows():
+    """Live transactions as plain rows carrying only the columns detection reads."""
+    return db.session.execute(
+        select(*_DETECTION_COLUMNS).where(Transaction.removed.is_(False))
+    ).all()
 
 
 def backfill_missing_keys():
@@ -252,15 +274,15 @@ def is_index_usable():
 def grouped_transactions():
     """Live transactions bucketed by their persisted group. No fuzzy matching.
 
-    Returns a list of transaction lists, one per merchant — the same shape
+    Returns a list of row lists, one per merchant — the same shape
     `_group_transactions` returns, so the detectors cannot tell the difference.
+    Rows are plain result rows (see `_detection_rows`), not ORM instances.
     """
     key_to_group = dict(
         db.session.query(MerchantGroupKey.key, MerchantGroupKey.group_id).all()
     )
     groups = defaultdict(list)
-    rows = Transaction.query.filter_by(removed=False).all()
-    for txn in rows:
+    for txn in _detection_rows():
         group_id = key_to_group.get(txn.merchant_key)
         if group_id is not None:
             groups[group_id].append(txn)
@@ -269,8 +291,7 @@ def grouped_transactions():
 
 def _in_memory_fallback():
     """Group the slow way. Correct, just O(distinct merchants squared)."""
-    live = Transaction.query.filter_by(removed=False).all()
-    return _group_transactions(live), False
+    return _group_transactions(_detection_rows()), False
 
 
 def groups_for_detection():

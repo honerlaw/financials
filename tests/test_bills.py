@@ -1,9 +1,13 @@
+import re
 from datetime import date, timedelta
 from decimal import Decimal
 
 import pytest
 
-from app.bills import detect_bills, _expected_day_of_month, _payment_status, _safe_date
+from app.bills import (
+    detect_bills, fixed_monthly_total, _expected_day_of_month, _monthly_estimate,
+    _payment_status, _safe_date,
+)
 from app.models import db, Institution, Transaction, Account
 
 TODAY = date(2026, 6, 13)
@@ -12,7 +16,8 @@ TODAY = date(2026, 6, 13)
 class FakeTxn:
     def __init__(self, txn_date, amount='120.00', merchant_name=None,
                  description='CHARGE', merchant_entity_id=None,
-                 institution_id=1, account_id='acc-1', removed=False):
+                 institution_id=1, account_id='acc-1', removed=False,
+                 category=None, category_detailed=None):
         self.date = txn_date
         self.amount = Decimal(amount)
         self.merchant_name = merchant_name
@@ -21,6 +26,8 @@ class FakeTxn:
         self.institution_id = institution_id
         self.account_id = account_id
         self.removed = removed
+        self.category = category
+        self.category_detailed = category_detailed
 
 
 def monthly_bill(n, day=10, start_month=1, start_year=2026, **kwargs):
@@ -245,3 +252,149 @@ def test_bills_page_empty_state(auth_client):
     res = auth_client.get('/bills')
     assert res.status_code == 200
     assert b'No recurring bills' in res.data
+
+
+# ── Fixed monthly total ───────────────────────────────────────────────────────
+
+def _only_bill(txns):
+    bills = detect_bills(txns, TODAY)
+    assert len(bills) == 1, bills
+    return bills[0]
+
+
+def test_fixed_price_bill_counts_at_its_price():
+    bill = _only_bill(monthly_bill(6, day=10, amount='15.00', description='STREAMING'))
+    assert bill['monthly_amount'] == Decimal('15.00')
+    assert bill['excluded_reason'] is None
+
+
+def test_variable_bill_leans_high():
+    """P75 by linear interpolation: position 0.75 * 11 = 8.25 of the sorted
+    year, so 150 + (200 - 150) * 0.25 = 162.50 — above the 105 median."""
+    amounts = ['100', '100', '100', '100', '100', '100',
+               '110', '120', '150', '200', '250', '300']
+    txns = [FakeTxn(d.date, amount=a, description='POWER CO')
+            for d, a in zip(monthly_bill(12, day=10, start_month=6, start_year=2025),
+                            amounts)]
+    bill = _only_bill(txns)
+    assert bill['monthly_amount'] == Decimal('162.50')
+    assert bill['monthly_amount'] > bill['amount']
+
+
+def test_charges_older_than_a_year_are_ignored():
+    old = monthly_bill(4, day=10, start_month=1, start_year=2025,
+                       amount='999.00', description='INTERNET')
+    recent = monthly_bill(12, day=10, start_month=6, start_year=2025,
+                          amount='50.00', description='INTERNET')
+    assert _only_bill(old + recent)['monthly_amount'] == Decimal('50.00')
+
+
+def test_same_day_charges_are_one_occurrence():
+    txns = (monthly_bill(6, day=10, amount='10.00', description='APPLE')
+            + monthly_bill(6, day=10, amount='5.00', description='APPLE'))
+    assert _only_bill(txns)['monthly_amount'] == Decimal('15.00')
+
+
+def test_refund_does_not_lower_the_estimate():
+    """Without the positive-amount filter the refund is its own occurrence and
+    P75 of [-50, 100] is 62.50; with it, only the charge counts."""
+    txns = [FakeTxn(date(2026, 5, 10), amount='100.00'),
+            FakeTxn(date(2026, 5, 20), amount='-50.00')]
+    assert _monthly_estimate(txns, 'monthly') == Decimal('100.00')
+
+
+def test_window_holds_twelve_monthly_occurrences():
+    """The charge exactly a year before the latest falls outside the window, or
+    the latest month would effectively be counted twice."""
+    txns = [FakeTxn(d.date, amount='100.00') for d in
+            monthly_bill(12, day=10, start_month=6, start_year=2025)]
+    txns.append(FakeTxn(date(2025, 5, 10), amount='900.00'))  # 365 days before
+    assert _monthly_estimate(txns, 'monthly') == Decimal('100.00')
+
+
+def test_uncategorized_history_does_not_outvote_card_payments():
+    old = monthly_bill(8, day=10, start_month=1, start_year=2025,
+                       amount='2000.00', description='CARD AUTOPAY')
+    new = monthly_bill(5, day=10, start_month=2, amount='2000.00',
+                       description='CARD AUTOPAY', category='LOAN_PAYMENTS',
+                       category_detailed='LOAN_PAYMENTS_CREDIT_CARD_PAYMENT')
+    # Fill the gap so the stream stays regular month to month.
+    gap = monthly_bill(4, day=10, start_month=9, start_year=2025,
+                       amount='2000.00', description='CARD AUTOPAY')
+    assert _only_bill(old + gap + new)['excluded_reason'] == 'transfer'
+
+
+@pytest.mark.parametrize('cadence, amount, expected', [
+    ('weekly', '100.00', '433.33'),
+    ('biweekly', '100.00', '216.67'),
+    ('monthly', '100.00', '100.00'),
+    ('quarterly', '90.00', '30.00'),
+    ('annual', '120.00', '10.00'),
+])
+def test_single_occurrence_scaled_by_cadence(cadence, amount, expected):
+    txns = [FakeTxn(date(2026, 6, 1), amount=amount)]
+    assert _monthly_estimate(txns, cadence) == Decimal(expected)
+
+
+def test_inactive_bill_is_not_counted():
+    bill = _only_bill(monthly_bill(3, day=10, description='OLD GYM'))  # last Mar 10
+    assert bill['excluded_reason'] == 'inactive'
+
+
+def test_inactive_annual_bill_reports_inactive():
+    txns = [FakeTxn(date(2023, 6, 1), description='DOMAIN'),
+            FakeTxn(date(2024, 6, 1), description='DOMAIN')]
+    assert _only_bill(txns)['excluded_reason'] == 'inactive'
+
+
+def test_active_annual_bill_is_not_counted():
+    txns = [FakeTxn(date(2024, 6, 1), amount='120.00', description='DOMAIN'),
+            FakeTxn(date(2025, 6, 1), amount='120.00', description='DOMAIN')]
+    bill = _only_bill(txns)
+    assert bill['excluded_reason'] == 'annual'
+    assert bill['monthly_amount'] == Decimal('10.00')
+
+
+@pytest.mark.parametrize('category, detailed, expected', [
+    ('TRANSFER_OUT', 'TRANSFER_OUT_SAVINGS', 'transfer'),
+    ('LOAN_PAYMENTS', 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT', 'transfer'),
+    ('LOAN_PAYMENTS', 'LOAN_PAYMENTS_MORTGAGE_PAYMENT', None),
+    (None, None, None),
+])
+def test_card_payments_and_transfers_are_not_counted(category, detailed, expected):
+    txns = monthly_bill(6, day=10, description='PAYMENT',
+                        category=category, category_detailed=detailed)
+    assert _only_bill(txns)['excluded_reason'] == expected
+
+
+def test_fixed_monthly_total_sums_counted_bills():
+    bills = [
+        {'monthly_amount': Decimal('15.00'), 'excluded_reason': None},
+        {'monthly_amount': Decimal('240.25'), 'excluded_reason': None},
+        {'monthly_amount': Decimal('900.00'), 'excluded_reason': 'annual'},
+        {'monthly_amount': Decimal('20.00'), 'excluded_reason': 'inactive'},
+    ]
+    assert fixed_monthly_total(bills) == (Decimal('255.25'), 2)
+    assert fixed_monthly_total([]) == (Decimal('0.00'), 0)
+
+
+def test_bills_page_renders_fixed_total(auth_client, app):
+    _seed_recurring_outflow(app)
+    with app.app_context():
+        inst = Institution.query.first()
+        today = date.today()
+        for i, days in enumerate((60, 30, 0)):
+            db.session.add(Transaction(
+                plaid_transaction_id=f'xfer-{i}', institution_id=inst.id,
+                account_id='acc-1', date=today - timedelta(days=days),
+                description='Savings Transfer', merchant_name='Savings Transfer',
+                amount=Decimal('500.00'), category='TRANSFER_OUT',
+            ))
+        db.session.commit()
+    res = auth_client.get('/bills')
+    assert res.status_code == 200
+    assert b'Fixed bills' in res.data
+    assert b'$95.00 / month' in res.data
+    assert re.search(rb'\b1 bill\s', res.data)  # the transfer is not counted
+    assert b'Per month' in res.data
+    assert b'not counted: transfer' in res.data

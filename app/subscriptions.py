@@ -1,6 +1,9 @@
 """Recurring-transaction (subscription) detection.
 
-Pure functions over Transaction rows — no DB access, no schema changes.
+Pure functions over transaction-like rows — no DB access, no schema changes.
+In production the rows are plain result rows carrying only the columns listed
+in app/merchant_groups.py's _DETECTION_COLUMNS, not ORM instances: reading any
+other attribute here (or in app/bills.py) needs a column added there.
 Detection is computed live on page load; at personal-finance volumes a
 single pass over the transactions table is plenty fast.
 
@@ -229,7 +232,7 @@ def detect_subscriptions_from_groups(groups, today):
     `today` on every call and are deliberately never cached, so a stored index
     cannot go stale merely because the calendar advanced.
 
-    `groups` is an iterable of transaction lists; each list is one merchant.
+    `groups` is an iterable of row lists; each list is one merchant.
     """
     streams = []
     for group in groups:

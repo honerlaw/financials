@@ -6,6 +6,7 @@ that safe: the indexed grouping agrees with the in-memory grouping the detector
 contract is written against, and a group assignment never moves once made.
 """
 
+import hashlib
 from datetime import date, timedelta
 from unittest import mock
 from unittest.mock import MagicMock
@@ -54,6 +55,8 @@ def _persist(txns):
             merchant_entity_id=t.merchant_entity_id,
             amount=t.amount,
             removed=t.removed,
+            category=t.category,
+            category_detailed=t.category_detailed,
             merchant_key=grouping_key(t) or None,
         ))
     db.session.commit()
@@ -124,6 +127,10 @@ def test_indexed_bills_match_in_memory(app, corpus):
         assert [b['name'] for b in actual] == [b['name'] for b in expected]
         assert ([b['payment_status'] for b in actual]
                 == [b['payment_status'] for b in expected])
+        assert ([b['monthly_amount'] for b in actual]
+                == [b['monthly_amount'] for b in expected])
+        assert ([b['excluded_reason'] for b in actual]
+                == [b['excluded_reason'] for b in expected])
 
 
 def test_name_key_joins_the_entity_group(app):
@@ -567,3 +574,63 @@ def test_sync_writes_merchant_key_on_upsert(app):
         db.session.commit()
         stored = Transaction.query.filter_by(plaid_transaction_id='p-2').one()
         assert stored.merchant_key == 'entity:ent-nflx'
+
+
+def _seed_page_corpus(n_merchants):
+    """`n_merchants` distinct monthly streams, four charges each, index warm."""
+    inst = Institution(name='Test Bank', slug='test_bank',
+                       access_token='tok', item_id='item-1')
+    db.session.add(inst)
+    db.session.flush()
+    for m in range(n_merchants):
+        # Letters only (normalize_merchant strips digits) and dissimilar
+        # enough that fuzzy matching keeps every merchant its own group.
+        name = ''.join(
+            chr(ord('a') + b % 26) for b in hashlib.sha256(b'%d' % m).digest()[:10]
+        )
+        for month in range(2, 6):
+            txn = Transaction(
+                plaid_transaction_id='page-%d-%d' % (m, month),
+                institution_id=inst.id, account_id='acc-1',
+                date=date(2026, month, 10), description=name,
+                merchant_name=name, amount=Decimal('12.00'),
+            )
+            txn.merchant_key = grouping_key(txn)
+            db.session.add(txn)
+    db.session.commit()
+    update_index()
+    db.session.commit()
+    groups, used_index = groups_for_detection()
+    assert used_index is True
+    db.session.commit()
+    return len(groups)
+
+
+@pytest.mark.parametrize('path', ['/bills', '/subscriptions'])
+def test_page_query_count_does_not_grow_with_transactions(app, path):
+    """A page load costs a constant number of queries, not one per transaction.
+
+    Regression: the routes used to commit between loading the grouped
+    transactions (as ORM instances) and running detection. The commit expired
+    every loaded row, so detection's first attribute read re-SELECTed each one —
+    7,500 queries and ~20 s per page in production. Detection now reads plain
+    rows, which cannot lazy-load at all; this pins the property both fixes
+    protect, whichever mechanism a future change breaks it through. Two corpora
+    10x apart must cost the same.
+    """
+    counts = []
+    for n_merchants in (5, 50):
+        with app.app_context():
+            db.drop_all()
+            db.create_all()
+            assert _seed_page_corpus(n_merchants) == n_merchants
+            client = app.test_client()
+            client.post('/login', data={'password': 'testpass'})
+            db.session.expunge_all()
+            response, selects = _count_selects(lambda: client.get(path))
+            assert response.status_code == 200
+            counts.append(selects)
+    assert counts[0] == counts[1], (
+        '%s issued %d SELECTs for 20 transactions but %d for 200; page cost '
+        'must not scale with the corpus' % (path, counts[0], counts[1])
+    )

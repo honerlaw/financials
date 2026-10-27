@@ -55,6 +55,8 @@ def _persist(txns):
             merchant_entity_id=t.merchant_entity_id,
             amount=t.amount,
             removed=t.removed,
+            category=t.category,
+            category_detailed=t.category_detailed,
             merchant_key=grouping_key(t) or None,
         ))
     db.session.commit()
@@ -125,6 +127,10 @@ def test_indexed_bills_match_in_memory(app, corpus):
         assert [b['name'] for b in actual] == [b['name'] for b in expected]
         assert ([b['payment_status'] for b in actual]
                 == [b['payment_status'] for b in expected])
+        assert ([b['monthly_amount'] for b in actual]
+                == [b['monthly_amount'] for b in expected])
+        assert ([b['excluded_reason'] for b in actual]
+                == [b['excluded_reason'] for b in expected])
 
 
 def test_name_key_joins_the_entity_group(app):
@@ -605,9 +611,12 @@ def test_page_query_count_does_not_grow_with_transactions(app, path):
     """A page load costs a constant number of queries, not one per transaction.
 
     Regression: the routes used to commit between loading the grouped
-    transactions and running detection. The commit expired every loaded row, so
-    detection's first attribute read re-SELECTed each one — 7,500 queries and
-    ~20 s per page in production. Two corpora 10x apart must cost the same.
+    transactions (as ORM instances) and running detection. The commit expired
+    every loaded row, so detection's first attribute read re-SELECTed each one —
+    7,500 queries and ~20 s per page in production. Detection now reads plain
+    rows, which cannot lazy-load at all; this pins the property both fixes
+    protect, whichever mechanism a future change breaks it through. Two corpora
+    10x apart must cost the same.
     """
     counts = []
     for n_merchants in (5, 50):

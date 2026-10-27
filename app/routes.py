@@ -336,10 +336,11 @@ def subscriptions():
     # lapsed, with nothing to trigger a refresh.
     groups, _used_index = groups_for_detection()
     streams = detect_subscriptions_from_groups(groups, date.today())
-    # Commit only now: it persists any index build groups_for_detection() just
-    # did, but a commit expires every loaded row, and detection reading the
-    # expired transactions re-SELECTs each one — ~7,500 queries, ~20 s in
-    # production. Detection returns plain dicts, so nothing after this is stale.
+    # Commit only after detection: it persists any index build
+    # groups_for_detection() just did, and a commit expires loaded ORM rows.
+    # Committing before detection once made it re-SELECT every transaction one
+    # at a time (~7,500 queries, ~20 s in production). Detection now reads plain
+    # rows, which cannot expire, but keep the order — it costs nothing.
     db.session.commit()
 
     accounts = {a.plaid_account_id: a for a in Account.query.all()}
@@ -364,7 +365,7 @@ def subscriptions():
 @bp.route('/bills')
 @login_required
 def bills():
-    from app.bills import detect_bills_from_groups
+    from app.bills import detect_bills_from_groups, fixed_monthly_total
     from app.merchant_groups import groups_for_detection
 
     groups, _used_index = groups_for_detection()
@@ -385,9 +386,12 @@ def bills():
     paid_count = sum(1 for b in bill_list if b['payment_status'] == 'paid')
     unpaid_count = sum(1 for b in bill_list if b['payment_status'] == 'unpaid')
     upcoming_count = sum(1 for b in bill_list if b['payment_status'] == 'upcoming')
+    fixed_total, fixed_count = fixed_monthly_total(bill_list)
     return render_template(
         'bills.html',
         bills=bill_list,
+        fixed_total=fixed_total,
+        fixed_count=fixed_count,
         paid_count=paid_count,
         unpaid_count=unpaid_count,
         upcoming_count=upcoming_count,

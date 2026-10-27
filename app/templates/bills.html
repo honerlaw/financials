@@ -11,6 +11,18 @@
   </span>
 </div>
 
+<div class="card mb-4">
+  <div class="card-body">
+    <h2 class="eyebrow mb-2">Fixed bills</h2>
+    <div class="amount amount-xl">${{ "{:,.2f}".format(fixed_total) }} / month</div>
+    <div class="small muted">
+      {{ fixed_count }} {{ 'bill' if fixed_count == 1 else 'bills' }}
+      · excludes annual, inactive and transfers
+      · variable bills count at the high end of their last year (75th percentile)
+    </div>
+  </div>
+</div>
+
 <div class="card">
   <div class="table-wrap">
     <table class="table">
@@ -18,7 +30,8 @@
         <tr>
           <th>Merchant</th>
           <th>Cadence</th>
-          <th class="right">Typical amount</th>
+          <th class="right" title="Median charge">Typical amount</th>
+          <th class="right" title="Monthly equivalent, 75th percentile of the last year">Per month</th>
           <th>Expected this month</th>
           <th>Last charge</th>
           <th class="right">Charges</th>
@@ -37,6 +50,12 @@
         <td class="right nowrap amount medium text-danger">
           -${{ "{:,.2f}".format(b.amount|abs) }}
           {% if b.varies %}<span class="badge badge-warn">varies</span>{% endif %}
+        </td>
+        {# Every row shows its monthly equivalent; one left out of the headline
+           total says why, so the total is auditable row by row. #}
+        <td class="right nowrap amount {% if b.excluded_reason %}muted{% else %}medium{% endif %}">
+          ${{ "{:,.2f}".format(b.monthly_amount) }}
+          {% if b.excluded_reason %}<div class="xs muted">not counted: {{ b.excluded_reason }}</div>{% endif %}
         </td>
         <td class="muted xs nowrap">{{ b.expected_date_this_month.strftime('%b %d') }}</td>
         <td class="muted xs nowrap">{{ b.last_date.strftime('%b %d, %Y') }}</td>
@@ -61,7 +80,7 @@
         </td>
       </tr>
       {% else %}
-      <tr><td colspan="8" class="empty">No recurring bills detected yet.</td></tr>
+      <tr><td colspan="9" class="empty">No recurring bills detected yet.</td></tr>
       {% endfor %}
       </tbody>
     </table>

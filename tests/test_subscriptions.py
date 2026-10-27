@@ -12,7 +12,8 @@ class FakeTxn:
 
     def __init__(self, txn_date, amount='15.49', merchant_name=None,
                  description='CHARGE', merchant_entity_id=None,
-                 institution_id=1, account_id='acc-1', removed=False):
+                 institution_id=1, account_id='acc-1', removed=False,
+                 category=None, category_detailed=None):
         self.date = txn_date
         self.amount = Decimal(amount)
         self.merchant_name = merchant_name
@@ -21,6 +22,8 @@ class FakeTxn:
         self.institution_id = institution_id
         self.account_id = account_id
         self.removed = removed
+        self.category = category
+        self.category_detailed = category_detailed
 
 
 def monthly_txns(n, start=date(2026, 1, 5), **kwargs):

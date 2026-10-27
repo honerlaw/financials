@@ -335,8 +335,12 @@ def subscriptions():
     # cached — a stored `active` flag would be wrong the moment a stream
     # lapsed, with nothing to trigger a refresh.
     groups, _used_index = groups_for_detection()
-    db.session.commit()
     streams = detect_subscriptions_from_groups(groups, date.today())
+    # Commit only now: it persists any index build groups_for_detection() just
+    # did, but a commit expires every loaded row, and detection reading the
+    # expired transactions re-SELECTs each one — ~7,500 queries, ~20 s in
+    # production. Detection returns plain dicts, so nothing after this is stale.
+    db.session.commit()
 
     accounts = {a.plaid_account_id: a for a in Account.query.all()}
     institution_names = {i.id: i.name for i in Institution.query.all()}
@@ -364,8 +368,9 @@ def bills():
     from app.merchant_groups import groups_for_detection
 
     groups, _used_index = groups_for_detection()
-    db.session.commit()
     bill_list = detect_bills_from_groups(groups, date.today())
+    # After detection, never before it — see subscriptions() above.
+    db.session.commit()
 
     accounts = {a.plaid_account_id: a for a in Account.query.all()}
     institution_names = {i.id: i.name for i in Institution.query.all()}

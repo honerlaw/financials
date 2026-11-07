@@ -295,7 +295,7 @@ def _in_memory_fallback():
 
 
 def groups_for_detection():
-    """The grouping /subscriptions and /bills should use, warming the index if
+    """The grouping /recurring should use, warming the index if
     it is cold.
 
     Returns (groups, used_index). When the index is usable this is a pair of
@@ -304,7 +304,7 @@ def groups_for_detection():
     now and used; the caller commits.
 
     The in-memory path stays reachable as the last resort so a failure to build
-    can never render an empty page: a slow /subscriptions is a bad day, an
+    can never render an empty page: a slow /recurring is a bad day, an
     empty one looks like lost data.
     """
     if is_index_usable():

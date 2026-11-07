@@ -248,15 +248,13 @@ def _seed_recurring(app):
         db.session.commit()
 
 
-def test_subscriptions_requires_login(client):
-    res = client.get('/subscriptions')
-    assert res.status_code == 302
-    assert '/login' in res.headers['Location']
+# /subscriptions now redirects to /recurring (login and redirect behaviour are
+# pinned in tests/test_bills.py); these tests pin that every recurring outflow
+# it used to show still renders there.
 
-
-def test_subscriptions_page_renders_stream(auth_client, app):
+def test_recurring_page_renders_subscription_stream(auth_client, app):
     _seed_recurring(app)
-    res = auth_client.get('/subscriptions')
+    res = auth_client.get('/recurring')
     assert res.status_code == 200
     assert b'Netflix' in res.data
     assert b'Monthly' in res.data or b'monthly' in res.data
@@ -264,7 +262,7 @@ def test_subscriptions_page_renders_stream(auth_client, app):
     assert b'Test Bank' in res.data
 
 
-def test_subscriptions_page_renders_multi_account_labels(auth_client, app):
+def test_recurring_page_renders_multi_account_labels(auth_client, app):
     # One stream split across two institutions/cards must render both
     # "Institution · Account" badges on the single row.
     with app.app_context():
@@ -295,13 +293,8 @@ def test_subscriptions_page_renders_multi_account_labels(auth_client, app):
             ))
         db.session.commit()
 
-    res = auth_client.get('/subscriptions')
+    res = auth_client.get('/recurring')
     assert res.status_code == 200
     assert 'AmEx · Platinum'.encode() in res.data
     assert 'Citi · Double Cash'.encode() in res.data
 
-
-def test_subscriptions_page_empty_state(auth_client):
-    res = auth_client.get('/subscriptions')
-    assert res.status_code == 200
-    assert b'No recurring transactions' in res.data

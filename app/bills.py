@@ -1,15 +1,16 @@
-"""Bill detection and monthly payment-status tracking.
+"""Recurring expenses (bills) and recurring income, for the /recurring page.
 
 A "bill" is any recurring outflow stream — utilities, rent, card payments, etc.
-Inflows (paychecks, refunds) are excluded. Detection reuses the same
-cadence-based grouping as subscriptions.py; payment status is a per-month
+"Income" is any recurring inflow stream — paychecks, interest, but also
+transfers in and refunds, which are listed but not counted. Detection reuses the
+same cadence-based grouping as subscriptions.py; payment status is a per-month
 overlay computed from raw transaction dates.
 
-The page's headline is the fixed monthly total: every counted bill's
-monthly-equivalent estimate, summed. The estimate deliberately leans high — the
-75th percentile of the last year's charges — so a variable bill (utilities,
+The page's headlines are two monthly totals. Expenses deliberately lean high —
+the 75th percentile of the last year's charges — so a variable bill (utilities,
 interest) is budgeted nearer its expensive months than its median, while a
-fixed-price bill is simply its price.
+fixed-price bill is simply its price. Income leans low — the 25th percentile —
+so "left after recurring" errs on the side of less, never more.
 """
 
 import calendar
@@ -36,6 +37,7 @@ MONTHLY_FACTOR = {
 }
 
 ESTIMATE_PERCENTILE = Decimal('0.75')  # leans high without letting one spike set it
+INCOME_PERCENTILE = Decimal('0.25')    # leans low: never overstate what comes in
 ESTIMATE_WINDOW_DAYS = 365             # a full seasonal cycle for utilities
 
 # Annual is excluded from the total: the detector calls two purchases a year
@@ -49,6 +51,11 @@ _TOTAL_CADENCES = {'weekly', 'biweekly', 'monthly', 'quarterly'}
 # exactly the fixed bills this total is for, so only card payments are excluded.
 _TRANSFER_PREFIX = 'TRANSFER'
 _CARD_PAYMENT_DETAILED = 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT'
+
+# Income needs positive evidence: Plaid's INCOME primary category (wages,
+# interest, dividends, ...). See _is_income for why this is stricter than the
+# expense side's transfer rule.
+_INCOME_PREFIX = 'INCOME'
 
 _CENTS = Decimal('0.01')
 
@@ -104,26 +111,30 @@ def _percentile(values, q):
     return ordered[lower] + (ordered[lower + 1] - ordered[lower]) * (pos - lower)
 
 
-def _monthly_estimate(txns, cadence):
-    """Monthly-equivalent cost of a stream, leaning high.
+def _monthly_estimate(txns, cadence, inflow=False, percentile=ESTIMATE_PERCENTILE):
+    """Monthly-equivalent amount of a stream, at the given percentile.
 
     One occurrence per date (the unit _build_stream counts cadence in), its
-    amount the sum of that date's charges; refunds and credits are ignored. Only
-    occurrences in the ESTIMATE_WINDOW_DAYS ending at the stream's latest charge
-    count (exclusive of the far end, so a monthly bill has 12, not 13) —
-    anchored on the stream rather than on today, so a quarterly bill always has
-    its recent history. With one or two occurrences the percentile is simply the
-    best available.
+    amount the sum of that date's charges — or, for an inflow, the absolute sum
+    of that date's deposits; rows of the other sign (refunds on a bill, a
+    clawback on a paycheck) are ignored. Only occurrences in the
+    ESTIMATE_WINDOW_DAYS ending at the stream's latest occurrence count
+    (exclusive of the far end, so a monthly stream has 12, not 13) — anchored on
+    the stream rather than on today, so a quarterly stream always has its recent
+    history. With one or two occurrences the percentile is simply the best
+    available.
     """
     by_date = defaultdict(Decimal)
     for t in txns:
-        if t.amount > 0:
+        if inflow and t.amount < 0:
+            by_date[t.date] -= t.amount
+        elif not inflow and t.amount > 0:
             by_date[t.date] += t.amount
     if not by_date:
         return Decimal('0.00')
     cutoff = max(by_date) - timedelta(days=ESTIMATE_WINDOW_DAYS)
     recent = [amount for d, amount in by_date.items() if d > cutoff]
-    typical = _percentile(recent, ESTIMATE_PERCENTILE)
+    typical = _percentile(recent, percentile)
     return (typical * MONTHLY_FACTOR[cadence]).quantize(_CENTS, rounding=ROUND_HALF_UP)
 
 
@@ -143,6 +154,35 @@ def _is_transfer(txns):
         or (t.category_detailed or '').upper() == _CARD_PAYMENT_DETAILED
     )
     return hits * 2 > len(categorized)
+
+
+def _is_income(txns):
+    """True when most of a stream's categorized rows carry an INCOME category.
+
+    Deliberately stricter than _is_transfer. A mistake on the expense side
+    over-counts a bill, which errs safe; a mistake here overstates what comes in
+    and so what is left over, which does not. So income needs positive evidence:
+    uncategorized rows abstain, and a stream with no categorized rows at all is
+    not income. Transfers in, card-payment credits, refunds and reimbursements
+    all fail this test and are listed as "not income".
+    """
+    categorized = [t for t in txns if t.category or t.category_detailed]
+    hits = sum(
+        1 for t in categorized
+        if (t.category or '').upper().startswith(_INCOME_PREFIX)
+    )
+    return hits * 2 > len(categorized) > 0
+
+
+def _income_excluded_reason(stream, txns):
+    """Why an income stream is left out of the monthly income total, or None."""
+    if not stream['active']:
+        return 'inactive'
+    if stream['cadence'] not in _TOTAL_CADENCES:
+        return 'annual'
+    if not _is_income(txns):
+        return 'not income'
+    return None
 
 
 def _excluded_reason(stream, txns):
@@ -166,6 +206,14 @@ def fixed_monthly_total(bills):
     return sum((b['monthly_amount'] for b in counted), Decimal('0.00')), len(counted)
 
 
+def monthly_income_total(income):
+    """(total, count) over the income streams counted toward monthly income.
+
+    Same shape as fixed_monthly_total: sums the rounded per-stream figures.
+    """
+    return fixed_monthly_total(income)
+
+
 def detect_bills(transactions, today):
     """Detect recurring outflow streams and compute monthly payment status.
 
@@ -186,12 +234,32 @@ def detect_bills_from_groups(groups, today):
     every call and never cached — a stored status would be wrong the moment the
     month rolled over, with nothing to trigger a refresh.
     """
+    bills, _income = detect_recurring_from_groups(groups, today)
+    return bills
+
+
+def detect_recurring_from_groups(groups, today):
+    """(bills, income) from already-grouped transactions, in one pass.
+
+    Each group's stream is built once: an outflow becomes a bill (payment
+    status, monthly estimate at P75, excluded reason), an inflow becomes an
+    income stream (monthly estimate at P25, excluded reason). Bills are sorted
+    unpaid-first, then upcoming, then paid, then inactive; within each group by
+    amount magnitude descending. Income is sorted counted-first, then by
+    monthly amount descending.
+    """
     bills = []
+    income = []
     for group in groups:
         stream = _build_stream(group, today)
         if stream is None:
             continue
         if stream['is_inflow']:
+            stream['monthly_amount'] = _monthly_estimate(
+                group, stream['cadence'], inflow=True, percentile=INCOME_PERCENTILE,
+            )
+            stream['excluded_reason'] = _income_excluded_reason(stream, group)
+            income.append(stream)
             continue
 
         if not stream['active']:
@@ -208,4 +276,5 @@ def detect_bills_from_groups(groups, today):
         bills.append(stream)
 
     bills.sort(key=lambda b: (_STATUS_ORDER[b['payment_status']], -abs(b['amount'])))
-    return bills
+    income.sort(key=lambda s: (s['excluded_reason'] is not None, -s['monthly_amount']))
+    return bills, income

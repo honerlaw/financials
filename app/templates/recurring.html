@@ -1,0 +1,199 @@
+{% extends 'base.html' %}
+{% macro money(value) %}${{ "{:,.2f}".format(value) }}{% endmacro %}
+{% block content %}
+<div class="row-b wrap gap-3 mb-4">
+  <h1 class="amount" style="font-size: var(--fs-lg);">Recurring</h1>
+  <span class="small muted">
+    {% if unpaid_count %}<span class="text-danger strong">{{ unpaid_count }} unpaid</span>{% endif %}
+    {% if unpaid_count and (upcoming_count or paid_count) %} · {% endif %}
+    {% if upcoming_count %}{{ upcoming_count }} upcoming{% endif %}
+    {% if upcoming_count and paid_count %} · {% endif %}
+    {% if paid_count %}{{ paid_count }} paid this month{% endif %}
+  </span>
+</div>
+
+{# The three headline figures. Expenses lean high and income leans low, so
+   "left after recurring" errs toward less — each card says which. #}
+<div class="figures mb-4">
+  <div class="card"><div class="card-body">
+    <h2 class="eyebrow mb-2">Recurring expenses</h2>
+    <div class="amount amount-xl">{{ money(expense_total) }} / month</div>
+    <div class="small muted">
+      {{ expense_count }} {{ 'expense' if expense_count == 1 else 'expenses' }}
+      · variable ones at the high end of their last year (75th percentile)
+    </div>
+  </div></div>
+  <div class="card"><div class="card-body">
+    <h2 class="eyebrow mb-2">Recurring income</h2>
+    <div class="amount amount-xl text-success">{{ money(income_total) }} / month</div>
+    <div class="small muted">
+      {% if income_count %}
+      {{ income_count }} {{ 'source' if income_count == 1 else 'sources' }}
+      · at the low end of their last year (25th percentile)
+      {% else %}
+      No recurring income detected
+      {% endif %}
+    </div>
+  </div></div>
+  {# Hidden without counted income: "left over" against a missing paycheck is
+     a large negative number that means nothing. #}
+  {% if income_count %}
+  {% set left = income_total - expense_total %}
+  <div class="card"><div class="card-body">
+    <h2 class="eyebrow mb-2">Left after recurring</h2>
+    <div class="amount amount-xl {% if left < 0 %}text-danger{% endif %}">
+      {% if left < 0 %}-{% endif %}{{ money(left|abs) }} / month
+    </div>
+    <div class="small muted">before groceries, dining and other variable spending</div>
+  </div></div>
+  {% endif %}
+</div>
+
+{# Counted expenses: exactly the rows behind the headline, so it can be audited
+   by adding the Per month column. Largest first; the header line and the
+   status badge keep what is unpaid visible. #}
+<div class="card mb-4">
+  <div class="card-head">Counted expenses</div>
+  <div class="table-wrap">
+    <table class="table">
+      <thead>
+        <tr>
+          <th>Merchant</th>
+          <th>Cadence</th>
+          <th class="right" title="Median charge">Typical amount</th>
+          <th class="right" title="Monthly equivalent, 75th percentile of the last year">Per month</th>
+          <th>Expected this month</th>
+          <th>Last charge</th>
+          <th>Accounts</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for b in counted %}
+      <tr>
+        <td class="medium">{{ b.name }}</td>
+        <td class="cap muted">{{ b.cadence }}</td>
+        <td class="right nowrap amount text-danger">
+          -{{ money(b.amount|abs) }}
+          {% if b.varies %}<span class="badge badge-warn">varies</span>{% endif %}
+        </td>
+        <td class="right nowrap amount medium">{{ money(b.monthly_amount) }}</td>
+        <td class="muted xs nowrap">{{ b.expected_date_this_month.strftime('%b %d') }}</td>
+        <td class="muted xs nowrap">{{ b.last_date.strftime('%b %d, %Y') }}</td>
+        <td>
+          <span class="row wrap gap-1">
+          {% for label in b.accounts %}<span class="badge badge-accent">{{ label }}</span>{% endfor %}
+          </span>
+        </td>
+        <td>
+          {% if b.payment_status == 'paid' %}<span class="badge badge-success">Paid</span>
+          {% elif b.payment_status == 'unpaid' %}<span class="badge badge-danger">Unpaid</span>
+          {% else %}<span class="badge">Upcoming</span>{% endif %}
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="8" class="empty">No recurring expenses detected yet.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{# Not counted: every other recurring outflow stays listed (knowledge 003),
+   collapsed by reason. No paid/unpaid badge here — an uncounted stream is not
+   an obligation, and a red "Unpaid" on it would be a false alarm (knowledge 005). #}
+{% if excluded %}
+<h2 class="eyebrow mb-2">Not counted</h2>
+<div class="card mb-4">
+  {% for label, rows in excluded %}
+  <details class="disclosure">
+    <summary><span>{{ label }} ({{ rows|length }})</span></summary>
+    <div class="table-wrap">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Merchant</th>
+            <th>Cadence</th>
+            <th class="right" title="Median charge">Typical amount</th>
+            <th class="right" title="Monthly equivalent, 75th percentile of the last year">Per month</th>
+            <th>Last charge</th>
+            <th>Accounts</th>
+          </tr>
+        </thead>
+        <tbody>
+        {% for b in rows %}
+        <tr {% if b.excluded_reason == 'inactive' %}class="is-lapsed"{% endif %}>
+          <td class="medium">{{ b.name }}</td>
+          <td class="cap muted">{{ b.cadence }}</td>
+          <td class="right nowrap amount text-danger">
+            -{{ money(b.amount|abs) }}
+            {% if b.varies %}<span class="badge badge-warn">varies</span>{% endif %}
+          </td>
+          <td class="right nowrap amount muted">
+            {{ money(b.monthly_amount) }}
+            <div class="xs muted">not counted: {{ b.excluded_reason }}</div>
+          </td>
+          <td class="muted xs nowrap">{{ b.last_date.strftime('%b %d, %Y') }}</td>
+          <td>
+            <span class="row wrap gap-1">
+            {% for label in b.accounts %}<span class="badge badge-accent">{{ label }}</span>{% endfor %}
+            </span>
+          </td>
+        </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </details>
+  {% endfor %}
+</div>
+{% endif %}
+
+{# Recurring income: counted rows first and sum to the income headline;
+   transfers in, refunds and lapsed sources stay listed, dimmed, with why. #}
+<div class="card">
+  <div class="card-head">Recurring income</div>
+  <div class="table-wrap">
+    <table class="table">
+      <thead>
+        <tr>
+          <th>Source</th>
+          <th>Cadence</th>
+          <th class="right" title="Median deposit">Typical amount</th>
+          <th class="right" title="Monthly equivalent, 25th percentile of the last year">Per month</th>
+          <th>Last deposit</th>
+          <th>Next expected</th>
+          <th>Accounts</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for s in income %}
+      <tr {% if s.excluded_reason %}class="is-lapsed"{% endif %}>
+        <td class="medium">{{ s.name }}</td>
+        <td class="cap muted">{{ s.cadence }}</td>
+        <td class="right nowrap amount text-success">
+          +{{ money(s.amount|abs) }}
+          {% if s.varies %}<span class="badge badge-warn">varies</span>{% endif %}
+        </td>
+        <td class="right nowrap amount {% if s.excluded_reason %}muted{% else %}medium{% endif %}">
+          {{ money(s.monthly_amount) }}
+          {% if s.excluded_reason %}<div class="xs muted">not counted: {{ s.excluded_reason }}</div>{% endif %}
+        </td>
+        <td class="muted xs nowrap">{{ s.last_date.strftime('%b %d, %Y') }}</td>
+        <td class="muted xs nowrap">
+          {% if s.excluded_reason == 'inactive' %}—{% else %}{{ s.next_date.strftime('%b %d, %Y') }}{% endif %}
+        </td>
+        <td>
+          <span class="row wrap gap-1">
+          {% for label in s.accounts %}<span class="badge badge-accent">{{ label }}</span>{% endfor %}
+          </span>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="7" class="empty">No recurring income detected yet.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

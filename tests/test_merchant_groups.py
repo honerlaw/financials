@@ -1,7 +1,7 @@
 """Tests for the persisted merchant-group index.
 
 The index exists to remove an O(distinct-merchants^2) fuzzy match from every
-/subscriptions and /bills request. These tests pin the two properties that make
+/recurring request. These tests pin the two properties that make
 that safe: the indexed grouping agrees with the in-memory grouping the detector
 contract is written against, and a group assignment never moves once made.
 """
@@ -606,7 +606,7 @@ def _seed_page_corpus(n_merchants):
     return len(groups)
 
 
-@pytest.mark.parametrize('path', ['/bills', '/subscriptions'])
+@pytest.mark.parametrize('path', ['/recurring'])
 def test_page_query_count_does_not_grow_with_transactions(app, path):
     """A page load costs a constant number of queries, not one per transaction.
 

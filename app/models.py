@@ -104,7 +104,7 @@ class Transaction(db.Model):
     removed = db.Column(db.Boolean, default=False, nullable=False)
     # The grouping key this row belongs to: 'entity:<merchant_entity_id>' when
     # Plaid supplied an entity id, else normalize_merchant(merchant_name or
-    # description). Written at upsert so the subscriptions/bills read path is an
+    # description). Written at upsert so the /recurring read path is an
     # indexed join instead of a per-request normalization pass. Nullable because
     # rows predating the merchant-group index have none until it is built.
     merchant_key = db.Column(db.String(255), nullable=True)
@@ -157,7 +157,7 @@ class DailyDigest(db.Model):
 
 
 class MerchantGroup(db.Model):
-    """One detected merchant identity — the unit /subscriptions and /bills group by.
+    """One detected merchant identity — the unit /recurring groups by.
 
     ``canonical_key`` is frozen at creation and is what later keys fuzzy-match
     against. It is deliberately NOT recomputed from the group's name

@@ -13,7 +13,9 @@ transaction count, so it grows permanently as one-off purchases accumulate.
 The fix is to do the matching once, at sync time, and keep the answer. A key
 that has already been assigned to a group never gets matched again; only
 genuinely new keys are compared, against the frozen canonical keys of existing
-groups. Steady state is a handful of new merchants per sync.
+groups and then, for a name key, against the word prefixes of their live
+member keys (`member_prefix_match`). Steady state is a handful of new merchants
+per sync.
 
 Everything date-dependent — `active`, `next_date`, payment status — is
 deliberately NOT stored. It is recomputed per request from the grouped
@@ -32,6 +34,8 @@ from app.subscriptions import (
     _group_transactions,
     _similar,
     grouping_key,
+    is_member,
+    member_prefix_match,
     normalize_merchant,
 )
 from difflib import SequenceMatcher
@@ -158,6 +162,40 @@ def _match_name(name, canonical, allow_entity_groups=True):
     return None
 
 
+def _live_members(name_keys):
+    """(members, live_new) for the member-prefix rule.
+
+    `members` maps each indexed name key that has a live transaction to its
+    group id, guarded by is_member against its group's canonical key. Keys of
+    removed rows (and keys left behind by a merchant-name change) stay in
+    merchant_group_keys forever, but the in-memory grouper never sees them, so
+    they must not bridge a join here either. `live_new` is the subset of this
+    pass's new `name_keys` that have a live transaction.
+    """
+    live = (
+        select(Transaction.merchant_key)
+        .where(Transaction.removed.is_(False))
+        .where(Transaction.merchant_key.isnot(None))
+        .distinct()
+    )
+    rows = (
+        db.session.query(MerchantGroupKey.key, MerchantGroupKey.group_id,
+                         MerchantGroup.canonical_key)
+        .join(MerchantGroup, MerchantGroup.id == MerchantGroupKey.group_id)
+        .filter(~MerchantGroupKey.key.startswith('entity:'))
+        .filter(MerchantGroupKey.key.in_(live))
+        .all()
+    )
+    members = {key: group_id for key, group_id, canonical in rows
+               if is_member(key, canonical)}
+    live_new = set()
+    if name_keys:
+        live_new = {key for (key,) in db.session.execute(
+            live.where(Transaction.merchant_key.in_(name_keys))
+        )}
+    return members, live_new
+
+
 def update_index():
     """Bring the merchant-group index up to date. Returns a summary dict.
 
@@ -190,10 +228,9 @@ def update_index():
     if not new_keys and not backfilled and not rebuilt:
         return {'rebuilt': False, 'backfilled': 0, 'new_keys': 0, 'new_groups': 0}
 
-    canonical = {
-        g.canonical_key: (g.id, g.from_entity)
-        for g in MerchantGroup.query.all()
-    }
+    existing = MerchantGroup.query.all()
+    canonical = {g.canonical_key: (g.id, g.from_entity) for g in existing}
+    canonical_by_id = {g.id: g.canonical_key for g in existing}
 
     # Entity keys first, exactly as _group_transactions seeds its group list
     # from merchant_entity_id before merging name keys. Order matters: a name
@@ -217,11 +254,17 @@ def update_index():
             db.session.flush()          # need the id before the key row
             group_id = group.id
             canonical[group.canonical_key] = (group_id, True)
+            canonical_by_id[group_id] = group.canonical_key
             new_groups += 1
         db.session.add(MerchantGroupKey(key=key, group_id=group_id))
 
+    # Built only now, after the quiet-sync early return. Name keys only: the
+    # member-prefix rule never places an entity key (knowledge 032).
+    members, live_new = _live_members(name_keys)
     for key in name_keys:
         group_id = _match_name(key, canonical)
+        if group_id is None:
+            group_id = member_prefix_match(key, members)
         if group_id is None:
             group = MerchantGroup(
                 canonical_key=key, algo_version=GROUPING_ALGO_VERSION,
@@ -231,8 +274,13 @@ def update_index():
             db.session.flush()
             group_id = group.id
             canonical[key] = (group_id, False)
+            canonical_by_id[group_id] = key
             new_groups += 1
         db.session.add(MerchantGroupKey(key=key, group_id=group_id))
+        # Every live name key assigned in this pass is a candidate member,
+        # however it was placed; on a cold build these are the whole set.
+        if key in live_new and is_member(key, canonical_by_id[group_id]):
+            members[key] = group_id
 
     db.session.flush()
     return {

@@ -49,11 +49,17 @@ INACTIVE_MULTIPLIER = 1.5    # overdue by > 1.5x cadence -> inactive
 VARIES_THRESHOLD = 0.25      # amount MAD > 25% of median -> "varies" badge
 FUZZY_THRESHOLD = 0.82       # SequenceMatcher ratio to collapse merchant keys
 
-# Bump whenever normalize_merchant, _similar, or FUZZY_THRESHOLD changes shape.
+# Bump whenever normalize_merchant, _similar, FUZZY_THRESHOLD or the grouping
+# rule itself (e.g. the member-prefix join) changes shape.
 # app/merchant_groups.py compares this against the stored algo_version and does
 # exactly one full rebuild on a mismatch, so a tuned dial can never leave a
-# silently stale index behind.
-GROUPING_ALGO_VERSION = 1
+# silently stale index behind. 2: member-key word-prefix join.
+GROUPING_ALGO_VERSION = 2
+
+# A member key's word prefix must be at least this long (spaces counted) to
+# join a key to its group. Deliberately aligned with _similar's prefix minimum
+# and DESCRIPTOR_MIN_LENGTH.
+MEMBER_PREFIX_MIN_LENGTH = 5
 
 # Tokens that carry no merchant identity ("NETFLIX.COM" vs "Netflix").
 _NOISE_TOKENS = {'com', 'net', 'org', 'www', 'inc', 'llc', 'ltd', 'corp', 'the'}
@@ -114,6 +120,36 @@ def _similar(a, b, matcher=None):
     return matcher.ratio() >= FUZZY_THRESHOLD
 
 
+def is_member(key, representative):
+    """Whether a name key assigned to a group may pull its word-extensions in.
+
+    Never the representative itself (_similar's prefix branch already covers
+    it), nor a prefix of it: a bare "amazon" that joined an "amazon prime"
+    group by reverse prefix must not become a hub for every "amazon ..." key.
+    """
+    return not representative.startswith(key)
+
+
+def member_prefix_match(key, members):
+    """The group a name key joins through a member key, or None.
+
+    `members` maps member key -> group handle (a group list in memory, a group
+    id in the index). The key's word prefixes are tried longest first, and the
+    first one that is a member and at least MEMBER_PREFIX_MIN_LENGTH long wins:
+    "in acme widgets anytown usa" joins the group holding "in acme widgets".
+    Word boundaries only, so "acme widget" never pulls in "acme widgetry".
+    Used by both grouping paths, so the rule cannot drift between them.
+    """
+    tokens = key.split()
+    for n in range(len(tokens) - 1, 0, -1):
+        prefix = ' '.join(tokens[:n])
+        if len(prefix) < MEMBER_PREFIX_MIN_LENGTH:
+            return None     # shorter prefixes only get shorter
+        if prefix in members:
+            return members[prefix]
+    return None
+
+
 def _median(values):
     """Median of a non-empty list; preserves Decimal arithmetic."""
     ordered = sorted(values)
@@ -144,6 +180,10 @@ def _group_transactions(txns):
     """Group by merchant_entity_id when present, else fuzzy-collapsed
     normalized merchant name. Grouping is global across accounts and
     institutions so a card switch doesn't split a stream.
+
+    A name key that matches no group's representative may still join a group
+    through one of its member keys (member_prefix_match): the card network
+    appending a city to a descriptor whose plain form already joined.
     """
     by_entity = defaultdict(list)
     by_name = defaultdict(list)
@@ -157,18 +197,27 @@ def _group_transactions(txns):
 
     # Entity-id groups seed the canonical list; name groups then merge into
     # the first canonical group whose key fuzzy-matches (sorted for
-    # determinism), or start their own.
+    # determinism), else into the group of a member key that is a word prefix
+    # of theirs, or start their own. Sorted order puts a prefix before its
+    # extensions, so the member is always seen first.
     groups = [[_group_key(ts), ts] for _, ts in sorted(by_entity.items())]
+    members = {}
     for key in sorted(by_name):
         # One matcher per key, seq2 pinned: difflib caches the b-side chain, so
         # scanning it across every group costs one build instead of one per pair.
         matcher = SequenceMatcher(None, '', key, autojunk=False)
         for group in groups:
             if _similar(group[0], key, matcher):
-                group[1].extend(by_name[key])
+                target = group
                 break
         else:
-            groups.append([key, by_name[key]])
+            target = member_prefix_match(key, members)
+            if target is None:
+                target = [key, []]
+                groups.append(target)
+        target[1].extend(by_name[key])
+        if is_member(key, target[0]):
+            members[key] = target
     return [ts for _, ts in groups]
 
 

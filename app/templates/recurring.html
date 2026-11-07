@@ -1,11 +1,15 @@
 {% extends 'base.html' %}
 {% macro money(value) %}${{ "{:,.2f}".format(value) }}{% endmacro %}
 {# A stream built by one of the user's rules carries a badge; every other
-   stream gets a Flag link that opens the rule form pre-filled from it. #}
+   stream gets a Flag link that opens the rule form pre-filled from it. A
+   same-amount sub-stream's Flag also pins its exact amount, so the rule takes
+   over just that plan. #}
 {% macro name_cell(s) %}
 <td class="medium">
   {{ s.name }}
   {% if s.rule_id %}<span class="badge badge-accent">your rule</span>
+  {% elif s.split_amount is not none %}<span class="badge" title="One of several plans at this merchant, found by its exact amount">same amount</span>
+  <a class="xs muted" href="{{ url_for('main.new_recurring_rule', pattern=s.pattern_hint, label=s.name, direction='outflow', amount_min=s.split_amount, amount_max=s.split_amount) }}">Flag</a>
   {% else %}<a class="xs muted" href="{{ url_for('main.new_recurring_rule', pattern=s.pattern_hint, label=s.name, direction='inflow' if s.is_inflow else 'outflow') }}">Flag</a>{% endif %}
 </td>
 {% endmacro %}
@@ -182,6 +186,55 @@
     </div>
   </details>
   {% endif %}
+</div>
+{% endif %}
+
+{# Possibly recurring: merchants charged in most recent months with no regular
+   schedule (appointments, services billed on varying days). Never counted;
+   the user decides each with a rule. Beside a same-amount stream of the same
+   merchant both links are withheld: an unranged rule would also claim that
+   stream's rows. #}
+{% if suggestions %}
+<h2 class="eyebrow mb-2">Possibly recurring</h2>
+<div class="card mb-4">
+  <details class="disclosure">
+    <summary><span>Charged in most recent months, on no regular schedule ({{ suggestions|length }})</span></summary>
+    <div class="card-body small muted">Not counted. Flag one to count it as a monthly bill, or mark it not recurring to clear it from this list.</div>
+    <div class="table-wrap">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Merchant</th>
+            <th>Months charged</th>
+            <th class="right" title="Median of the months it was charged">Typical month</th>
+            <th>Last charge</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+        {% for g in suggestions %}
+        <tr>
+          <td class="medium">
+            {{ g.name }}
+            {% if g.is_transfer %}<span class="badge">transfer</span>{% endif %}
+          </td>
+          <td class="muted">{{ g.months }} of last {{ g.window_months }} months</td>
+          <td class="right nowrap amount">{{ money(g.typical_month) }}</td>
+          <td class="muted xs nowrap">{{ g.last_date.strftime('%b %d, %Y') }}</td>
+          <td class="xs nowrap">
+            {% if g.has_split %}
+            <span class="muted">Flag its same-amount stream first</span>
+            {% else %}
+            <a href="{{ url_for('main.new_recurring_rule', pattern=g.pattern_hint, label=g.name, direction='outflow') }}">Flag</a>
+            · <a class="muted" href="{{ url_for('main.new_recurring_rule', pattern=g.pattern_hint, label=g.name, direction='outflow', action='not_recurring') }}">Not recurring</a>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </details>
 </div>
 {% endif %}
 

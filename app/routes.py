@@ -417,6 +417,7 @@ def recurring():
         counted=counted,
         excluded=[(label, rows) for label, rows in excluded if rows],
         marked=found.marked,
+        suggestions=found.suggestions,
         rules=found.rules,
         income=income,
         expense_total=expense_total,

@@ -6,6 +6,7 @@ Flask's session cookie is timestamped.
 """
 
 from datetime import date, timedelta
+import re
 from decimal import Decimal
 from types import SimpleNamespace
 
@@ -362,3 +363,36 @@ def test_page_without_either_renders_as_before(client, app):
     assert res.status_code == 200
     assert 'Electric Co' in html
     assert 'same amount' not in html and 'Possibly recurring' not in html
+
+
+@freeze_time(FROZEN)
+def test_suggestion_links_are_a_flag_and_a_not_recurring(client, app):
+    _seed(app, plans=False)
+    _login(client)
+    html = client.get('/recurring').get_data(as_text=True)
+    links = re.findall(r'href="([^"]*pattern=RIVERSIDE\+THERAPY[^"]*)"', html)
+    assert len(links) == 2
+    assert sum('action=not_recurring' in link for link in links) == 1
+
+
+@freeze_time(FROZEN)
+def test_suggestion_beside_a_same_amount_stream_has_only_the_note(client, app):
+    _seed(app, plans=False, therapy=False)
+    with app.app_context():
+        inst_id = Institution.query.one().id
+        for n, t in enumerate(series(3, '9.00', 'RIVERSIDE THERAPY APP', range(1, 7),
+                                     merchant_name='Riverside Therapy') + visits()):
+            db.session.add(Transaction(
+                plaid_transaction_id=f'p-{n}', institution_id=inst_id,
+                account_id='acc-1', date=t.date, description=t.description,
+                merchant_name=t.merchant_name, amount=t.amount,
+            ))
+        db.session.commit()
+    _login(client)
+    html = client.get('/recurring').get_data(as_text=True)
+    assert 'Riverside Therapy · $9.00' in html
+    assert 'Flag its same-amount stream first' in html
+    assert 'action=not_recurring' not in html
+    # Only the sub-stream's own Flag link, with its exact amount, remains.
+    links = re.findall(r'href="([^"]*pattern=RIVERSIDE\+THERAPY[^"]*)"', html)
+    assert len(links) == 1 and 'amount_min=9.00' in links[0]

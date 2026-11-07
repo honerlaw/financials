@@ -9,4 +9,7 @@
 - Whole-proposal soundness, first wave — [reviewed — revise] held until scope and approach were final; its points were folded with the panel's fixes.
 - Whole-proposal soundness, restart — [reviewed — clean] Skeptic accepted; ten wording notes folded (Flag/Not recurring links both omitted beside a sub-stream, per-bin calendar-month caveat, biweekly in rejection list, refund wording, "no stream as a whole", "normally", input rows/tiebreak, late-second-plan undercount, /subscriptions wording, frozen-clock route tests).
 
+- Completion verification — [reviewed — Verifier: INCOMPLETE → folded] code matched every Approach claim; two test gaps (criterion 2g: the flag-it-first note was never rendered in a test; 3b: Flag and Not recurring links were indistinguishable) closed with two route tests. 497 pass.
+
 ## Notes
+- Local replay (uncategorized cache, not committed) reproduced the design replay: the expected same-amount monthly plans, and a suggestion list topped by P2P, vet, rental, counseling and pet payees. Card payments and transfers only drop out in production, where categories exist.

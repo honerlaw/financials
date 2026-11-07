@@ -1,4 +1,5 @@
 {% extends 'base.html' %}
+{% from '_essential_toggle.html' import essential_toggle %}
 {% macro money(value) %}${{ "{:,.2f}".format(value) }}{% endmacro %}
 {# A stream built by one of the user's rules carries a badge; every other
    stream gets a Flag link that opens the rule form pre-filled from it. A
@@ -33,7 +34,18 @@
   <div class="card"><div class="card-body">
     <h2 class="eyebrow mb-2">Recurring expenses</h2>
     <div class="amount amount-xl">{{ money(expense_total) }} / month</div>
-    <div class="small muted">
+    {# The keep/cancel split: essential is what the user marked in the table
+       below; the rest is what could be cancelled. Both sum the rounded rows,
+       so the two lines always add up to the total. #}
+    {% if expense_count %}
+    <div class="small mt-1" id="essential-split">
+      <div><span class="strong">Essential {{ money(essential_total) }} / month</span>
+        <span class="muted">· {{ essential_count }} of {{ expense_count }}</span></div>
+      <div>Not essential {{ money(expense_total - essential_total) }} / month
+        <span class="muted">· could be cancelled</span></div>
+    </div>
+    {% endif %}
+    <div class="small muted mt-1">
       {{ expense_count }} {{ 'expense' if expense_count == 1 else 'expenses' }}
       · variable ones at the high end of their last year (75th percentile)
     </div>
@@ -67,7 +79,7 @@
 {# Counted expenses: exactly the rows behind the headline, so it can be audited
    by adding the Per month column. Largest first; the header line and the
    status badge keep what is unpaid visible. #}
-<div class="card mb-4">
+<div class="card mb-4" id="counted">
   <div class="card-head">Counted expenses</div>
   <div class="table-wrap">
     <table class="table">
@@ -81,6 +93,7 @@
           <th>Last charge</th>
           <th>Accounts</th>
           <th>Status</th>
+          <th>Essential</th>
         </tr>
       </thead>
       <tbody>
@@ -105,9 +118,10 @@
           {% elif b.payment_status == 'unpaid' %}<span class="badge badge-danger">Unpaid</span>
           {% else %}<span class="badge">Upcoming</span>{% endif %}
         </td>
+        <td class="nowrap">{{ essential_toggle(b) }}</td>
       </tr>
       {% else %}
-      <tr><td colspan="8" class="empty">No recurring expenses detected yet.</td></tr>
+      <tr><td colspan="9" class="empty">No recurring expenses detected yet.</td></tr>
       {% endfor %}
       </tbody>
     </table>

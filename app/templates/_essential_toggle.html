@@ -1,0 +1,18 @@
+{# Marked: a green "Essential" button that un-marks, posting every key the
+   stream carries (a merged stream has several). Unmarked: "Mark essential",
+   posting the one key to save. A stream with no key gets no toggle. #}
+{% macro essential_toggle(b) %}
+{% if b.essential_keys %}
+<form method="post" action="{{ url_for('main.set_essential') }}">
+  {% if b.essential %}
+  <input type="hidden" name="essential" value="0">
+  {% for k in b.essential_keys %}<input type="hidden" name="key" value="{{ k }}">{% endfor %}
+  <button type="submit" class="btn btn-sm btn-success" aria-pressed="true" title="Marked essential. Click to unmark.">Essential</button>
+  {% else %}
+  <input type="hidden" name="essential" value="1">
+  <input type="hidden" name="key" value="{{ b.essential_key }}">
+  <button type="submit" class="btn btn-sm btn-ghost" aria-pressed="false">Mark essential</button>
+  {% endif %}
+</form>
+{% endif %}
+{% endmacro %}

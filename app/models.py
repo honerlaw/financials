@@ -226,3 +226,20 @@ class RecurringRule(db.Model):
     amount_max = db.Column(db.Numeric(10, 2), nullable=True)
     action = db.Column(db.String(20), nullable=False)      # 'recurring' | 'not_recurring'
     created_at = db.Column(db.DateTime(timezone=True), default=_utcnow, nullable=False)
+
+
+class EssentialMark(db.Model):
+    """One stream the user marked essential on /recurring.
+
+    ``stream_key`` is one of the keys app/bills.py gives a recurring expense:
+    ``rule:<id>`` for a rule-built stream, ``merchant:<grouping key>`` for a
+    detected one, ``merchant:<grouping key>@<amount>`` for a same-amount
+    sub-stream. A bill is essential when any of its keys is saved. No mark
+    means not essential. Nothing about detection is stored here.
+    """
+
+    __tablename__ = 'essential_marks'
+
+    id = db.Column(db.Integer, primary_key=True)
+    stream_key = db.Column(db.String(255), unique=True, nullable=False)
+    created_at = db.Column(db.DateTime(timezone=True), default=_utcnow, nullable=False)

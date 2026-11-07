@@ -4,7 +4,7 @@ import threading
 
 from flask import (
     Blueprint, render_template, request, redirect,
-    url_for, session, jsonify, current_app,
+    url_for, session, jsonify, current_app, abort,
 )
 
 from app.models import db, Institution, Transaction, SyncLog, Account
@@ -364,11 +364,20 @@ def _rule_rows():
     ).all()
 
 
+def _essential_keys():
+    """The saved essential-mark keys. A plain column read, so the commit after
+    detection has nothing to expire."""
+    from sqlalchemy import select
+    from app.models import EssentialMark
+    return set(db.session.execute(select(EssentialMark.stream_key)).scalars())
+
+
 @bp.route('/recurring')
 @login_required
 def recurring():
     from app.bills import (
-        detect_recurring_with_rules, fixed_monthly_total, monthly_income_total,
+        detect_recurring_with_rules, essential_monthly_total, fixed_monthly_total,
+        mark_essential, monthly_income_total,
     )
     from app.merchant_groups import groups_for_detection
 
@@ -379,6 +388,7 @@ def recurring():
     # moment a stream lapsed or the month rolled over. The user's rules
     # (app/recurring_rules.py) are applied per request too.
     rules = _rule_rows()
+    essential_keys = _essential_keys()
     groups, _used_index = groups_for_detection()
     found = detect_recurring_with_rules(groups, date.today(), rules)
     bills, income = found.bills, found.income
@@ -389,6 +399,7 @@ def recurring():
     # rows, which cannot expire, but keep the order — it costs nothing.
     db.session.commit()
     _account_labels(bills + income)
+    mark_essential(bills, essential_keys)
 
     counted = sorted(
         (b for b in bills if b['excluded_reason'] is None),
@@ -408,6 +419,7 @@ def recurring():
     ]
     expense_total, expense_count = fixed_monthly_total(bills)
     income_total, income_count = monthly_income_total(income)
+    essential_total, essential_count = essential_monthly_total(bills)
 
     def status_count(status):
         return sum(1 for b in counted if b['payment_status'] == status)
@@ -422,6 +434,8 @@ def recurring():
         income=income,
         expense_total=expense_total,
         expense_count=expense_count,
+        essential_total=essential_total,
+        essential_count=essential_count,
         income_total=income_total,
         income_count=income_count,
         unpaid_count=status_count('unpaid'),
@@ -495,11 +509,55 @@ def create_recurring_rule():
 @login_required
 def delete_recurring_rule(rule_id):
     from app.models import RecurringRule
+    from app.models import EssentialMark
     rule = db.session.get(RecurringRule, rule_id)
     if rule is not None:
         db.session.delete(rule)
+        # Its stream's mark goes with it, so no later rule can inherit it.
+        EssentialMark.query.filter_by(stream_key=f'rule:{rule_id}').delete()
         db.session.commit()
     return redirect(url_for('main.recurring'))
+
+
+ESSENTIAL_KEY_PREFIXES = ('rule:', 'merchant:')
+ESSENTIAL_KEY_MAX_LENGTH = 255
+ESSENTIAL_KEYS_MAX = 500
+
+
+@bp.route('/recurring/essential', methods=['POST'])
+@login_required
+def set_essential():
+    """Mark a recurring expense essential (essential=1, its primary key) or
+    not (essential=0, all of its keys — a merged stream carries several)."""
+    from sqlalchemy.exc import IntegrityError
+    from app.models import EssentialMark
+    keys = request.form.getlist('key')
+    essential = request.form.get('essential')
+    valid = (
+        essential in ('0', '1')
+        and 1 <= len(keys) <= ESSENTIAL_KEYS_MAX
+        and all(
+            k.startswith(ESSENTIAL_KEY_PREFIXES) and len(k) <= ESSENTIAL_KEY_MAX_LENGTH
+            for k in keys
+        )
+    )
+    if not valid:
+        abort(400)
+    if essential == '1':
+        saved = _essential_keys()
+        for key in dict.fromkeys(keys):
+            if key not in saved:
+                db.session.add(EssentialMark(stream_key=key))
+        try:
+            db.session.commit()
+        except IntegrityError:
+            # Saved by a concurrent request in between: already essential.
+            db.session.rollback()
+    else:
+        EssentialMark.query.filter(EssentialMark.stream_key.in_(keys)).delete(
+            synchronize_session=False)
+        db.session.commit()
+    return redirect(url_for('main.recurring', _anchor='counted'))
 
 
 # /bills and /subscriptions were merged into /recurring. A temporary (302)

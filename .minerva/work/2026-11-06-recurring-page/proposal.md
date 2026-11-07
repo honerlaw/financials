@@ -1,7 +1,7 @@
 # Proposal: recurring-page
 
 **Date**: 2026-11-06
-**Status**: Draft
+**Status**: Shipped (2026-11-06)
 
 ## Goal
 
@@ -85,7 +85,12 @@ not-counted collapsed and grouped by reason; income at the 25th percentile.
   (`merchant_groups.py`, `models.py`, `sync.py`). `app/chat/tools.py` names concepts, not
   URLs, and is left alone. The `detect_subscriptions*` functions stay: they remain the
   detector's tested reference implementation even with no route calling them.
-- Income "next expected" renders `next_date` as-is; an active stream is at most 1.5× its
+- **Not-counted groups** render in the order Annual, Transfers, Inactive
+  (`routes._EXCLUDED_GROUPS`); any other reason `_excluded_reason` may return gets a group
+  of its own, titled by the reason, so no uncounted bill can silently drop off the page.
+- **Styling.** New `.figures` (headline grid) and `.disclosure` (collapsed group, inset focus
+  ring, decorative arrow with empty alt text) rules in `app/static/app.css`.
+- Income "next expected" renders `next_date` as-is (a dash for an inactive source); an active stream is at most 1.5× its
   cadence late, so a past date is visible and honest.
 - **Out of scope:** counting annual bills, chat, the SMS digest, a semi-monthly cadence (the
   user confirmed biweekly pay), and a manual income override.

@@ -13,7 +13,7 @@ from types import SimpleNamespace
 import pytest
 from freezegun import freeze_time
 
-from app.bills import detect_recurring_with_rules
+from app.bills import detect_recurring_with_rules, fixed_monthly_total
 from app.models import Account, Institution, RecurringRule, Transaction, db
 from app.recurring_rules import apply_rules, parse_rule_form, pattern_hint, preview
 from app.subscriptions import merge_by_descriptor
@@ -149,6 +149,20 @@ def test_identical_same_day_rows_are_both_claimed():
     assert result.groups == [[other]]
 
 
+def test_value_equal_rows_are_partitioned_by_position():
+    """Production rows are SQLAlchemy Rows, which compare by value: two
+    identical same-day rows must both be claimed, or both kept."""
+    from collections import namedtuple
+    Plain = namedtuple('Plain', 'date amount description merchant_name')
+    twin = lambda: Plain(TODAY, Decimal('25.00'), 'ACME', None)
+    kept_twin = lambda: Plain(TODAY, Decimal('25.00'), 'Elsewhere', None)
+    group = [twin(), twin(), kept_twin(), kept_twin()]
+    result = apply_rules([group], [rule()])
+    assert len(result.claims[0].rows) == 2
+    assert result.groups == [[kept_twin(), kept_twin()]]
+    assert len(result.groups[0]) == 2
+
+
 def test_records_rows_won_and_n_of_m_per_source_group():
     payee, others = checks()
     result = apply_rules([payee + others], [rule(pattern='Check', amount_min='300',
@@ -201,19 +215,30 @@ def test_preview_reports_rows_lost_to_and_taken_from_saved_rules():
                   amount_max='320')]
     broad = rule(id=None, label='Candidate', pattern='Check')
     lost = preview(groups, saved, broad)
-    assert lost['won'] == 3 and lost['lost'] == [('Saved ranged', 5)]
+    assert lost['won'] == 3
+    assert lost['lost'] == [{'label': 'Saved ranged', 'pattern': 'Check', 'rows': 5}]
 
     saved = [rule(id=1, label='Saved broad', pattern='Check')]
     ranged = rule(id=None, pattern='Check', amount_min='300', amount_max='320')
     taken = preview(groups, saved, ranged)
-    assert taken['won'] == 5 and taken['taken'] == [('Saved broad', 5)]
+    assert taken['won'] == 5
+    assert taken['taken'] == [{'label': 'Saved broad', 'pattern': 'Check', 'rows': 5}]
     assert taken['lost'] == []
 
 
 def test_unsaved_candidate_ranks_after_saved_rules():
     rows = [Row(TODAY, '20.00', 'ACME')]
     result = preview([rows], [rule(id=7, label='Saved')], rule(id=None, label='New'))
-    assert result['won'] == 0 and result['lost'] == [('Saved', 1)]
+    assert result['won'] == 0
+    assert result['lost'] == [{'label': 'Saved', 'pattern': 'ACME', 'rows': 1}]
+
+
+def test_preview_keeps_saved_rules_with_the_same_label_apart():
+    rows = [Row(TODAY, '20.00', 'ACME ONE'), Row(TODAY, '20.00', 'ACME TWO')]
+    saved = [rule(id=1, label='Dup', pattern='ACME ONE'),
+             rule(id=2, label='Dup', pattern='ACME TWO')]
+    result = preview([rows], saved, rule(id=None, pattern='ACME'))
+    assert [t['pattern'] for t in result['lost']] == ['ACME ONE', 'ACME TWO']
 
 
 # ── pattern hint ─────────────────────────────────────────────────────────────
@@ -232,13 +257,36 @@ def test_pattern_hint(descriptions, hint):
 
 def test_parse_rule_form_accepts_a_valid_rule():
     fields, errors = parse_rule_form({
-        'label': ' Lawn ', 'pattern': ' Check ', 'direction': 'outflow',
+        'label': ' Payee ', 'pattern': ' Check ', 'direction': 'outflow',
         'action': 'recurring', 'amount_min': '$1,050', 'amount_max': '1100.5',
     })
     assert errors == []
-    assert fields['label'] == 'Lawn' and fields['pattern'] == 'Check'
+    assert fields['label'] == 'Payee' and fields['pattern'] == 'Check'
     assert fields['amount_min'] == Decimal('1050.00')
     assert fields['amount_max'] == Decimal('1100.50')
+
+
+def test_parse_rule_form_requires_direction_and_action_unless_defaulted():
+    _, errors = parse_rule_form({'label': 'X', 'pattern': 'ACME'})
+    assert 'Choose money out or money in.' in errors
+    assert 'Choose recurring or not recurring.' in errors
+    fields, errors = parse_rule_form({'label': 'X', 'pattern': 'ACME'}, defaults=True)
+    assert errors == [] and (fields['direction'], fields['action']) == ('outflow', 'recurring')
+
+
+def test_parse_rule_form_strips_control_characters():
+    """Postgres rejects NUL in text; SQLite would store it."""
+    fields, errors = parse_rule_form({'label': 'A\x00B', 'pattern': '\x00ab\x00',
+                                      'direction': 'outflow', 'action': 'recurring'})
+    assert fields['label'] == 'AB' and fields['pattern'] == 'ab'
+    assert any('at least 3 characters' in e for e in errors)
+
+
+@pytest.mark.parametrize('text', ['0', '-0', '0.00'])
+def test_minimum_of_zero_is_no_range(text):
+    fields, errors = parse_rule_form({'label': 'X', 'pattern': 'ACME', 'amount_min': text,
+                                      'direction': 'outflow', 'action': 'recurring'})
+    assert errors == [] and fields['amount_min'] is None
 
 
 # ── detection ────────────────────────────────────────────────────────────────
@@ -283,6 +331,29 @@ def test_forced_monthly_split_payments_are_estimated_from_monthly_totals():
     bill = _bill(_detect([rows], [rule(label='Plan')]), 'Plan')
     assert bill['cadence_forced'] is True
     assert bill['monthly_amount'] == Decimal('250.00')
+
+
+def test_forced_monthly_estimate_never_falls_below_one_payment():
+    """Monthly totals' P75 can sit below the per-date P75 (one heavy month of
+    several payments, several light months); the estimate takes the larger."""
+    rows = [Row(date(2026, m, d), '100.00', 'ACME PLAN')
+            for m, d in ((1, 3), (2, 17), (3, 9), (4, 26))]
+    rows += [Row(date(2026, 5, d), '300.00', 'ACME PLAN') for d in (2, 12, 22)]
+    bill = _bill(_detect([rows], [rule(label='Plan')]), 'Plan')
+    assert bill['cadence_forced'] is True
+    assert bill['monthly_amount'] == Decimal('300.00')
+
+
+def test_forced_monthly_bill_is_never_unpaid():
+    """An irregular stream has no due day: paid once anything posts this
+    month, otherwise upcoming."""
+    days = [date(2026, 2, 2), date(2026, 3, 1), date(2026, 4, 26), date(2026, 5, 3)]
+    rows = [Row(d, '80.00', 'ACME SERVICE') for d in days]
+    found = _detect([rows], [rule(label='Service')])
+    assert _bill(found, 'Service')['payment_status'] == 'upcoming'
+    rows.append(Row(date(2026, 6, 2), '80.00', 'ACME SERVICE'))
+    found = _detect([rows], [rule(label='Service')])
+    assert _bill(found, 'Service')['payment_status'] == 'paid'
 
 
 def test_outflow_rule_leaves_matching_inflows_in_their_group():
@@ -335,6 +406,7 @@ def test_not_recurring_rule_removes_a_counted_bill_and_lists_it_as_marked():
     found = _detect([gym, other], [rule(label='Not a bill', pattern='ACME GYM',
                                         action='not_recurring')])
     assert [b['name'] for b in found.bills] == ['Electric Co']
+    assert fixed_monthly_total(found.bills) == (Decimal('90.00'), 1)
     [marked] = found.marked
     assert marked['label'] == 'Not a bill' and marked['rows_won'] == 5
     assert [s['name'] for s in marked['sources']] == ['Acme Gym']
@@ -350,6 +422,20 @@ def test_claiming_rows_can_change_how_leftover_groups_merge():
     new.append(Row(date(2026, 2, 20), '75.00', 'CONTOSO SVC ONEOFF', merchant_name='Contoso'))
     assert len(merge_by_descriptor([old, new])) == 2
     leftover = apply_rules([old, new], [rule(pattern='ONEOFF', action='not_recurring')]).groups
+    assert len(merge_by_descriptor(leftover)) == 1
+
+
+def test_claiming_rows_can_change_a_leftover_groups_dominant_descriptor():
+    """Promo rows outnumber the renamed group's own descriptor, so it does not
+    share the old group's descriptor; once a rule claims them, it does."""
+    old = [Row(date(2026, m, 5), '30.00', 'CONTOSO SVC', merchant_name='Contoso Old')
+           for m in (1, 2, 3)]
+    new = [Row(date(2026, m, 5), '30.00', 'CONTOSO SVC', merchant_name='Contoso')
+           for m in (4, 5, 6)]
+    new += [Row(date(2026, m, 15), '5.00', 'CONTOSO PROMO', merchant_name='Contoso')
+            for m in (4, 5, 6, 6)]
+    assert len(merge_by_descriptor([old, new])) == 2
+    leftover = apply_rules([old, new], [rule(pattern='PROMO', action='not_recurring')]).groups
     assert len(merge_by_descriptor(leftover)) == 1
 
 
@@ -397,7 +483,7 @@ def _login(client):
 
 def _add_rule(app, **kwargs):
     with app.app_context():
-        values = dict(label='Lawn', pattern='Check', direction='outflow',
+        values = dict(label='Payee', pattern='Check', direction='outflow',
                       action='recurring', amount_min=Decimal('300'),
                       amount_max=Decimal('320'))
         values.update(kwargs)
@@ -405,7 +491,7 @@ def _add_rule(app, **kwargs):
         db.session.commit()
 
 
-VALID = {'label': 'Lawn', 'pattern': 'Check', 'direction': 'outflow',
+VALID = {'label': 'Payee', 'pattern': 'Check', 'direction': 'outflow',
          'action': 'recurring', 'amount_min': '300', 'amount_max': '320'}
 
 
@@ -416,7 +502,7 @@ def test_create_rule_saves_and_redirects(client, app):
     assert res.status_code == 302 and res.headers['Location'].endswith('/recurring')
     with app.app_context():
         [saved] = RecurringRule.query.all()
-        assert (saved.label, saved.pattern, saved.amount_min) == ('Lawn', 'Check', Decimal('300.00'))
+        assert (saved.label, saved.pattern, saved.amount_min) == ('Payee', 'Check', Decimal('300.00'))
 
 
 @pytest.mark.parametrize('change, message', [
@@ -424,6 +510,8 @@ def test_create_rule_saves_and_redirects(client, app):
     ({'pattern': ' ab '}, 'at least 3 characters'),
     ({'action': 'maybe'}, 'Choose recurring or not recurring'),
     ({'direction': 'sideways'}, 'Choose money out or money in'),
+    ({'direction': ''}, 'Choose money out or money in'),
+    ({'action': ''}, 'Choose recurring or not recurring'),
     ({'amount_min': 'abc'}, 'Minimum amount must be a number'),
     ({'amount_min': 'NaN'}, 'Minimum amount must be a number'),
     ({'amount_max': '-5'}, 'cannot be negative'),
@@ -453,13 +541,33 @@ def test_preview_lists_the_rows_a_rule_would_claim(client, app):
 @freeze_time(FROZEN)
 def test_preview_shows_rows_lost_to_a_saved_rule(client, app):
     _seed(app)
-    _add_rule(app, label='Saved lawn')
+    _add_rule(app, label='Saved payee')
     _login(client)
     res = client.get('/recurring/rules/new', query_string={
         **VALID, 'amount_min': '', 'amount_max': '', 'preview': '1'})
     html = res.get_data(as_text=True)
     assert 'This rule would claim 2 transactions' in html
-    assert '6 matching transactions stay with your rule "Saved lawn"' in html
+    assert '6 matching transactions stay with your rule "Saved payee" ("Check")' in html
+
+
+@freeze_time(FROZEN)
+def test_preview_shows_rows_taken_from_a_saved_rule(client, app):
+    _seed(app)
+    _add_rule(app, label='All checks', amount_min=None, amount_max=None)
+    _login(client)
+    html = client.get('/recurring/rules/new', query_string={**VALID, 'preview': '1'}).get_data(as_text=True)
+    assert 'This rule would claim 6 transactions' in html
+    assert 'It would take 6 from your rule "All checks" ("Check")' in html
+
+
+@freeze_time(FROZEN)
+def test_preview_works_without_a_name(client, app):
+    _seed(app)
+    _login(client)
+    html = client.get('/recurring/rules/new', query_string={
+        'pattern': 'Check', 'preview': '1'}).get_data(as_text=True)
+    assert 'This rule would claim 8 transactions' in html
+    assert 'formnovalidate' in html
 
 
 @freeze_time(FROZEN)
@@ -525,11 +633,11 @@ def test_rules_card_badge_and_counted_rule_bill(client, app):
     _login(client)
     html = client.get('/recurring').get_data(as_text=True)
     counted = html.split('Counted expenses', 1)[1].split('Not counted', 1)[0]
-    assert re.search(r'Lawn\s*<span class="badge badge-accent">your rule</span>', counted)
+    assert re.search(r'Payee\s*<span class="badge badge-accent">your rule</span>', counted)
     assert re.search(r'Car\s*<span class="badge badge-accent">your rule</span>', counted)
     assert '3 expenses' in html
     rules_card = html.split('Your rules', 1)[1]
-    assert 'Jun 04, 2026' in rules_card                     # Lawn's last matched
+    assert 'Jun 04, 2026' in rules_card                     # Payee's last matched
     assert '0 rows' in rules_card                           # Nothing
     assert 'Check #1001 (6 of 8 rows)' in rules_card
 

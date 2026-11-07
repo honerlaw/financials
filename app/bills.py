@@ -279,6 +279,15 @@ def _finish_bill(stream, txns, today, override=False):
         stream['expected_date_this_month'] = _safe_date(
             today.year, today.month, _expected_day_of_month(txns)
         )
+    elif stream['cadence_forced']:
+        # A rule asserted this irregular stream recurs, so it has no expected
+        # day to be late against: paid once anything posted this month,
+        # otherwise upcoming — never a false "Unpaid" (knowledge 005).
+        expected_date = _safe_date(today.year, today.month, _expected_day_of_month(txns))
+        paid = any(t.date.year == today.year and t.date.month == today.month
+                   for t in txns)
+        stream['payment_status'] = 'paid' if paid else 'upcoming'
+        stream['expected_date_this_month'] = expected_date
     else:
         status, expected_date = _payment_status(txns, today)
         stream['payment_status'] = status

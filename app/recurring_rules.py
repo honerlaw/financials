@@ -128,26 +128,35 @@ def preview(groups, saved_rules, candidate):
     Returns a dict:
       won      — rows the candidate would claim,
       sources  — per source group, "taken of total" for those rows,
-      taken    — (label, n) for rows it would take from a saved rule,
-      lost     — (label, n) for rows it matches but a saved rule keeps.
+      taken    — per saved rule (label, pattern, rows) it would take rows from,
+      lost     — per saved rule that keeps rows the candidate matches.
     """
     before = apply_rules(groups, saved_rules)
-    owner_before = {id(r): c.rule.label for c in before.claims for r in c.rows}
+    owner_before = {id(r): c.rule for c in before.claims for r in c.rows}
     after = apply_rules(groups, list(saved_rules) + [candidate])
     mine = after.claims[-1]
-    owner_after = {id(r): c.rule.label for c in after.claims[:-1] for r in c.rows}
+    owner_after = {id(r): c.rule for c in after.claims[:-1] for r in c.rows}
 
-    taken = Counter(owner_before[id(r)] for r in mine.rows if id(r) in owner_before)
-    lost = Counter(
+    def tally(owners):
+        # Keyed by rule id: labels need not be unique.
+        counts = Counter(rule.id for rule in owners)
+        by_id = {rule.id: rule for rule in owners}
+        return [
+            {'label': by_id[i].label, 'pattern': by_id[i].pattern, 'rows': n}
+            for i, n in sorted(counts.items())
+        ]
+
+    taken = [owner_before[id(r)] for r in mine.rows if id(r) in owner_before]
+    lost = [
         owner_after[id(r)]
         for group in groups for r in group
         if matches(candidate, r) and id(r) in owner_after
-    )
+    ]
     return {
         'won': len(mine.rows),
         'sources': mine.sources,
-        'taken': sorted(taken.items()),
-        'lost': sorted(lost.items()),
+        'taken': tally(taken),
+        'lost': tally(lost),
     }
 
 
@@ -186,14 +195,23 @@ def _parse_amount(text, name, errors):
     return value.quantize(_CENTS)
 
 
-def parse_rule_form(form):
+def _clean(text):
+    """Trimmed text without control characters (Postgres rejects NUL)."""
+    return ''.join(ch for ch in (text or '') if ch >= ' ' or ch == '\t').strip()
+
+
+def parse_rule_form(form, defaults=False):
     """(fields, errors) from a rule form. `fields` always holds what was typed
-    (trimmed) so the form can re-render; amounts are parsed Decimals or None."""
+    (trimmed) so the form can re-render; amounts are parsed Decimals or None.
+
+    `defaults` fills a missing direction (money out) and action (recurring) —
+    for opening the form from a link. A submitted rule must state both.
+    """
     errors = []
-    label = (form.get('label') or '').strip()
-    pattern = (form.get('pattern') or '').strip()
-    direction = form.get('direction') or 'outflow'
-    action = form.get('action') or 'recurring'
+    label = _clean(form.get('label'))
+    pattern = _clean(form.get('pattern'))
+    direction = form.get('direction') or ('outflow' if defaults else '')
+    action = form.get('action') or ('recurring' if defaults else '')
     if not label:
         errors.append('Give the rule a name.')
     elif len(label) > TEXT_MAX_LENGTH:
@@ -208,6 +226,8 @@ def parse_rule_form(form):
         errors.append('Choose recurring or not recurring.')
     amount_min = _parse_amount(form.get('amount_min'), 'Minimum amount', errors)
     amount_max = _parse_amount(form.get('amount_max'), 'Maximum amount', errors)
+    if amount_min is not None and amount_min == 0:
+        amount_min = None   # "from 0" filters nothing; it must not rank as a range
     if amount_min is not None and amount_max is not None and amount_min > amount_max:
         errors.append('The minimum amount is larger than the maximum.')
     fields = {

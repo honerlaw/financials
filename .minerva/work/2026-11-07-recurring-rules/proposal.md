@@ -1,7 +1,7 @@
 # Proposal: recurring-rules
 
 **Date**: 2026-11-07
-**Status**: Draft
+**Status**: Implemented
 
 ## Goal
 The user can correct /recurring themselves when detection gets a stream wrong.
@@ -52,6 +52,7 @@ The user asked for a way to flag a stream themselves when detection is uncertain
     - a **"Marked not recurring"** group under Not counted shows one row per rule: its label, the number of rows it won, and the names of the streams those rows came from. These rows have their own shape (no cadence, amount or status; they show the rule's direction) and their own template branch. The group renders after the other Not-counted groups, ordered by label, and the Not-counted section renders when this group is the only non-empty one;
     - the "Your rules" card shows the same.
   - A rule that claims nothing produces no stream. It shows as "0 rows" on the card.
+  - *As built:* a forced-monthly bill has no due day, so its payment status is "paid" once anything posted this calendar month and "upcoming" otherwise, never "Unpaid" (knowledge 005). The bill/income building is two helpers, `_finish_bill` and `_finish_income`, each taking `override`.
   - `_build_stream(txns, today, fallback_cadence=None)` uses `fallback_cadence` only when `_classify_cadence` returns None. The per-group bill/income building in `detect_recurring_from_groups` is extracted into one helper that takes the group, its stream and an `override` flag. Rule streams and automatic streams then share it instead of duplicating it.
 - **UI.**
   - **Flag link.** Every stream row on /recurring (counted, not counted, income) gets a small **Flag** link to `GET /recurring/rules/new?pattern=…&label=…&direction=…`. The direction is pre-filled from the stream's side.
@@ -67,6 +68,7 @@ The user asked for a way to flag a stream themselves when detection is uncertain
   - **Badge.** Rule-built rows carry a "your rule" badge.
   - **No per-rule queries.** Rules are loaded as plain rows (selected columns, not ORM instances), like detection's transactions, so the commit after detection cannot expire them and the card never re-selects a rule (knowledge 2026-10-26).
   - All new routes are `login_required`.
+  - *As built:* a rule-built row shows the badge instead of a Flag link (it is changed by deleting the rule). The preview shows the amount range per source group in place of a side column, since every claimed row is on the rule's one side.
 - **Cross-site safety.** `SESSION_COOKIE_SAMESITE='Lax'` is set explicitly. This is an app-wide change to the session cookie: it stops a cross-site POST from carrying the session. That protects the new forms, and also the existing state-changing POST endpoints (sync, digest send, institution removal), which today rely on browser defaults. All of the app's own POSTs are same-origin, so none is affected.
 - **Unchanged.** Grouping, the persisted index, `GROUPING_ALGO_VERSION`, the cadence rules and the automatic estimate math are untouched, and /recurring stays the only consumer. Rules cost one extra query plus a linear pass. Badges, counts and source groups all come from that same pass.
 
@@ -117,6 +119,16 @@ The user asked for a way to flag a stream themselves when detection is uncertain
 6. **After deploy**, the classifications the user gave in this conversation are entered as rules on production through the new form. These production writes are user-directed. Each rule is saved only after its preview is checked, and a rule shown to be wrong is deleted. /recurring then counts those streams.
    - If a payee cannot be isolated (for example, check amounts that overlap other checks, or a transfer pattern that also claims unrelated transfers), report that to the user rather than call the criterion met.
    - The outcome is reported to the user only. Nothing real is committed.
+
+### Input handling (as built)
+- Submitted rules must state direction and action. Only the GET form defaults them (money out, recurring).
+- Label and pattern are stripped of control characters, because Postgres rejects NUL.
+- A minimum of 0 is stored as no minimum, so it cannot rank as a range.
+- Preview counts are keyed by rule id and show each rule's pattern, since labels need not be unique.
+- The Preview button skips browser validation, so it works before a name is typed.
+
+## Known consequences
+- A rule can move a stream paid twice a month on fixed days (detected biweekly) from Transfers into the counted list. There, the existing ±6-day payment window can show a false "Unpaid" (knowledge 006). This is the same class of problem as issue #58.
 
 ## Open Questions
 - Rules see only rows that belong to some merchant group. A row whose merchant key has no group, or whose normalized key is empty (a purely numeric memo), cannot be claimed. That is rare, and accepted.

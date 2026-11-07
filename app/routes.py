@@ -467,7 +467,7 @@ def new_recurring_rule():
     direction pre-filled) or from "Add a rule"; its Preview button re-submits
     here with the edited fields."""
     from app.recurring_rules import parse_rule_form
-    fields, errors = parse_rule_form(request.args)
+    fields, errors = parse_rule_form(request.args, defaults=True)
     # Arriving from a link is not a failed submission: only show errors once
     # the user has pressed Preview.
     return _render_rule_form(fields, errors if request.args.get('preview') else [])

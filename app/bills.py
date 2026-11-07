@@ -14,7 +14,7 @@ so "left after recurring" errs on the side of less, never more.
 """
 
 import calendar
-from collections import defaultdict
+from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from decimal import ROUND_HALF_UP, Decimal
@@ -26,6 +26,7 @@ from app.subscriptions import (
     _display_name,
     _group_transactions,
     _median,
+    grouping_key,
     merge_by_descriptor,
 )
 
@@ -261,6 +262,58 @@ def fixed_monthly_total(bills):
     return sum((b['monthly_amount'] for b in counted), Decimal('0.00')), len(counted)
 
 
+def essential_monthly_total(bills):
+    """(total, count) over the counted bills the user marked essential.
+
+    Same arithmetic as fixed_monthly_total — the rounded per-row figures — so
+    essential + not essential always equals the headline total. A mark on an
+    uncounted bill adds nothing: it is not in the total either.
+    """
+    return fixed_monthly_total([b for b in bills if b.get('essential')])
+
+
+def mark_essential(streams, saved_keys):
+    """Set each stream's 'essential' from the saved EssentialMark keys: true
+    when any of its `essential_keys` is saved."""
+    saved = set(saved_keys)
+    for stream in streams:
+        stream['essential'] = any(k in saved for k in stream['essential_keys'])
+    return streams
+
+
+# EssentialMark.stream_key is String(255); a longer key could never be saved.
+ESSENTIAL_KEY_MAX_LENGTH = 255
+
+
+def _merchant_keys(rows, suffix=''):
+    """Essential-mark keys for a detected stream: (keys, primary).
+
+    One `merchant:<grouping key><suffix>` per distinct non-empty grouping key
+    among `rows`. A group merged across a Plaid rename carries its old and new
+    keys, so a mark made under either name still matches. `primary` — the key
+    written when the stream is marked — is the most common one, ties to the
+    smallest. (), None when no row has a usable grouping key. A key too long
+    to store is left out, so the page never offers a toggle that cannot save.
+    """
+    limit = ESSENTIAL_KEY_MAX_LENGTH - len('merchant:') - len(suffix)
+    counts = Counter(
+        k for k in (grouping_key(t) for t in rows) if k and len(k) <= limit
+    )
+    if not counts:
+        return (), None
+    top = max(counts.values())
+    primary = min(k for k, n in counts.items() if n == top)
+    keys = tuple(sorted(f'merchant:{k}{suffix}' for k in counts))
+    return keys, f'merchant:{primary}{suffix}'
+
+
+def _set_keys(stream, keys, primary):
+    stream['essential_keys'] = keys
+    stream['essential_key'] = primary
+    stream['essential'] = False
+    return stream
+
+
 def monthly_income_total(income):
     """(total, count) over the income streams counted toward monthly income.
 
@@ -463,6 +516,9 @@ def detect_recurring_with_rules(groups, today, rules):
                 sub['split_amount'] = amount
                 sub['pattern_hint'] = pattern_hint(rows)
                 sub['rule_id'] = None
+                # Suffixed with the plan's amount, and without the parent key,
+                # so marking one plan never marks another at the same merchant.
+                _set_keys(sub, *_merchant_keys(rows, suffix=f'@{amount:.2f}'))
                 bills.append(_finish_bill(sub, rows, today))
                 taken.update(positions)
             if not _is_card_payment(group):
@@ -475,8 +531,11 @@ def detect_recurring_with_rules(groups, today, rules):
         stream['split_amount'] = None
         stream['rule_id'] = None
         if stream['is_inflow']:
+            # Income is never marked essential: it is not an expense.
+            _set_keys(stream, (), None)
             income.append(_finish_income(stream, group))
         else:
+            _set_keys(stream, *_merchant_keys(group))
             bills.append(_finish_bill(stream, group, today))
 
     entries = []
@@ -502,6 +561,8 @@ def detect_recurring_with_rules(groups, today, rules):
         stream['pattern_hint'] = rule.pattern
         stream['split_amount'] = None
         stream['rule_id'] = rule.id
+        key = None if inflow else f'rule:{rule.id}'
+        _set_keys(stream, (key,) if key else (), key)
         if inflow:
             income.append(_finish_income(stream, claim.rows, override=True))
         else:

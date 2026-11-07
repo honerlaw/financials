@@ -284,6 +284,9 @@ a:hover { text-decoration: underline; }
 .btn-ghost { border-color: transparent; background: transparent; color: var(--text-muted); }
 .btn-ghost:hover { background: var(--surface-2); color: var(--text); }
 
+.btn-success { color: var(--pos); background: var(--pos-bg); border-color: var(--pos-border); }
+.btn-success:hover { background: var(--pos-border); }
+
 /* ── Badges ───────────────────────────────────────────────────────────────── */
 
 .badge {

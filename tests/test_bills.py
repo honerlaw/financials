@@ -276,6 +276,8 @@ def test_recurring_page_empty_state(auth_client):
     assert b'No recurring expenses detected yet' in res.data
     assert b'No recurring income detected yet' in res.data
     assert b'Left after recurring' not in res.data
+    # No counted expenses: no "0 of 0" essential split.
+    assert b'id="essential-split"' not in res.data
 
 
 # ── Fixed monthly total ───────────────────────────────────────────────────────

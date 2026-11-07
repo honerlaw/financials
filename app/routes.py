@@ -372,10 +372,17 @@ def recurring():
         (b for b in bills if b['excluded_reason'] is None),
         key=lambda b: -b['monthly_amount'],
     )
+    # Any reason without a heading still gets a group of its own, titled by
+    # the reason itself: an uncounted bill must never silently vanish from
+    # the page (knowledge 003 — every recurring stream stays listed).
+    reasons = [reason for reason, _ in _EXCLUDED_GROUPS]
+    reasons += sorted({b['excluded_reason'] for b in bills} - set(reasons) - {None})
+    labels = dict(_EXCLUDED_GROUPS)
     excluded = [
-        (label, sorted((b for b in bills if b['excluded_reason'] == reason),
-                       key=lambda b: -b['monthly_amount']))
-        for reason, label in _EXCLUDED_GROUPS
+        (labels.get(reason, reason.capitalize()),
+         sorted((b for b in bills if b['excluded_reason'] == reason),
+                key=lambda b: -b['monthly_amount']))
+        for reason in reasons
     ]
     expense_total, expense_count = fixed_monthly_total(bills)
     income_total, income_count = monthly_income_total(income)

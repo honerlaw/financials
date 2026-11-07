@@ -407,8 +407,6 @@ a:hover { text-decoration: underline; }
 .disclosure > summary {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: var(--sp-3);
   padding: var(--sp-3) var(--sp-5);
   font-weight: 600;
   font-size: var(--fs-sm);
@@ -416,8 +414,12 @@ a:hover { text-decoration: underline; }
   list-style: none;
 }
 .disclosure > summary::-webkit-details-marker { display: none; }
-.disclosure > summary::before { content: "▸"; color: var(--text-muted); margin-right: var(--sp-2); }
-.disclosure[open] > summary::before { content: "▾"; }
+/* Empty alt text: the arrow is decoration, and <details> already announces
+   its expanded state. */
+.disclosure > summary::before { content: "▸" / ""; color: var(--text-muted); margin-right: var(--sp-2); }
+.disclosure[open] > summary::before { content: "▾" / ""; }
+/* Inset the focus ring: the .card's overflow: hidden clips an outset one. */
+.disclosure > summary:focus-visible { outline-offset: -2px; }
 .disclosure[open] > summary { border-bottom: 1px solid var(--border); }
 .disclosure + .disclosure { border-top: 1px solid var(--border); }
 

@@ -466,14 +466,22 @@ def test_income_ignores_positive_rows_and_sums_same_day_deposits():
 
 
 def test_income_older_than_a_year_is_ignored():
-    """A deposit 365 or more days before the latest falls outside the window —
-    the same exclusive far end as expenses."""
+    """Old deposits drop out of the window, so a raise shows up in the figure."""
     recent = biweekly_deposits(27)                       # 0..364 days back
     old = biweekly_deposits(10, last=TODAY - timedelta(days=378), amount='-100.00')
-    edge = [FakeTxn(TODAY - timedelta(days=365), amount='-100.00')]
-    txns = recent + old + edge
-    assert _monthly_estimate(txns, 'biweekly', inflow=True,
+    assert _monthly_estimate(recent + old, 'biweekly', inflow=True,
                              percentile=INCOME_PERCENTILE) == Decimal('4333.33')
+
+
+def test_income_window_excludes_its_far_end():
+    """A deposit exactly 365 days before the latest is outside the window —
+    the same exclusive far end as expenses. With it, P25 of [100, 2000, 2000]
+    would be 1050; without it, both remaining deposits are 2000."""
+    txns = [FakeTxn(TODAY, amount='-2000.00'),
+            FakeTxn(TODAY - timedelta(days=30), amount='-2000.00'),
+            FakeTxn(TODAY - timedelta(days=365), amount='-100.00')]
+    assert _monthly_estimate(txns, 'monthly', inflow=True,
+                             percentile=INCOME_PERCENTILE) == Decimal('2000.00')
 
 
 def test_income_estimate_with_no_deposits_is_zero():
@@ -632,3 +640,53 @@ def test_not_counted_rows_carry_no_payment_badge(auth_client, app):
     assert 'Annual (1)' in not_counted
     assert 'badge-danger' not in not_counted
     assert 'badge-success' not in not_counted
+
+
+def test_every_bill_exclusion_reason_has_a_group(auth_client, app, monkeypatch):
+    """A reason the page has no heading for still renders, under its own name,
+    so no uncounted bill silently drops off the page."""
+    import app.bills as bills_module
+    _seed_recurring_outflow(app)
+    monkeypatch.setattr(bills_module, '_excluded_reason', lambda stream, txns: 'paused')
+    res = auth_client.get('/recurring')
+    not_counted = _section(res.data, 'Not counted', 'Recurring income</div>')
+    assert 'Paused (1)' in not_counted
+    assert 'Electric Co' in not_counted
+
+
+def test_counted_expenses_are_largest_first(auth_client, app):
+    _seed_recurring_outflow(app)                                    # 95.00
+    with app.app_context():
+        inst = Institution.query.first()
+        today = date.today()
+        for i, days in enumerate((60, 30, 0)):
+            db.session.add(Transaction(
+                plaid_transaction_id=f'rent-{i}', institution_id=inst.id,
+                account_id='acc-1', date=today - timedelta(days=days),
+                description='Maple Apartments', merchant_name='Maple Apartments',
+                amount=Decimal('1800.00'),
+            ))
+        db.session.commit()
+    res = auth_client.get('/recurring')
+    expenses = _section(res.data, 'Counted expenses', 'Recurring income</div>')
+    assert expenses.index('Maple Apartments') < expenses.index('Electric Co')
+
+
+def test_left_over_renders_negative_when_expenses_exceed_income(auth_client, app):
+    _seed_recurring_outflow(app)
+    with app.app_context():
+        inst = Institution.query.first()
+        today = date.today()
+        for i, days in enumerate((60, 30, 0)):
+            db.session.add(Transaction(
+                plaid_transaction_id=f'int-{i}', institution_id=inst.id,
+                account_id='acc-1', date=today - timedelta(days=days),
+                description='Interest Paid', merchant_name='Interest Paid',
+                amount=Decimal('-40.00'), category='INCOME',
+                category_detailed='INCOME_INTEREST_EARNED',
+            ))
+        db.session.commit()
+    res = auth_client.get('/recurring')
+    left = _section(res.data, 'Left after recurring', 'Counted expenses')
+    assert 'text-danger' in left
+    assert '-$55.00 / month' in left  # 40.00 income − 95.00 expenses

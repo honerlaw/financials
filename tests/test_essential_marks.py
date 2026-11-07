@@ -99,6 +99,19 @@ def test_rule_stream_is_keyed_by_rule_id_and_income_has_no_keys():
     assert (income['essential_keys'], income['essential_key']) == ((), None)
 
 
+def test_keys_too_long_to_store_are_left_out():
+    from app.bills import ESSENTIAL_KEY_MAX_LENGTH, _merchant_keys
+    fits = Row(TODAY, '5.00', 'x')
+    fits.merchant_entity_id = 'e' * (ESSENTIAL_KEY_MAX_LENGTH - len('merchant:entity:'))
+    too_long = Row(TODAY, '5.00', 'x')
+    too_long.merchant_entity_id = fits.merchant_entity_id + 'e'
+    [key], _ = _merchant_keys([fits])
+    assert len(key) == ESSENTIAL_KEY_MAX_LENGTH
+    assert _merchant_keys([too_long]) == ((), None)
+    # The amount suffix counts toward the limit too.
+    assert _merchant_keys([fits], suffix='@9.00') == ((), None)
+
+
 def test_rows_without_a_grouping_key_get_no_keys():
     # Detection never groups such rows; the helper still answers safely.
     from app.bills import _merchant_keys
@@ -277,6 +290,23 @@ def test_marking_twice_saves_one_mark(client, app):
 
 
 @freeze_time(FROZEN)
+def test_mark_saved_concurrently_is_already_essential(client, app, monkeypatch):
+    # The pre-check misses a mark another request saved in between: the
+    # unique constraint rejects the insert, and the request still succeeds.
+    import app.routes as routes
+    _seed(app)
+    _login(client)
+    _mark(client, '1', 'merchant:streamflix')
+    monkeypatch.setattr(routes, '_essential_keys', lambda: set())
+    res = _mark(client, '1', 'merchant:streamflix')
+    assert res.status_code == 302
+    assert _saved(app) == ['merchant:streamflix']
+    monkeypatch.undo()
+    assert 'aria-pressed="true"' in _row(client.get('/recurring').get_data(as_text=True),
+                                         'Streamflix')
+
+
+@freeze_time(FROZEN)
 def test_bad_toggle_requests_are_rejected(client, app):
     _login(client)
     assert _mark(client, '1').status_code == 400                         # no key
@@ -286,6 +316,8 @@ def test_bad_toggle_requests_are_rejected(client, app):
     assert _mark(client, '1', 'merchant:' + 'x' * 246).status_code == 302   # 255 chars
     assert _mark(client, '0', *[f'merchant:{i}' for i in range(501)]).status_code == 400
     assert _mark(client, '0', *[f'merchant:{i}' for i in range(500)]).status_code == 302
+    # Marking takes exactly one key: the page only ever posts the primary one.
+    assert _mark(client, '1', 'merchant:a', 'merchant:b').status_code == 400
 
 
 def test_toggle_requires_login(client, app):

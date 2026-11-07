@@ -520,22 +520,23 @@ def delete_recurring_rule(rule_id):
 
 
 ESSENTIAL_KEY_PREFIXES = ('rule:', 'merchant:')
-ESSENTIAL_KEY_MAX_LENGTH = 255
 ESSENTIAL_KEYS_MAX = 500
 
 
 @bp.route('/recurring/essential', methods=['POST'])
 @login_required
 def set_essential():
-    """Mark a recurring expense essential (essential=1, its primary key) or
-    not (essential=0, all of its keys — a merged stream carries several)."""
+    """Mark a recurring expense essential (essential=1, exactly its primary
+    key) or not (essential=0, all of its keys — a merged stream carries
+    several)."""
     from sqlalchemy.exc import IntegrityError
+    from app.bills import ESSENTIAL_KEY_MAX_LENGTH
     from app.models import EssentialMark
     keys = request.form.getlist('key')
     essential = request.form.get('essential')
     valid = (
         essential in ('0', '1')
-        and 1 <= len(keys) <= ESSENTIAL_KEYS_MAX
+        and 1 <= len(keys) <= (1 if essential == '1' else ESSENTIAL_KEYS_MAX)
         and all(
             k.startswith(ESSENTIAL_KEY_PREFIXES) and len(k) <= ESSENTIAL_KEY_MAX_LENGTH
             for k in keys
@@ -544,15 +545,15 @@ def set_essential():
     if not valid:
         abort(400)
     if essential == '1':
-        saved = _essential_keys()
-        for key in dict.fromkeys(keys):
-            if key not in saved:
-                db.session.add(EssentialMark(stream_key=key))
-        try:
-            db.session.commit()
-        except IntegrityError:
-            # Saved by a concurrent request in between: already essential.
-            db.session.rollback()
+        [key] = keys
+        if key not in _essential_keys():
+            db.session.add(EssentialMark(stream_key=key))
+            try:
+                db.session.commit()
+            except IntegrityError:
+                # Saved by a concurrent request in between: already essential.
+                # The rollback also clears Postgres's aborted transaction.
+                db.session.rollback()
     else:
         EssentialMark.query.filter(EssentialMark.stream_key.in_(keys)).delete(
             synchronize_session=False)

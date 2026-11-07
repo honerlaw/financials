@@ -281,6 +281,10 @@ def mark_essential(streams, saved_keys):
     return streams
 
 
+# EssentialMark.stream_key is String(255); a longer key could never be saved.
+ESSENTIAL_KEY_MAX_LENGTH = 255
+
+
 def _merchant_keys(rows, suffix=''):
     """Essential-mark keys for a detected stream: (keys, primary).
 
@@ -288,9 +292,13 @@ def _merchant_keys(rows, suffix=''):
     among `rows`. A group merged across a Plaid rename carries its old and new
     keys, so a mark made under either name still matches. `primary` — the key
     written when the stream is marked — is the most common one, ties to the
-    smallest. (), None when no row has a grouping key.
+    smallest. (), None when no row has a usable grouping key. A key too long
+    to store is left out, so the page never offers a toggle that cannot save.
     """
-    counts = Counter(k for k in (grouping_key(t) for t in rows) if k)
+    limit = ESSENTIAL_KEY_MAX_LENGTH - len('merchant:') - len(suffix)
+    counts = Counter(
+        k for k in (grouping_key(t) for t in rows) if k and len(k) <= limit
+    )
     if not counts:
         return (), None
     top = max(counts.values())

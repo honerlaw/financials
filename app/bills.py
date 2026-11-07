@@ -15,10 +15,13 @@ so "left after recurring" errs on the side of less, never more.
 
 import calendar
 from collections import defaultdict
+from dataclasses import dataclass
 from datetime import date, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 
+from app.recurring_rules import apply_rules, pattern_hint
 from app.subscriptions import (
+    _MONTHLY_NOMINAL,
     _build_stream,
     _group_transactions,
     merge_by_descriptor,
@@ -112,7 +115,8 @@ def _percentile(values, q):
     return ordered[lower] + (ordered[lower + 1] - ordered[lower]) * (pos - lower)
 
 
-def _monthly_estimate(txns, cadence, inflow=False, percentile=ESTIMATE_PERCENTILE):
+def _monthly_estimate(txns, cadence, inflow=False, percentile=ESTIMATE_PERCENTILE,
+                      by_month=False):
     """Monthly-equivalent amount of a stream, at the given percentile.
 
     One occurrence per date (the unit _build_stream counts cadence in), its
@@ -124,6 +128,11 @@ def _monthly_estimate(txns, cadence, inflow=False, percentile=ESTIMATE_PERCENTIL
     the stream rather than on today, so a quarterly stream always has its recent
     history. With one or two occurrences the percentile is simply the best
     available.
+
+    `by_month` is for a stream a user rule forced to monthly: its payments are
+    irregular and may come more than once a month, so the estimate is the larger
+    of the per-date figure and the same percentile of its calendar-month totals
+    in the window — never below one payment, never one part of a split payment.
     """
     by_date = defaultdict(Decimal)
     for t in txns:
@@ -136,6 +145,12 @@ def _monthly_estimate(txns, cadence, inflow=False, percentile=ESTIMATE_PERCENTIL
     cutoff = max(by_date) - timedelta(days=ESTIMATE_WINDOW_DAYS)
     recent = [amount for d, amount in by_date.items() if d > cutoff]
     typical = _percentile(recent, percentile)
+    if by_month:
+        months = defaultdict(Decimal)
+        for d, amount in by_date.items():
+            if d > cutoff:
+                months[(d.year, d.month)] += amount
+        typical = max(typical, _percentile(list(months.values()), percentile))
     return (typical * MONTHLY_FACTOR[cadence]).quantize(_CENTS, rounding=ROUND_HALF_UP)
 
 
@@ -175,24 +190,32 @@ def _is_income(txns):
     return hits * 2 > len(categorized) > 0
 
 
-def _income_excluded_reason(stream, txns):
-    """Why an income stream is left out of the monthly income total, or None."""
+def _income_excluded_reason(stream, txns, override=False):
+    """Why an income stream is left out of the monthly income total, or None.
+
+    `override`: the user's rule says this is recurring income, which stands in
+    for the INCOME-category evidence (knowledge 2026-11-06's manual override).
+    """
     if not stream['active']:
         return 'inactive'
     if stream['cadence'] not in _TOTAL_CADENCES:
         return 'annual'
-    if not _is_income(txns):
+    if not override and not _is_income(txns):
         return 'not income'
     return None
 
 
-def _excluded_reason(stream, txns):
-    """Why a bill is left out of the fixed monthly total, or None if counted."""
+def _excluded_reason(stream, txns, override=False):
+    """Why a bill is left out of the fixed monthly total, or None if counted.
+
+    `override`: the user's rule says this is a recurring bill, so a transfer
+    category does not exclude it.
+    """
     if not stream['active']:
         return 'inactive'
     if stream['cadence'] not in _TOTAL_CADENCES:
         return 'annual'
-    if _is_transfer(txns):
+    if not override and _is_transfer(txns):
         return 'transfer'
     return None
 
@@ -239,6 +262,137 @@ def detect_bills_from_groups(groups, today):
     return bills
 
 
+_FORCED_MONTHLY = ('monthly', _MONTHLY_NOMINAL)
+
+
+def _finish_income(stream, txns, override=False):
+    stream['monthly_amount'] = _monthly_estimate(
+        txns, stream['cadence'], inflow=True, percentile=INCOME_PERCENTILE,
+    )
+    stream['excluded_reason'] = _income_excluded_reason(stream, txns, override)
+    return stream
+
+
+def _finish_bill(stream, txns, today, override=False):
+    if not stream['active']:
+        stream['payment_status'] = 'inactive'
+        stream['expected_date_this_month'] = _safe_date(
+            today.year, today.month, _expected_day_of_month(txns)
+        )
+    elif stream['cadence_forced']:
+        # A rule asserted this irregular stream recurs, so it has no expected
+        # day to be late against: paid once anything posted this month,
+        # otherwise upcoming — never a false "Unpaid" (knowledge 005).
+        expected_date = _safe_date(today.year, today.month, _expected_day_of_month(txns))
+        paid = any(t.date.year == today.year and t.date.month == today.month
+                   for t in txns)
+        stream['payment_status'] = 'paid' if paid else 'upcoming'
+        stream['expected_date_this_month'] = expected_date
+    else:
+        status, expected_date = _payment_status(txns, today)
+        stream['payment_status'] = status
+        stream['expected_date_this_month'] = expected_date
+    stream['monthly_amount'] = _monthly_estimate(
+        txns, stream['cadence'], by_month=stream['cadence_forced'],
+    )
+    stream['excluded_reason'] = _excluded_reason(stream, txns, override)
+    return stream
+
+
+def _rule_entry(claim, status, stream=None):
+    """One rule as the "Your rules" card and "Marked not recurring" show it."""
+    rule = claim.rule
+    return {
+        'id': rule.id,
+        'label': rule.label,
+        'pattern': rule.pattern,
+        'direction': rule.direction,
+        'amount_min': rule.amount_min,
+        'amount_max': rule.amount_max,
+        'action': rule.action,
+        'rows_won': len(claim.rows),
+        'last_matched': claim.rows[-1].date if claim.rows else None,
+        'sources': claim.sources,
+        'status': status,
+        'stream': stream,
+    }
+
+
+@dataclass
+class Recurring:
+    bills: list
+    income: list
+    rules: list     # one _rule_entry per rule, in the order given
+    marked: list    # the 'not_recurring' rules that won rows
+
+
+def detect_recurring_with_rules(groups, today, rules):
+    """Bills, income and the user's rules, from already-grouped transactions.
+
+    The rules claim their rows first (app/recurring_rules.py). What is left goes
+    through automatic detection exactly as before, merges included. Each rule's
+    rows then form one stream of their own, named by its label:
+
+    - 'recurring', outflow → a bill never excluded as a transfer. If no cadence
+      is detected it is treated as monthly — the user asserted it recurs — and
+      estimated from its monthly totals. It can still be inactive or annual.
+    - 'recurring', inflow → counted income without INCOME-category evidence,
+      but only with a detected cadence: forcing one would overstate income.
+    - 'not_recurring' → the rows leave detection and are listed as marked.
+    """
+    result = apply_rules(groups, rules) if rules else None
+    leftover = result.groups if result else groups
+
+    bills = []
+    income = []
+    for group in merge_by_descriptor(leftover):
+        stream = _build_stream(group, today)
+        if stream is None:
+            continue
+        stream['pattern_hint'] = pattern_hint(group)
+        stream['rule_id'] = None
+        if stream['is_inflow']:
+            income.append(_finish_income(stream, group))
+        else:
+            bills.append(_finish_bill(stream, group, today))
+
+    entries = []
+    marked = []
+    for claim in (result.claims if result else []):
+        rule = claim.rule
+        if not claim.rows:
+            entries.append(_rule_entry(claim, '0 rows'))
+            continue
+        if rule.action == 'not_recurring':
+            entry = _rule_entry(claim, 'marked not recurring')
+            entries.append(entry)
+            marked.append(entry)
+            continue
+        inflow = rule.direction == 'inflow'
+        stream = _build_stream(
+            claim.rows, today, fallback_cadence=None if inflow else _FORCED_MONTHLY,
+        )
+        if stream is None:
+            entries.append(_rule_entry(claim, 'no regular cadence'))
+            continue
+        stream['name'] = rule.label
+        stream['pattern_hint'] = rule.pattern
+        stream['rule_id'] = rule.id
+        if inflow:
+            income.append(_finish_income(stream, claim.rows, override=True))
+        else:
+            bills.append(_finish_bill(stream, claim.rows, today, override=True))
+        reason = stream['excluded_reason']
+        entries.append(_rule_entry(
+            claim, 'counted' if reason is None else f'not counted: {reason}', stream,
+        ))
+
+    bills.sort(key=lambda b: (_STATUS_ORDER[b['payment_status']], -abs(b['amount'])))
+    income.sort(key=lambda s: (s['excluded_reason'] is not None, -s['monthly_amount']))
+    marked.sort(key=lambda m: (m['label'].lower(), m['id'] or 0))
+    return Recurring(bills=bills, income=income, rules=entries, marked=marked)
+
+
 def detect_recurring_from_groups(groups, today):
     """(bills, income) from already-grouped transactions, in one pass.
 
@@ -248,35 +402,8 @@ def detect_recurring_from_groups(groups, today):
     unpaid-first, then upcoming, then paid, then inactive; within each group by
     amount magnitude descending. Income is sorted counted-first, then by
     monthly amount descending. Groups that are one merchant renamed by Plaid
-    are merged first (`merge_by_descriptor`).
+    are merged first (`merge_by_descriptor`). No user rules — see
+    detect_recurring_with_rules.
     """
-    bills = []
-    income = []
-    for group in merge_by_descriptor(groups):
-        stream = _build_stream(group, today)
-        if stream is None:
-            continue
-        if stream['is_inflow']:
-            stream['monthly_amount'] = _monthly_estimate(
-                group, stream['cadence'], inflow=True, percentile=INCOME_PERCENTILE,
-            )
-            stream['excluded_reason'] = _income_excluded_reason(stream, group)
-            income.append(stream)
-            continue
-
-        if not stream['active']:
-            stream['payment_status'] = 'inactive'
-            stream['expected_date_this_month'] = _safe_date(
-                today.year, today.month, _expected_day_of_month(group)
-            )
-        else:
-            status, expected_date = _payment_status(group, today)
-            stream['payment_status'] = status
-            stream['expected_date_this_month'] = expected_date
-        stream['monthly_amount'] = _monthly_estimate(group, stream['cadence'])
-        stream['excluded_reason'] = _excluded_reason(stream, group)
-        bills.append(stream)
-
-    bills.sort(key=lambda b: (_STATUS_ORDER[b['payment_status']], -abs(b['amount'])))
-    income.sort(key=lambda s: (s['excluded_reason'] is not None, -s['monthly_amount']))
-    return bills, income
+    found = detect_recurring_with_rules(groups, today, [])
+    return found.bills, found.income

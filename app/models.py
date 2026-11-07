@@ -205,3 +205,24 @@ class MerchantGroupKey(db.Model):
     __table_args__ = (
         db.Index('ix_merchant_group_keys_group_id', 'group_id'),
     )
+
+
+class RecurringRule(db.Model):
+    """A user's correction to /recurring: rows whose raw description contains
+    ``pattern`` (case-insensitive), of one ``direction``, optionally within an
+    inclusive ``abs(amount)`` range, are claimed by this rule and form their
+    own stream. ``action`` says whether that stream counts ('recurring') or not
+    ('not_recurring'). Applied per request by app/recurring_rules.py — nothing
+    about grouping or the merchant-group index is stored here.
+    """
+
+    __tablename__ = 'recurring_rules'
+
+    id = db.Column(db.Integer, primary_key=True)
+    label = db.Column(db.String(255), nullable=False)
+    pattern = db.Column(db.String(255), nullable=False)
+    direction = db.Column(db.String(10), nullable=False)   # 'outflow' | 'inflow'
+    amount_min = db.Column(db.Numeric(10, 2), nullable=True)
+    amount_max = db.Column(db.Numeric(10, 2), nullable=True)
+    action = db.Column(db.String(20), nullable=False)      # 'recurring' | 'not_recurring'
+    created_at = db.Column(db.DateTime(timezone=True), default=_utcnow, nullable=False)

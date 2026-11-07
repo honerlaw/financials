@@ -39,6 +39,10 @@ def create_app(config=None):
         SECRET_KEY=os.getenv('SECRET_KEY', ''),
         APP_PASSWORD=os.getenv('APP_PASSWORD', ''),
         SQLALCHEMY_TRACK_MODIFICATIONS=False,
+        # The session cookie is the only credential. Lax keeps it off
+        # cross-site POSTs, so another site cannot submit the app's forms
+        # (rules, sync, digest, institution removal) as the signed-in user.
+        SESSION_COOKIE_SAMESITE='Lax',
         PLAID_CLIENT_ID=os.getenv('PLAID_CLIENT_ID', ''),
         PLAID_SECRET=os.getenv('PLAID_SECRET', ''),
         PLAID_ENV=os.getenv('PLAID_ENV', 'development'),

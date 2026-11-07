@@ -651,7 +651,7 @@ def test_every_bill_exclusion_reason_has_a_group(auth_client, app, monkeypatch):
     so no uncounted bill silently drops off the page."""
     import app.bills as bills_module
     _seed_recurring_outflow(app)
-    monkeypatch.setattr(bills_module, '_excluded_reason', lambda stream, txns: 'paused')
+    monkeypatch.setattr(bills_module, '_excluded_reason', lambda stream, txns, override=False: 'paused')
     res = auth_client.get('/recurring')
     not_counted = _section(res.data, 'Not counted', 'Recurring income</div>')
     assert 'Paused (1)' in not_counted

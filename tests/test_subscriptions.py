@@ -452,3 +452,94 @@ def test_renamed_deposits_merge_too():
     for t in old + new:
         t.amount = -t.amount
     assert len(merge_by_descriptor([old, new])) == 1
+
+
+# ── Calendar-month regularity: a monthly bill paid by hand on a drifting day ──
+# Fixed dates throughout (knowledge 004: the detector takes `today`), because
+# the rule depends on which calendar month each date falls in.
+
+from app.subscriptions import _classify_cadence, _gap_is_regular
+
+MONTHLY = (30, 6)   # the monthly bucket's (nominal, tolerance)
+
+
+def _drifting_bill_dates():
+    """Once per calendar month, posting anywhere from the 5th to the 17th."""
+    months = [(2025, 7), (2025, 8), (2025, 9), (2025, 10), (2025, 11),
+              (2025, 12), (2026, 1), (2026, 2), (2026, 3), (2026, 4), (2026, 5)]
+    days = [5, 17, 8, 16, 6, 15, 5, 17, 7, 16, 9]
+    return [date(y, m, d) for (y, m), d in zip(months, days)]
+
+
+def _old_rule_regular_fraction(dates):
+    gaps = [(b - a).days for a, b in zip(dates, dates[1:])]
+    return sum(1 for g in gaps if abs(g - 30) <= 6) / len(gaps)
+
+
+def test_drifting_day_monthly_bill_is_one_active_monthly_stream():
+    dates = _drifting_bill_dates()
+    assert _old_rule_regular_fraction(dates) < 0.7     # the old rule dropped it
+    txns = [FakeTxn(d, amount='512.00', merchant_name='Example Auto Loan')
+            for d in dates]
+    streams = detect_subscriptions(txns, TODAY)
+    assert len(streams) == 1
+    assert streams[0]['cadence'] == 'monthly'
+    assert streams[0]['active'] is True
+    assert streams[0]['count'] == len(dates)
+
+
+def test_consecutive_month_gap_bounds_are_inclusive_15_and_45():
+    start = date(2026, 1, 31)
+    assert _gap_is_regular(start, start + timedelta(days=15), *MONTHLY)   # Feb 15
+    assert not _gap_is_regular(start, start + timedelta(days=14), *MONTHLY)
+    start = date(2026, 1, 1)
+    assert _gap_is_regular(start, start + timedelta(days=45), *MONTHLY)   # Feb 15
+    assert not _gap_is_regular(start, start + timedelta(days=46), *MONTHLY)
+
+
+def test_consecutive_months_far_apart_are_not_regular():
+    assert not _gap_is_regular(date(2026, 1, 2), date(2026, 2, 27), *MONTHLY)
+    assert _gap_is_regular(date(2026, 1, 12), date(2026, 2, 21), *MONTHLY)
+
+
+def test_a_gap_inside_one_month_is_not_regular():
+    assert not _gap_is_regular(date(2026, 3, 3), date(2026, 3, 23), *MONTHLY)
+    assert _gap_is_regular(date(2026, 3, 23), date(2026, 4, 12), *MONTHLY)
+
+
+def test_a_gap_that_skips_a_month_is_not_regular():
+    assert not _gap_is_regular(date(2026, 1, 30), date(2026, 3, 13), *MONTHLY)
+    # The same 42 days between consecutive months is regular.
+    assert _gap_is_regular(date(2026, 1, 1), date(2026, 2, 12), *MONTHLY)
+
+
+def test_december_to_january_counts_as_consecutive():
+    assert _gap_is_regular(date(2025, 12, 5), date(2026, 1, 12), *MONTHLY)
+
+
+def test_the_calendar_rule_applies_only_to_the_monthly_bucket():
+    # 20 days across a month boundary is regular for neither biweekly nor
+    # quarterly, whatever the calendar says.
+    assert not _gap_is_regular(date(2026, 1, 25), date(2026, 2, 14), 14, 3)
+    assert not _gap_is_regular(date(2026, 1, 25), date(2026, 2, 14), 91, 12)
+
+
+def test_irregular_monthly_ish_visits_are_not_monthly():
+    """Median gap ~30, so the monthly bucket is chosen and the calendar rule
+    itself decides: visits bunch inside one month, then skip the next."""
+    dates = [date(2025, 9, 2), date(2025, 9, 22), date(2025, 11, 1),
+             date(2025, 12, 1), date(2025, 12, 23), date(2026, 2, 1),
+             date(2026, 3, 3), date(2026, 3, 24), date(2026, 5, 2)]
+    gaps = [(b - a).days for a, b in zip(dates, dates[1:])]
+    assert 24 <= sorted(gaps)[len(gaps) // 2] <= 36
+    assert _classify_cadence(dates) is None
+    txns = [FakeTxn(d, amount='40.00', merchant_name='Corner Shop') for d in dates]
+    assert detect_subscriptions(txns, TODAY) == []
+
+
+def test_three_consecutive_months_with_drifting_gaps_is_monthly():
+    """Accepted short-history trade-off: gaps of 18 and 42 days in three
+    consecutive months read as monthly (the old rule rejected them)."""
+    dates = [date(2026, 3, 28), date(2026, 4, 15), date(2026, 5, 27)]
+    assert _old_rule_regular_fraction(dates) == 0
+    assert _classify_cadence(dates) == ('monthly', 30)

@@ -3,6 +3,7 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 import pytest
+from freezegun import freeze_time
 
 from app.bills import (
     INCOME_PERCENTILE, detect_bills, detect_recurring_from_groups,
@@ -720,4 +721,39 @@ def test_recurring_counts_a_renamed_merchant_once(auth_client, app):
     assert 'Fabrikam Inc' not in res.data.decode()
     assert _per_month_cells(expenses) == [Decimal('250.00')]
     assert b'$250.00 / month' in res.data
+    assert re.search(rb'\b1 expense\s', res.data)
+
+
+@freeze_time('2026-06-01')
+def test_recurring_counts_a_monthly_bill_paid_on_a_drifting_day(client, app):
+    """Paid once every calendar month by hand, on a day that wanders between the
+    5th and the 17th: the old gap rule dropped it from the page entirely."""
+    paid = [date(2025, 7, 5), date(2025, 8, 17), date(2025, 9, 8),
+            date(2025, 10, 16), date(2025, 11, 6), date(2025, 12, 15),
+            date(2026, 1, 5), date(2026, 2, 17), date(2026, 3, 7),
+            date(2026, 4, 16), date(2026, 5, 9)]
+    gaps = [(b - a).days for a, b in zip(paid, paid[1:])]
+    assert sum(1 for g in gaps if abs(g - 30) <= 6) / len(gaps) < 0.7
+    with app.app_context():
+        inst = Institution(name='Test Bank', slug='test_bank',
+                           access_token='tok', item_id='item-1')
+        db.session.add(inst)
+        db.session.flush()
+        for i, d in enumerate(paid):
+            db.session.add(Transaction(
+                plaid_transaction_id=f'drift-{i}', institution_id=inst.id,
+                account_id='acc-1', date=d,
+                description='WEB PAY EXAMPLE AUTO FINANCE',
+                merchant_name='Example Auto Finance',
+                amount=Decimal('512.00'),
+            ))
+        db.session.commit()
+    # Log in under the frozen clock: the signed session cookie is timestamped,
+    # and one minted at the real time reads as from the future and is refused.
+    client.post('/login', data={'password': 'testpass'})
+    res = client.get('/recurring')
+    expenses = _section(res.data, 'Counted expenses', 'Recurring income</div>')
+    assert expenses.count('Example Auto Finance') == 1
+    assert _per_month_cells(expenses) == [Decimal('512.00')]
+    assert b'$512.00 / month' in res.data
     assert re.search(rb'\b1 expense\s', res.data)

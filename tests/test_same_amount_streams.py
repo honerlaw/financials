@@ -391,7 +391,7 @@ def test_suggestion_beside_a_same_amount_stream_has_only_the_note(client, app):
     _login(client)
     html = client.get('/recurring').get_data(as_text=True)
     assert 'Riverside Therapy · $9.00' in html
-    assert 'Flag its same-amount stream first' in html
+    assert 'Add a rule for its same-amount stream first' in html
     assert 'action=not_recurring' not in html
     # Only the sub-stream's own Flag link, with its exact amount, remains.
     links = re.findall(r'href="([^"]*pattern=RIVERSIDE\+THERAPY[^"]*)"', html)

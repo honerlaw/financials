@@ -223,7 +223,7 @@
           <td class="muted xs nowrap">{{ g.last_date.strftime('%b %d, %Y') }}</td>
           <td class="xs nowrap">
             {% if g.has_split %}
-            <span class="muted">Flag its same-amount stream first</span>
+            <span class="muted">Add a rule for its same-amount stream first</span>
             {% else %}
             <a href="{{ url_for('main.new_recurring_rule', pattern=g.pattern_hint, label=g.name, direction='outflow') }}">Flag</a>
             · <a class="muted" href="{{ url_for('main.new_recurring_rule', pattern=g.pattern_hint, label=g.name, direction='outflow', action='not_recurring') }}">Not recurring</a>

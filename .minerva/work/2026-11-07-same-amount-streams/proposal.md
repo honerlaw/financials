@@ -1,7 +1,7 @@
 # Proposal: same-amount-streams-and-suggestions
 
 **Date**: 2026-11-07
-**Status**: Draft
+**Status**: Implemented
 
 ## Goal
 /recurring finds recurring charges that one-stream-per-merchant detection misses:
@@ -116,6 +116,9 @@ Production data informed this design. No production names, amounts, counts or ac
 - **A price change drops a plan for about a month.** The old-price subset turns inactive and is no longer accepted, and the new price needs 3 charges, so the plan is out of the total until then.
 - **Everyday merchants charged less than about weekly** (fuel, pet supplies, occasional retail) still appear in "Possibly recurring" until marked not recurring. Each dismissal is a permanent rule listed under "Marked not recurring".
 - **Own-account transfers** that recur monthly but irregularly can appear in "Possibly recurring", marked as transfers and sorted last.
+
+- **A suggestion's "Not recurring" is an unranged rule.** A broad pattern hint can also claim a counted bill in another group. The rule form's preview lists every group it would take rows from (found in code review; documented, not changed).
+- **The note beside a same-amount stream** says to add a rule for that stream first, not to Flag it, because that stream may be a transfer the user wants marked not recurring.
 
 ## Open Questions
 - A lighter "dismiss" that does not create a rule is out of scope.

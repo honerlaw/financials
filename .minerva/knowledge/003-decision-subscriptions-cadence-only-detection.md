@@ -62,3 +62,4 @@ Three interlocking decisions, validated by `tests/test_subscriptions.py`:
 - [[008-decision-dashboard-spend-and-weekly-budget]] — see also
 - [[029-decision-merchant-grouping-precomputed-at-sync]] — see also
 - [[032-constraint-plaid-entity-ids-must-never-fuzzy-merge]] — see also
+- [[2026-11-07-decision-split-undetected-groups-by-exact-amount]] — amends point 1: an already-undetected group is partitioned by exact amount (monthly, active bins only)

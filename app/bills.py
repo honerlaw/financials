@@ -15,7 +15,7 @@ so "left after recurring" errs on the side of less, never more.
 
 import calendar
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 
@@ -23,7 +23,9 @@ from app.recurring_rules import apply_rules, pattern_hint
 from app.subscriptions import (
     _MONTHLY_NOMINAL,
     _build_stream,
+    _display_name,
     _group_transactions,
+    _median,
     merge_by_descriptor,
 )
 
@@ -62,6 +64,20 @@ _CARD_PAYMENT_DETAILED = 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT'
 _INCOME_PREFIX = 'INCOME'
 
 _CENTS = Decimal('0.01')
+
+# Same-amount sub-streams: a merchant group not detected as a whole is split by
+# exact amount, and a subset counts only as an active monthly stream. Other
+# cadences proved to be coincidences: many bins per group give each its own
+# chance to pass at MIN_OCCURRENCES (knowledge 003's amendment).
+SPLIT_CADENCES = {'monthly'}
+
+# "Possibly recurring": a merchant with no stream, charged in at least
+# SUGGEST_MIN_MONTHS of the SUGGEST_WINDOW_MONTHS complete months before this
+# one, on charge days a median of SUGGEST_MIN_MEDIAN_GAP_DAYS or more apart
+# (everyday merchants are charged every few days).
+SUGGEST_WINDOW_MONTHS = 6
+SUGGEST_MIN_MONTHS = 4
+SUGGEST_MIN_MEDIAN_GAP_DAYS = 6
 
 
 def _expected_day_of_month(txns):
@@ -170,6 +186,21 @@ def _is_transfer(txns):
         or (t.category_detailed or '').upper() == _CARD_PAYMENT_DETAILED
     )
     return hits * 2 > len(categorized)
+
+
+def _is_card_payment(txns):
+    """True when most of a group's categorized rows are credit-card payments.
+
+    Paying a card settles charges already counted, so such a group is never
+    suggested as possibly recurring. Uncategorized rows abstain, as in
+    _is_transfer.
+    """
+    categorized = [t for t in txns if t.category or t.category_detailed]
+    hits = sum(
+        1 for t in categorized
+        if (t.category_detailed or '').upper() == _CARD_PAYMENT_DETAILED
+    )
+    return hits * 2 > len(categorized) > 0
 
 
 def _is_income(txns):
@@ -318,12 +349,82 @@ def _rule_entry(claim, status, stream=None):
     }
 
 
+def _split_by_amount(group, today):
+    """Same-amount sub-streams of a group that is not a stream as a whole.
+
+    Its outflow rows are binned by exact amount, and each bin goes through
+    _build_stream unchanged. A bin is accepted only as an active monthly
+    stream (SPLIT_CADENCES). A bin holding the whole group is skipped: it
+    already failed. Returns [(amount, stream, row positions)] by amount.
+    """
+    bins = defaultdict(list)
+    for i, t in enumerate(group):
+        if t.amount > 0:
+            bins[t.amount].append(i)
+    accepted = []
+    for amount in sorted(bins):
+        positions = bins[amount]
+        if len(positions) == len(group):
+            continue
+        stream = _build_stream([group[i] for i in positions], today)
+        if stream is None or stream['cadence'] not in SPLIT_CADENCES or not stream['active']:
+            continue
+        accepted.append((amount, stream, positions))
+    return accepted
+
+
+def _window_months(today):
+    """The SUGGEST_WINDOW_MONTHS complete calendar months before today's, oldest first."""
+    months = []
+    year, month = today.year, today.month
+    for _ in range(SUGGEST_WINDOW_MONTHS):
+        month -= 1
+        if month == 0:
+            year, month = year - 1, 12
+        months.append((year, month))
+    return months[::-1]
+
+
+def _suggestion(group, remaining, today, has_split):
+    """A "Possibly recurring" entry for a group with no stream, or None.
+
+    `remaining` are the group's rows in no accepted sub-stream; only their
+    outflows are judged. The transfer badge is judged on the whole group.
+    """
+    out = [t for t in remaining if t.amount > 0]
+    if not out:
+        return None
+    window = set(_window_months(today))
+    in_window = [t for t in out if (t.date.year, t.date.month) in window]
+    totals = defaultdict(Decimal)
+    for t in in_window:
+        totals[(t.date.year, t.date.month)] += t.amount
+    if len(totals) < SUGGEST_MIN_MONTHS:
+        return None
+    days = sorted({t.date for t in in_window})
+    gaps = [(b - a).days for a, b in zip(days, days[1:])]
+    if not gaps or _median(gaps) < SUGGEST_MIN_MEDIAN_GAP_DAYS:
+        return None
+    return {
+        'name': _display_name(group),
+        'months': len(totals),
+        'window_months': SUGGEST_WINDOW_MONTHS,
+        'typical_month': Decimal(_median(list(totals.values()))).quantize(
+            _CENTS, rounding=ROUND_HALF_UP),
+        'last_date': max(t.date for t in out),
+        'pattern_hint': pattern_hint(out),
+        'is_transfer': _is_transfer(group),
+        'has_split': has_split,
+    }
+
+
 @dataclass
 class Recurring:
     bills: list
     income: list
     rules: list     # one _rule_entry per rule, in the order given
     marked: list    # the 'not_recurring' rules that won rows
+    suggestions: list = field(default_factory=list)   # "Possibly recurring"; never counted
 
 
 def detect_recurring_with_rules(groups, today, rules):
@@ -339,17 +440,39 @@ def detect_recurring_with_rules(groups, today, rules):
     - 'recurring', inflow → counted income without INCOME-category evidence,
       but only with a detected cadence: forcing one would overstate income.
     - 'not_recurring' → the rows leave detection and are listed as marked.
+
+    A leftover group that is no stream as a whole is split by exact amount
+    (_split_by_amount); each accepted subset is a bill named with its amount.
+    Groups with no stream as a whole may become "Possibly recurring"
+    suggestions (_suggestion), which are never counted.
     """
     result = apply_rules(groups, rules) if rules else None
     leftover = result.groups if result else groups
 
     bills = []
     income = []
+    suggestions = []
     for group in merge_by_descriptor(leftover):
         stream = _build_stream(group, today)
         if stream is None:
+            splits = _split_by_amount(group, today)
+            taken = set()
+            for amount, sub, positions in splits:
+                rows = [group[i] for i in positions]
+                sub['name'] = f'{_display_name(group)} · ${amount:,.2f}'
+                sub['split_amount'] = amount
+                sub['pattern_hint'] = pattern_hint(rows)
+                sub['rule_id'] = None
+                bills.append(_finish_bill(sub, rows, today))
+                taken.update(positions)
+            if not _is_card_payment(group):
+                remaining = [t for i, t in enumerate(group) if i not in taken]
+                entry = _suggestion(group, remaining, today, has_split=bool(splits))
+                if entry:
+                    suggestions.append(entry)
             continue
         stream['pattern_hint'] = pattern_hint(group)
+        stream['split_amount'] = None
         stream['rule_id'] = None
         if stream['is_inflow']:
             income.append(_finish_income(stream, group))
@@ -377,6 +500,7 @@ def detect_recurring_with_rules(groups, today, rules):
             continue
         stream['name'] = rule.label
         stream['pattern_hint'] = rule.pattern
+        stream['split_amount'] = None
         stream['rule_id'] = rule.id
         if inflow:
             income.append(_finish_income(stream, claim.rows, override=True))
@@ -390,7 +514,9 @@ def detect_recurring_with_rules(groups, today, rules):
     bills.sort(key=lambda b: (_STATUS_ORDER[b['payment_status']], -abs(b['amount'])))
     income.sort(key=lambda s: (s['excluded_reason'] is not None, -s['monthly_amount']))
     marked.sort(key=lambda m: (m['label'].lower(), m['id'] or 0))
-    return Recurring(bills=bills, income=income, rules=entries, marked=marked)
+    suggestions.sort(key=lambda s: (s['is_transfer'], -s['typical_month'], s['name'].lower()))
+    return Recurring(bills=bills, income=income, rules=entries, marked=marked,
+                     suggestions=suggestions)
 
 
 def detect_recurring_from_groups(groups, today):

@@ -12,3 +12,7 @@
 - [reviewed — clean] scope check: single unit, one PR (tier: reviewer — multi-file, removes two routes so not additive; Skeptic accept, noted income-classification, single-pass and test-migration concerns, carried to whole-proposal; parallel wave)
 - [reviewed — folded] whole-proposal: folded test migration incl. query-count guard, INCOME-category gate for income (uncategorized not counted), single-pass detect_recurring_from_groups, income total sums rounded rows, left-over iff counted income ≥1, 302 not 301, status summary kept, no badge on not-counted rows, estimator labels (tier: reviewer — not provably small; parallel wave)
 - [rechecked — residual folded] whole-proposal: item 4 partially addressed (26/12 not pinned through the route) — added route test with biweekly INCOME_WAGES stream; also added unauthenticated-redirect test
+
+## Work notes
+- Criterion wording fix (routine, not a divergence): "26 biweekly deposits, not 27" was arithmetically wrong — deposits at 0,14,…,364 days back are 27 dates inside an exclusive 365-day window. The rule (exclusive far end, same as expenses) is unchanged; the criterion now pins "a deposit 365 days before the latest is ignored". The count never affects a fixed paycheck's P25 anyway.
+- Historical mentions of /bills and /subscriptions (measured costs, the 20 s bug) left in merchant_groups.py docstrings — they describe the past, not current routes.

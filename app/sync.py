@@ -95,8 +95,8 @@ def _sync_institution(client, institution):
         institution.last_synced_at = _utcnow()
         institution.status = 'active'
 
-        # Keep the merchant-group index current so /subscriptions and /bills
-        # never pay for fuzzy matching on a page load. Best-effort, like the
+        # Keep the merchant-group index current so /recurring
+        # never pays for fuzzy matching on a page load. Best-effort, like the
         # three refreshes above: the transactions have already landed, and a
         # stale index degrades to the slower in-memory path rather than to
         # wrong output.

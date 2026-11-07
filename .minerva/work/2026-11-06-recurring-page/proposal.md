@@ -55,8 +55,8 @@ not-counted collapsed and grouped by reason; income at the 25th percentile.
   `detect_bills_from_groups` stays, as a thin wrapper, for the parity tests.
 - **Income estimate.** An occurrence is one date, its amount the absolute value of that
   date's **negative** amounts summed (positive rows ignored; no occurrences → `0.00`). Only
-  dates `d > last deposit − 365 days` count — the same exclusive-far-end window as expenses,
-  so a biweekly stream contributes 26 deposits, not 27. The monthly figure is the 25th
+  dates `d > last deposit − 365 days` count — the same exclusive-far-end window as expenses
+  (a deposit exactly 365 days before the latest is excluded). The monthly figure is the 25th
   percentile (existing `_percentile`) × `MONTHLY_FACTOR`, rounded to cents.
   `monthly_income_total(income) -> (total, count)` sums the rounded counted rows, the same
   pattern as `fixed_monthly_total`.
@@ -93,7 +93,8 @@ not-counted collapsed and grouped by reason; income at the 25th percentile.
 ## Success criteria
 
 - Unit tests cover the income estimate — 25th percentile, per-date summing, positive amounts
-  ignored, the 365-day exclusive-far-end window (26 biweekly deposits, not 27), the 26/12
+  ignored, the 365-day exclusive-far-end window (a deposit 365 days before the latest is
+  ignored), the 26/12
   biweekly factor — and income counting: inactive, annual, and not-income (`TRANSFER_IN`,
   card-payment credit, a wholly uncategorized inflow stream) are excluded; an
   `INCOME_WAGES` stream is counted.

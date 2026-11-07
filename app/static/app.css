@@ -393,6 +393,34 @@ a:hover { text-decoration: underline; }
    readable rather than becoming decoration. */
 .is-lapsed { opacity: 0.55; }
 
+/* ── Recurring page ───────────────────────────────────────────────────────── */
+
+/* Headline figures: three side by side, stacking on a phone. */
+.figures {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--sp-3);
+}
+
+/* A collapsed group of rows. The summary is the whole clickable header, styled
+   like .card-head so an open group reads as a titled card. */
+.disclosure > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-5);
+  font-weight: 600;
+  font-size: var(--fs-sm);
+  cursor: pointer;
+  list-style: none;
+}
+.disclosure > summary::-webkit-details-marker { display: none; }
+.disclosure > summary::before { content: "▸"; color: var(--text-muted); margin-right: var(--sp-2); }
+.disclosure[open] > summary::before { content: "▾"; }
+.disclosure[open] > summary { border-bottom: 1px solid var(--border); }
+.disclosure + .disclosure { border-top: 1px solid var(--border); }
+
 /* ── List (settings institutions) ─────────────────────────────────────────── */
 
 .list-item {

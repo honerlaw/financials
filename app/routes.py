@@ -323,26 +323,9 @@ def _account_totals(institution_id, month_start, month_end):
     return rows_query.all()
 
 
-@bp.route('/subscriptions')
-@login_required
-def subscriptions():
-    from app.merchant_groups import groups_for_detection
-    from app.subscriptions import detect_subscriptions_from_groups
-
-    # Merchant grouping is the expensive half of detection and is served from
-    # the persisted index (app/merchant_groups.py). Everything below it is
-    # cheap and date-dependent, so it is recomputed per request rather than
-    # cached — a stored `active` flag would be wrong the moment a stream
-    # lapsed, with nothing to trigger a refresh.
-    groups, _used_index = groups_for_detection()
-    streams = detect_subscriptions_from_groups(groups, date.today())
-    # Commit only after detection: it persists any index build
-    # groups_for_detection() just did, and a commit expires loaded ORM rows.
-    # Committing before detection once made it re-SELECT every transaction one
-    # at a time (~7,500 queries, ~20 s in production). Detection now reads plain
-    # rows, which cannot expire, but keep the order — it costs nothing.
-    db.session.commit()
-
+def _account_labels(streams):
+    """Replace each stream's (institution_id, account_id) keys with display
+    labels, "Institution · Account", loading both lookup tables once."""
     accounts = {a.plaid_account_id: a for a in Account.query.all()}
     institution_names = {i.id: i.name for i in Institution.query.all()}
     for stream in streams:
@@ -353,49 +336,81 @@ def subscriptions():
             labels.add(f'{institution} · {account.name}' if account else institution)
         stream['accounts'] = sorted(labels)
 
-    active_count = sum(1 for s in streams if s['active'])
+
+# The order "Not counted" groups render in, with their headings.
+_EXCLUDED_GROUPS = (
+    ('annual', 'Annual'),
+    ('transfer', 'Transfers'),
+    ('inactive', 'Inactive'),
+)
+
+
+@bp.route('/recurring')
+@login_required
+def recurring():
+    from app.bills import (
+        detect_recurring_from_groups, fixed_monthly_total, monthly_income_total,
+    )
+    from app.merchant_groups import groups_for_detection
+
+    # Merchant grouping is the expensive half of detection and is served from
+    # the persisted index (app/merchant_groups.py). Everything below it is
+    # cheap and date-dependent, so it is recomputed per request rather than
+    # cached — a stored `active` flag or payment status would be wrong the
+    # moment a stream lapsed or the month rolled over.
+    groups, _used_index = groups_for_detection()
+    bills, income = detect_recurring_from_groups(groups, date.today())
+    # Commit only after detection: it persists any index build
+    # groups_for_detection() just did, and a commit expires loaded ORM rows.
+    # Committing before detection once made it re-SELECT every transaction one
+    # at a time (~7,500 queries, ~20 s in production). Detection now reads plain
+    # rows, which cannot expire, but keep the order — it costs nothing.
+    db.session.commit()
+    _account_labels(bills + income)
+
+    counted = sorted(
+        (b for b in bills if b['excluded_reason'] is None),
+        key=lambda b: -b['monthly_amount'],
+    )
+    excluded = [
+        (label, sorted((b for b in bills if b['excluded_reason'] == reason),
+                       key=lambda b: -b['monthly_amount']))
+        for reason, label in _EXCLUDED_GROUPS
+    ]
+    expense_total, expense_count = fixed_monthly_total(bills)
+    income_total, income_count = monthly_income_total(income)
+
+    def status_count(status):
+        return sum(1 for b in counted if b['payment_status'] == status)
+
     return render_template(
-        'subscriptions.html',
-        streams=streams,
-        active_count=active_count,
-        inactive_count=len(streams) - active_count,
+        'recurring.html',
+        counted=counted,
+        excluded=[(label, rows) for label, rows in excluded if rows],
+        income=income,
+        expense_total=expense_total,
+        expense_count=expense_count,
+        income_total=income_total,
+        income_count=income_count,
+        unpaid_count=status_count('unpaid'),
+        upcoming_count=status_count('upcoming'),
+        paid_count=status_count('paid'),
     )
 
 
+# /bills and /subscriptions were merged into /recurring. A temporary (302)
+# redirect rather than a permanent one: browsers cache a 301 indefinitely, so a
+# rollback would leave bookmarks stuck on a page that no longer exists.
 @bp.route('/bills')
 @login_required
 def bills():
-    from app.bills import detect_bills_from_groups, fixed_monthly_total
-    from app.merchant_groups import groups_for_detection
+    return redirect(url_for('main.recurring'))
 
-    groups, _used_index = groups_for_detection()
-    bill_list = detect_bills_from_groups(groups, date.today())
-    # After detection, never before it — see subscriptions() above.
-    db.session.commit()
 
-    accounts = {a.plaid_account_id: a for a in Account.query.all()}
-    institution_names = {i.id: i.name for i in Institution.query.all()}
-    for bill in bill_list:
-        labels = set()
-        for institution_id, account_id in bill.pop('account_keys'):
-            institution = institution_names.get(institution_id, '')
-            account = accounts.get(account_id)
-            labels.add(f'{institution} · {account.name}' if account else institution)
-        bill['accounts'] = sorted(labels)
-
-    paid_count = sum(1 for b in bill_list if b['payment_status'] == 'paid')
-    unpaid_count = sum(1 for b in bill_list if b['payment_status'] == 'unpaid')
-    upcoming_count = sum(1 for b in bill_list if b['payment_status'] == 'upcoming')
-    fixed_total, fixed_count = fixed_monthly_total(bill_list)
-    return render_template(
-        'bills.html',
-        bills=bill_list,
-        fixed_total=fixed_total,
-        fixed_count=fixed_count,
-        paid_count=paid_count,
-        unpaid_count=unpaid_count,
-        upcoming_count=upcoming_count,
-    )
+@bp.route('/subscriptions')
+@login_required
+def subscriptions():
+    return redirect(url_for('main.recurring'))
 
 
 @bp.route('/settings')

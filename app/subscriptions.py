@@ -34,6 +34,14 @@ CADENCES = [
     ('annual', 365, 30),
 ]
 
+# A monthly bill paid by hand posts on a day that drifts from month to month, so
+# its gaps swing well outside 30 ± 6 even though it is paid exactly once per
+# calendar month. Inside the monthly bucket only, a gap between two consecutive
+# calendar months also counts as regular when it is within this many days of
+# 30 (15–45, inclusive). Bucket selection by median gap is unchanged.
+_MONTHLY_NOMINAL = 30
+MONTHLY_CALENDAR_SLACK = 15
+
 MIN_OCCURRENCES = 3          # charges needed to call a stream recurring
 MIN_OCCURRENCES_ANNUAL = 2   # annual streams rarely have 3 years of history
 GAP_REGULARITY = 0.7         # fraction of gaps that must sit inside the bucket
@@ -258,21 +266,47 @@ def _group_order(group):
     )
 
 
-def _classify_cadence(gaps, occurrences):
-    """Map the median inter-charge gap to a cadence bucket, requiring most
-    gaps to be regular. Returns (name, nominal_days) or None.
+def _month_index(d):
+    return d.year * 12 + d.month
+
+
+def _gap_is_regular(earlier, later, nominal, tol):
+    """Whether the gap between two consecutive occurrences fits the bucket.
+
+    Within the bucket's tolerance always fits. A monthly gap also fits when the
+    two dates fall in consecutive calendar months (December → January included)
+    and are within MONTHLY_CALENDAR_SLACK days of 30: a bill paid once a month
+    on a drifting day. A gap inside one month, one that skips a month, or one
+    outside 15–45 days still does not. Months are those of `date`, Plaid's
+    posting date.
     """
-    if not gaps:
+    gap = (later - earlier).days
+    if abs(gap - nominal) <= tol:
+        return True
+    return (
+        nominal == _MONTHLY_NOMINAL
+        and _month_index(later) - _month_index(earlier) == 1
+        and abs(gap - nominal) <= MONTHLY_CALENDAR_SLACK
+    )
+
+
+def _classify_cadence(dates):
+    """Map the median gap between sorted, distinct occurrence dates to a cadence
+    bucket, requiring most gaps to be regular (`_gap_is_regular`). Returns
+    (name, nominal_days) or None.
+    """
+    pairs = list(zip(dates, dates[1:]))
+    if not pairs:
         return None
-    med = _median(gaps)
+    med = _median([(b - a).days for a, b in pairs])
     for name, nominal, tol in CADENCES:
         if abs(med - nominal) > tol:
             continue
         required = MIN_OCCURRENCES_ANNUAL if name == 'annual' else MIN_OCCURRENCES
-        if occurrences < required:
+        if len(dates) < required:
             return None
-        within = sum(1 for g in gaps if abs(g - nominal) <= tol)
-        if within / len(gaps) >= GAP_REGULARITY:
+        within = sum(1 for a, b in pairs if _gap_is_regular(a, b, nominal, tol))
+        if within / len(pairs) >= GAP_REGULARITY:
             return name, nominal
         return None  # median fit the bucket but the gaps are irregular
     return None
@@ -282,8 +316,7 @@ def _build_stream(txns, today):
     """Build a stream dict from one merchant group, or None if the group
     isn't recurring."""
     dates = sorted({t.date for t in txns})  # same-day charges = one occurrence
-    gaps = [(b - a).days for a, b in zip(dates, dates[1:])]
-    cadence = _classify_cadence(gaps, len(dates))
+    cadence = _classify_cadence(dates)
     if cadence is None:
         return None
     cadence_name, nominal = cadence

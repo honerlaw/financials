@@ -1,7 +1,7 @@
 # Proposal: essential-recurring-expenses
 
 **Date**: 2026-11-07
-**Status**: Draft
+**Status**: Shipped (2026-11-07)
 
 **Seed (user's words)**: "Add a mechanism so we can flag a recurring expense as "essential" or not, and then update our total recurring expenses summary header to show the total and then the essential total, this will help us figure out what we should cancel vs keep"
 
@@ -32,6 +32,8 @@ and an essential subtotal make the keep/cancel split visible and durable.
     where `<amount>` is `format(split_amount, '.2f')` of the Decimal `split_amount` (e.g. `9.00`). It
     does **not** also carry the parent `merchant:<k>`, so marking one plan at a merchant does not mark
     another.
+  - A key longer than 255 characters (`ESSENTIAL_KEY_MAX_LENGTH`, app/bills.py) is left out. A
+    stream whose keys are all too long therefore renders no toggle, never one that returns 400.
   - Each bill dict gets `essential_keys` (sorted tuple) and `essential_key`, the key written when
     toggled on: the most common grouping key among its rows, ties to the smallest (or the rule key).
 - **Applying marks.** `/recurring` reads the saved keys as plain rows (one constant query; plain rows
@@ -42,11 +44,12 @@ and an essential subtotal make the keep/cancel split visible and durable.
   `fixed_monthly_total` does.
 - **Toggle endpoint.** `POST /recurring/essential` (login required; SameSite=Lax already protects
   POSTs app-wide):
-  - fields: `essential` = `1` or `0`, and one or more `key` values;
-  - each key must be at most 255 characters and start with `rule:` or `merchant:`, with between 1
-    and 500 keys (a fuzzy-clustered group can carry many grouping keys); otherwise 400;
-  - `1` inserts the given key(s) that are not already saved. A unique-constraint race is caught and
-    rolled back;
+  - fields: `essential` = `1` or `0`, and `key` values. Marking (`1`) takes **exactly one** key,
+    which is all the page ever posts. Un-marking (`0`) takes 1 to 500, because a fuzzy-clustered
+    group can carry many grouping keys;
+  - each key must be at most 255 characters and start with `rule:` or `merchant:`; otherwise 400;
+  - `1` inserts the key if it is not already saved. A unique-constraint race is caught and rolled
+    back. The rollback also clears an aborted Postgres transaction;
   - `0` deletes every saved mark whose key is among the given keys. The off form posts **all** of the
     stream's keys, so a merged stream is fully unmarked;
   - redirects to `/recurring#counted`.
@@ -57,8 +60,10 @@ and an essential subtotal make the keep/cancel split visible and durable.
     lines: "Essential $Y / month · N of M expenses" and "Not essential $Z / month". Z = total − Y,
     and Z is the candidates to cancel. The existing P75 note stays.
   - **Counted expenses table:** a new "Essential" column. Each row has a small POST form button:
-    "Essential" (a success badge style, pressing it un-marks) or "Mark essential" (ghost, pressing it
-    marks).
+    "Essential" (a new `.btn-success`, which mirrors `.badge-success`; pressing it un-marks) or
+    "Mark essential" (ghost; pressing it marks). Both carry `aria-pressed`. The macro lives in
+    `app/templates/_essential_toggle.html` so tests can render it directly.
+  - The essential split is hidden when no expense is counted, so it never reads "0 of 0".
   - A bill whose `essential_keys` is empty renders **no** toggle. This is defensive only: rows
     with an empty grouping key are in no group, so it should not happen.
   - **Uncounted rows** (annual / transfer / inactive) get no toggle: they are not in the total. A

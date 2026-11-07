@@ -10,9 +10,9 @@
 
 The user wanted one place to see their relatively-fixed monthly expenses. `/subscriptions`
 turned out to be `/bills` plus inflow streams, so the two pages split one view. In
-production 53 of ~71 recurring expense streams were not counted toward the total (39
-inactive, 14 annual), burying the counted ones. The user had just linked the account their
-biweekly paycheck lands in, which made a recurring-income figure worth showing.
+production most recurring expense streams were not counted toward the total (inactive or
+annual), burying the counted ones. The user had just linked the account their pay lands in,
+which made a recurring-income figure worth showing.
 
 ## Finding
 
@@ -49,7 +49,7 @@ biweekly paycheck lands in, which made a recurring-income figure worth showing.
 - A paycheck that Plaid does not categorize as `INCOME` is listed but not counted. A manual
   income override is the fallback, and none exists yet.
 - The cadence buckets have no semi-monthly bucket, so pay on the 1st and 15th would be read
-  as biweekly and overstated by ~8% (26/12 vs 24/12). The user's pay is biweekly.
+  as biweekly and overstated by ~8% (26/12 vs 24/12).
 - Mixed-sign merchant groups land wholly on one side by the detector's unchanged
   `is_inflow` (signed median < 0).
 - The query-count regression test (`test_page_query_count_does_not_grow_with_transactions`)

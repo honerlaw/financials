@@ -34,12 +34,12 @@ replacing `/bills` and `/subscriptions`.
 The user wants to see their total "monthly" expenses that are relatively fixed, and said
 bills and subscriptions "don't really help me understand the full picture". The two pages
 fragment one view without adding information: `/subscriptions` is `/bills` plus inflow
-streams. Production `/bills` (read 2026-11-06) lists ~71 recurring expense streams, of
-which 53 are not counted (39 inactive, 14 annual), burying the counted list among rows that
-do not affect the total.
+streams. In production most of the streams `/bills`
+listed were not counted (inactive or annual), burying the counted list among rows that do
+not affect the total.
 
-Production detects only two recurring inflows today (savings interest and a lapsed biweekly
-deposit) because the account the user's biweekly paycheck lands in was not linked. The user
+Production detected almost no recurring income because the account the user's pay lands in
+was not linked. The user
 has just linked it, and linking requests 730 days of history (`app/plaid_client.py:61`), so
 a recurring income figure becomes meaningful once the backfill lands. The user chose: a new
 `/recurring` page over extending `/bills`; income vs. expenses; counted/not-counted split;
@@ -93,7 +93,7 @@ not-counted collapsed and grouped by reason; income at the 25th percentile.
 - Income "next expected" renders `next_date` as-is (a dash for an inactive source); an active stream is at most 1.5× its
   cadence late, so a past date is visible and honest.
 - **Out of scope:** counting annual bills, chat, the SMS digest, a semi-monthly cadence (the
-  user confirmed biweekly pay), and a manual income override.
+  user's pay is not semi-monthly), and a manual income override.
 
 ## Success criteria
 

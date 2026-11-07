@@ -1,7 +1,7 @@
 # Proposal: calendar-month-cadence
 
 **Date**: 2026-11-07
-**Status**: Draft
+**Status**: Shipped (2026-11-07)
 
 ## Goal
 A monthly bill paid exactly once per calendar month, on a day that drifts within roughly two weeks from month to month, is detected as a monthly recurring stream and appears on /recurring. These are typically bills the user schedules by hand through online bill pay, such as loan payments. Weekly, biweekly, quarterly and annual detection stay unchanged, and nothing detected today changes.
@@ -30,6 +30,7 @@ Production data informed this design. No production names, amounts, counts or ac
   - The 15-day floor rejects a short pair across a month boundary (Jan 30 → Feb 2).
   - The 45-day ceiling rejects a pair in consecutive months that is 46–58 days apart (Jan 2 → Feb 27). That costs a little recall on genuinely once-a-month payments, in exchange for keeping a bound on irregular merchants.
 - **Signature.** `_classify_cadence` takes the sorted, de-duplicated date list (same-day charges = one occurrence) and derives the gaps itself. Its only caller is `_build_stream`, and no test calls it directly. The per-gap decision is a small private helper, `_gap_is_regular(earlier, later, nominal, tol)`. Its calendar path applies only when `nominal` is the monthly bucket's 30 days. Both bounds are inclusive: 15 and 45 days are admitted.
+- **Comment.** The `GAP_REGULARITY` comment now says "fraction of gaps that must be regular (`_gap_is_regular`)" (review fix).
 - **No other changes.** Grouping, `GROUPING_ALGO_VERSION`, the persisted index, the expense and income estimates, and the transfer/income rules are unchanged. Payment status (knowledge 006, ±6-day window) is unchanged in this unit. Knowledge 006 justified `PAYMENT_WINDOW = 6` as "what detection considers on-time". For streams admitted by the calendar-month path that equivalence no longer holds; see Known consequences.
 - **Knowledge 003.** Its shape is kept: gating stays cadence-only, and "most gaps must be individually regular" still holds. What "regular" means for a monthly gap is widened to the unit a monthly bill is billed in, the calendar month, which tunes a constant 003 calls provisional against real data. Promote writes a knowledge entry refining 003.
 
@@ -60,7 +61,7 @@ Production data informed this design. No production names, amounts, counts or ac
 4. **After deploy**, the loan payments the user reported missing appear on production /recurring as monthly streams. For each one, report to the user whether it is counted or which not-counted reason applies (for example, Plaid labelling it a transfer, or briefly "inactive" when the next payment is late). This report goes to the user only, never to the PR body, a knowledge entry or an issue. Check by reading the page; nothing real is committed. A newly detected bill can show "Unpaid" in a month where it was paid outside the ±6-day window. That is expected, and it is filed as a follow-up.
 
 ## Known consequences
-- **Payment status.** Status still requires a payment within ±6 days of the median day of the month (knowledge 006). In some months, a drifting-day bill paid outside that window shows a red "Unpaid" badge and adds to the page's unpaid count, even though a payment posted that month. Changing status to "any payment this calendar month" would change 006 for every bill (and a late payment for last month could count for this one), so it goes to a follow-up GitHub issue rather than this unit.
+- **Payment status.** Status still requires a payment within ±6 days of the median day of the month (knowledge 006). In some months, a drifting-day bill paid outside that window shows a red "Unpaid" badge and adds to the page's unpaid count, even though a payment posted that month. Changing status to "any payment this calendar month" would change 006 for every bill (and a late payment for last month could count for this one), so it goes to a follow-up GitHub issue rather than this unit (#58).
 - **Short histories.** At exactly 3 occurrences, two consecutive-month gaps such as 18 and 42 days now pass, where today they are rejected. A short three-month burst of irregular charges can therefore appear as a monthly stream. This is accepted, because real three-charge subscriptions exist.
 - **Irregular merchants visited once a calendar month** cannot be told apart from a drifting bill, because knowledge 003 forbids an amount gate. The bounds limit this but do not eliminate it.
 - **Check group.** The mixed-payee check group can now count as a monthly expense (see Local replay).
@@ -71,3 +72,7 @@ Production data informed this design. No production names, amounts, counts or ac
   - a monthly loan payment that Plaid labels a transfer is listed but not counted;
   - a monthly transfer to another internal account is grouped with all internal transfers;
   - checks are grouped together regardless of payee.
+
+## Deferred work
+
+- #58 — monthly bills paid on a drifting day can show a false "Unpaid" on /recurring (priority: high)

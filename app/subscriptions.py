@@ -44,7 +44,7 @@ MONTHLY_CALENDAR_SLACK = 15
 
 MIN_OCCURRENCES = 3          # charges needed to call a stream recurring
 MIN_OCCURRENCES_ANNUAL = 2   # annual streams rarely have 3 years of history
-GAP_REGULARITY = 0.7         # fraction of gaps that must sit inside the bucket
+GAP_REGULARITY = 0.7         # fraction of gaps that must be regular (_gap_is_regular)
 INACTIVE_MULTIPLIER = 1.5    # overdue by > 1.5x cadence -> inactive
 VARIES_THRESHOLD = 0.25      # amount MAD > 25% of median -> "varies" badge
 FUZZY_THRESHOLD = 0.82       # SequenceMatcher ratio to collapse merchant keys

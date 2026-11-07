@@ -17,13 +17,16 @@ TODAY = date(2026, 6, 13)
 
 class FakeTxn:
     def __init__(self, txn_date, amount='120.00', merchant_name=None,
-                 description='CHARGE', merchant_entity_id=None,
+                 description=None, merchant_entity_id=None,
                  institution_id=1, account_id='acc-1', removed=False,
                  category=None, category_detailed=None):
         self.date = txn_date
         self.amount = Decimal(amount)
         self.merchant_name = merchant_name
-        self.description = description
+        # Real rows always carry the card descriptor, and it usually reads like
+        # the merchant; a shared placeholder would make every fixture one
+        # descriptor and merge unrelated merchants (merge_by_descriptor).
+        self.description = description or merchant_name or 'CHARGE'
         self.merchant_entity_id = merchant_entity_id
         self.institution_id = institution_id
         self.account_id = account_id
@@ -690,3 +693,31 @@ def test_left_over_renders_negative_when_expenses_exceed_income(auth_client, app
     left = _section(res.data, 'Left after recurring', 'Counted expenses')
     assert 'text-danger' in left
     assert '-$55.00 / month' in left  # 40.00 income − 95.00 expenses
+
+
+def test_recurring_counts_a_renamed_merchant_once(auth_client, app):
+    """Plaid renamed the merchant; the card descriptor stayed. One bill, counted."""
+    with app.app_context():
+        inst = Institution(name='Test Bank', slug='test_bank',
+                           access_token='tok', item_id='item-1')
+        db.session.add(inst)
+        db.session.flush()
+        today = date.today()
+        for i in range(12):
+            renamed = i < 2
+            db.session.add(Transaction(
+                plaid_transaction_id=f'renamed-{i}', institution_id=inst.id,
+                account_id='acc-1', date=today - timedelta(days=30 * i),
+                description='PAYCO* CONTOSO SERVICES',
+                merchant_name='Fabrikam Inc' if renamed else 'Contoso Ltd',
+                merchant_entity_id='ent-fabrikam' if renamed else None,
+                amount=Decimal('250.00'),
+            ))
+        db.session.commit()
+    res = auth_client.get('/recurring')
+    expenses = _section(res.data, 'Counted expenses', 'Recurring income</div>')
+    assert expenses.count('Contoso Ltd') == 1
+    assert 'Fabrikam Inc' not in res.data.decode()
+    assert _per_month_cells(expenses) == [Decimal('250.00')]
+    assert b'$250.00 / month' in res.data
+    assert re.search(rb'\b1 expense\s', res.data)

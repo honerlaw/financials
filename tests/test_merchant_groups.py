@@ -90,7 +90,18 @@ def _mixed():
     return txns
 
 
+def _renamed():
+    """One monthly bill whose Plaid merchant name changed: same descriptor, an
+    old name that lapses, and a new name with too few charges on its own."""
+    return (monthly_txns(4, start=date(2026, 1, 5), merchant_name='Contoso Ltd',
+                         description='PAYCO* CONTOSO SERVICES')
+            + monthly_txns(1, start=date(2026, 5, 5), merchant_name='Fabrikam Inc',
+                           description='PAYCO* CONTOSO SERVICES',
+                           merchant_entity_id='ent-fabrikam'))
+
+
 CORPORA = {
+    'renamed': _renamed,
     'variants': _variants,
     'entity_and_name': _entity_and_name,
     'mixed': _mixed,
@@ -634,3 +645,13 @@ def test_page_query_count_does_not_grow_with_transactions(app, path):
         '%s issued %d SELECTs for 20 transactions but %d for 200; page cost '
         'must not scale with the corpus' % (path, counts[0], counts[1])
     )
+
+
+def test_renamed_corpus_is_one_stream_on_the_indexed_path(app):
+    """Parity alone would pass with the merge removed; pin the outcome."""
+    with app.app_context():
+        _persist(_renamed())
+        update_index()
+        db.session.commit()
+        streams = detect_subscriptions_from_groups(grouped_transactions(), TODAY)
+        assert [(s['name'], s['count']) for s in streams] == [('Contoso Ltd', 5)]

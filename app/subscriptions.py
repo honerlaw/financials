@@ -10,6 +10,14 @@ single pass over the transactions table is plenty fast.
 Cadence regularity is the only detection gate. Amount consistency never
 gates a stream (card payments and utilities vary wildly month to month);
 a wide amount spread just sets `varies` for display.
+
+Grouping has two signals. The first is the merchant key (Plaid's entity id,
+else the fuzzy-matched merchant name), persisted by app/merchant_groups.py.
+The second, `merge_by_descriptor`, runs on every request after the groups are
+read: groups that share a transaction name (Plaid's `name`, our `description`
+— for card issuers the network descriptor, which stays put when Plaid's
+merchant-name enrichment changes) are merged when that looks like a rename.
+The persisted index keeps the pre-merge grouping.
 """
 
 import re
@@ -156,6 +164,100 @@ def _group_transactions(txns):
     return [ts for _, ts in groups]
 
 
+DESCRIPTOR_MIN_LENGTH = 5    # shorter normalized descriptors never merge
+
+
+def _dominant_descriptor(txns, normalized):
+    """Most common non-empty normalized description; ties → smallest string."""
+    counts = Counter()
+    for t in txns:
+        d = normalized(t.description)
+        if d:
+            counts[d] += 1
+    if not counts:
+        return ''
+    top = max(counts.values())
+    return min(d for d, n in counts.items() if n == top)
+
+
+def merge_by_descriptor(groups):
+    """Merge merchant groups that are one merchant renamed by Plaid.
+
+    Plaid's merchant-name enrichment can change mid-history while the card
+    descriptor (`description`) stays the same, splitting one bill into an old
+    group that looks lapsed and a new one too short to be a stream. Groups are
+    merged only when that is clearly what happened:
+
+    - they share a dominant normalized descriptor of at least
+      DESCRIPTOR_MIN_LENGTH characters — by exact equality only: fuzzy
+      matching here would put the quadratic cost knowledge 029 moved to sync
+      time back on every request;
+    - the groups sharing it carry at most one distinct merchant_entity_id
+      between them — two Plaid entities are two merchants (knowledge 032), and
+      a bucket with two is ambiguous, so it merges nothing at all;
+    - they are on the same side (charges vs deposits, by the signed median
+      `_build_stream` uses);
+    - no two of that side's groups overlap in time: a rename is sequential.
+      If any two do, nothing on that side merges — a concurrent group means
+      the descriptor is shared by more than one merchant, so even sequential
+      neighbours stay split (today's behaviour, never a false merge).
+
+    Pure: the input lists are not mutated. The result does not depend on the
+    order of the input groups.
+    """
+    groups = [list(g) for g in groups]
+    cache = {}
+
+    def normalized(text):
+        if text not in cache:
+            cache[text] = normalize_merchant(text or '')
+        return cache[text]
+
+    buckets = defaultdict(list)
+    merged = []
+    for group in groups:
+        descriptor = _dominant_descriptor(group, normalized)
+        if len(descriptor) < DESCRIPTOR_MIN_LENGTH:
+            merged.append(group)
+        else:
+            buckets[descriptor].append(group)
+
+    for descriptor in sorted(buckets):
+        bucket = buckets[descriptor]
+        entities = {t.merchant_entity_id for g in bucket for t in g
+                    if t.merchant_entity_id}
+        if len(bucket) == 1 or len(entities) > 1:
+            merged.extend(bucket)
+            continue
+        sides = defaultdict(list)
+        for group in bucket:
+            sides[_median([t.amount for t in group]) < 0].append(group)
+        for inflow in (False, True):
+            side = sorted(sides[inflow], key=_group_order)
+            spans = [(min(t.date for t in g), max(t.date for t in g)) for g in side]
+            sequential = all(later[0] > earlier[1]
+                             for earlier, later in zip(spans, spans[1:]))
+            if len(side) > 1 and sequential:
+                merged.append([t for g in side for t in g])
+            else:
+                merged.extend(side)
+    return merged
+
+
+def _group_order(group):
+    """Total order for merging: earliest date, latest date, display name,
+    size, then every description — so input order never decides a merge."""
+    return (
+        min(t.date for t in group),
+        max(t.date for t in group),
+        _display_name(group),
+        len(group),
+        tuple(sorted(t.description or '' for t in group)),
+        tuple(sorted(str(t.amount) for t in group)),
+        tuple(sorted(t.merchant_entity_id or '' for t in group)),
+    )
+
+
 def _classify_cadence(gaps, occurrences):
     """Map the median inter-charge gap to a cadence bucket, requiring most
     gaps to be regular. Returns (name, nominal_days) or None.
@@ -232,10 +334,12 @@ def detect_subscriptions_from_groups(groups, today):
     `today` on every call and are deliberately never cached, so a stored index
     cannot go stale merely because the calendar advanced.
 
-    `groups` is an iterable of row lists; each list is one merchant.
+    `groups` is an iterable of row lists; each list is one merchant. Groups
+    that are one merchant renamed by Plaid are merged first
+    (`merge_by_descriptor`).
     """
     streams = []
-    for group in groups:
+    for group in merge_by_descriptor(groups):
         stream = _build_stream(group, today)
         if stream is not None:
             streams.append(stream)

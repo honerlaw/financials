@@ -21,6 +21,7 @@ from decimal import ROUND_HALF_UP, Decimal
 from app.subscriptions import (
     _build_stream,
     _group_transactions,
+    merge_by_descriptor,
 )
 
 PAYMENT_WINDOW = 6  # days around expected day-of-month to match a payment
@@ -246,11 +247,12 @@ def detect_recurring_from_groups(groups, today):
     income stream (monthly estimate at P25, excluded reason). Bills are sorted
     unpaid-first, then upcoming, then paid, then inactive; within each group by
     amount magnitude descending. Income is sorted counted-first, then by
-    monthly amount descending.
+    monthly amount descending. Groups that are one merchant renamed by Plaid
+    are merged first (`merge_by_descriptor`).
     """
     bills = []
     income = []
-    for group in groups:
+    for group in merge_by_descriptor(groups):
         stream = _build_stream(group, today)
         if stream is None:
             continue

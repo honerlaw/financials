@@ -1,8 +1,12 @@
 from datetime import date, timedelta
 from decimal import Decimal
+from itertools import permutations
 
 from app.models import db, Institution, Transaction, Account
-from app.subscriptions import detect_subscriptions, normalize_merchant
+from app.subscriptions import (
+    _group_transactions, detect_subscriptions, detect_subscriptions_from_groups,
+    merge_by_descriptor, normalize_merchant,
+)
 
 TODAY = date(2026, 6, 1)
 
@@ -11,13 +15,16 @@ class FakeTxn:
     """Minimal stand-in for a Transaction row — detection is a pure function."""
 
     def __init__(self, txn_date, amount='15.49', merchant_name=None,
-                 description='CHARGE', merchant_entity_id=None,
+                 description=None, merchant_entity_id=None,
                  institution_id=1, account_id='acc-1', removed=False,
                  category=None, category_detailed=None):
         self.date = txn_date
         self.amount = Decimal(amount)
         self.merchant_name = merchant_name
-        self.description = description
+        # Real rows always carry the card descriptor, and it usually reads like
+        # the merchant; a shared placeholder would make every fixture one
+        # descriptor and merge unrelated merchants (merge_by_descriptor).
+        self.description = description or merchant_name or 'CHARGE'
         self.merchant_entity_id = merchant_entity_id
         self.institution_id = institution_id
         self.account_id = account_id
@@ -298,3 +305,150 @@ def test_recurring_page_renders_multi_account_labels(auth_client, app):
     assert 'AmEx · Platinum'.encode() in res.data
     assert 'Citi · Double Cash'.encode() in res.data
 
+
+
+# ── Descriptor merge: one merchant renamed by Plaid ───────────────────────────
+
+RENAMED = 'PAYCO* CONTOSO SERVICES'
+
+
+def _renamed_bill(old_entity=None, new_entity='ent-new', today=TODAY):
+    """A monthly bill under one merchant name that Plaid later renamed: the old
+    history ends two months back (so on its own it reads lapsed) and the new
+    name has two charges (too few to be a stream on its own)."""
+    old = [FakeTxn(today - timedelta(days=30 * i), amount='250.00',
+                   merchant_name='Contoso Ltd', description=RENAMED,
+                   merchant_entity_id=old_entity)
+           for i in range(3, 12)]
+    new = [FakeTxn(today - timedelta(days=30 * i), amount='250.00',
+                   merchant_name='Fabrikam Inc', description=RENAMED,
+                   merchant_entity_id=new_entity)
+           for i in range(0, 2)]
+    return old, new
+
+
+def _canonical(groups):
+    return sorted(sorted(id(t) for t in g) for g in groups)
+
+
+def test_renamed_merchant_is_one_active_stream():
+    old, new = _renamed_bill()
+    streams = detect_subscriptions(old + new, TODAY)
+    assert len(streams) == 1
+    assert streams[0]['cadence'] == 'monthly'
+    assert streams[0]['active'] is True
+    assert streams[0]['count'] == 11
+    assert streams[0]['name'] == 'Contoso Ltd'   # the longer-lived name
+
+
+def test_without_merge_the_renamed_bill_splits():
+    """The failure the merge fixes: grouping by name alone splits the bill into
+    a lapsed stream and a fragment too short to be one."""
+    old, new = _renamed_bill()
+    assert len(_group_transactions(old + new)) == 2
+    (lapsed,) = detect_subscriptions_from_groups([old], TODAY)
+    assert lapsed['active'] is False
+    assert detect_subscriptions_from_groups([new], TODAY) == []
+
+
+def test_different_descriptors_stay_separate():
+    old, new = _renamed_bill()
+    for t in new:
+        t.description = 'SOMEWHERE ELSE ENTIRELY'
+    assert _canonical(merge_by_descriptor([old, new])) == _canonical([old, new])
+
+
+def test_two_entity_ids_never_merge():
+    old, new = _renamed_bill(old_entity='ent-old', new_entity='ent-new')
+    assert _canonical(merge_by_descriptor([old, new])) == _canonical([old, new])
+
+
+def test_a_bucket_with_two_entities_merges_nothing():
+    """A no-entity group must not be attributed to one of two entities."""
+    old, new = _renamed_bill(old_entity=None, new_entity='ent-new')
+    other = [FakeTxn(TODAY - timedelta(days=400 + 30 * i), description=RENAMED,
+                     merchant_name='Third Co', merchant_entity_id='ent-third')
+             for i in range(3)]
+    groups = [old, new, other]
+    assert _canonical(merge_by_descriptor(groups)) == _canonical(groups)
+
+
+def test_entity_group_and_name_group_merge():
+    old, new = _renamed_bill(old_entity=None, new_entity='ent-new')
+    assert len(merge_by_descriptor([old, new])) == 1
+
+
+def test_overlapping_date_ranges_do_not_merge():
+    """Two merchants charging concurrently are not a rename."""
+    old, new = _renamed_bill()
+    new.append(FakeTxn(TODAY - timedelta(days=200), description=RENAMED,
+                       merchant_name='Fabrikam Inc'))
+    assert _canonical(merge_by_descriptor([old, new])) == _canonical([old, new])
+
+
+def test_charges_and_deposits_do_not_merge():
+    old, new = _renamed_bill()
+    for t in new:
+        t.amount = -t.amount
+    assert _canonical(merge_by_descriptor([old, new])) == _canonical([old, new])
+
+
+def test_short_descriptors_never_merge():
+    old, new = _renamed_bill()
+    for t in old + new:
+        t.description = 'ACH'
+    assert _canonical(merge_by_descriptor([old, new])) == _canonical([old, new])
+
+
+def test_three_sequential_names_chain_into_one():
+    old, new = _renamed_bill()
+    oldest = [FakeTxn(TODAY - timedelta(days=30 * i), amount='250.00',
+                      merchant_name='First Name Inc', description=RENAMED)
+              for i in range(12, 15)]
+    assert len(merge_by_descriptor([old, new, oldest])) == 1
+
+
+def test_merge_does_not_mutate_its_input():
+    old, new = _renamed_bill()
+    before = (list(old), list(new))
+    merge_by_descriptor([old, new])
+    assert (old, new) == before
+
+
+def test_merge_is_independent_of_input_order():
+    old, new = _renamed_bill()
+    oldest = [FakeTxn(TODAY - timedelta(days=30 * i), amount='250.00',
+                      merchant_name='First Name Inc', description=RENAMED)
+              for i in range(12, 15)]
+    unrelated = monthly_txns(3, merchant_name='Netflix', description='NETFLIX.COM')
+    groups = [old, new, oldest, unrelated]
+    results = {tuple(map(tuple, _canonical(merge_by_descriptor(list(p)))))
+               for p in permutations(groups)}
+    assert len(results) == 1
+
+
+def test_a_concurrent_group_blocks_merging_on_its_side():
+    """Two short groups inside a longer group's range are not a rename chain,
+    even though they follow each other."""
+    long_running = [FakeTxn(TODAY - timedelta(days=30 * i), description=RENAMED,
+                            merchant_name='Northwind') for i in range(0, 12)]
+    first = [FakeTxn(TODAY - timedelta(days=d), description=RENAMED,
+                     merchant_name='Fabrikam Inc') for d in (200, 170)]
+    second = [FakeTxn(TODAY - timedelta(days=140), description=RENAMED,
+                      merchant_name='Contoso Ltd')]
+    groups = [long_running, first, second]
+    assert _canonical(merge_by_descriptor(groups)) == _canonical(groups)
+
+
+def test_same_day_boundary_is_an_overlap():
+    old, new = _renamed_bill()
+    new.append(FakeTxn(max(t.date for t in old), description=RENAMED,
+                       merchant_name='Fabrikam Inc'))
+    assert _canonical(merge_by_descriptor([old, new])) == _canonical([old, new])
+
+
+def test_renamed_deposits_merge_too():
+    old, new = _renamed_bill()
+    for t in old + new:
+        t.amount = -t.amount
+    assert len(merge_by_descriptor([old, new])) == 1

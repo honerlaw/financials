@@ -312,11 +312,21 @@ def _classify_cadence(dates):
     return None
 
 
-def _build_stream(txns, today):
+def _build_stream(txns, today, fallback_cadence=None):
     """Build a stream dict from one merchant group, or None if the group
-    isn't recurring."""
+    isn't recurring.
+
+    `fallback_cadence` — a (name, nominal days) pair — is used only when no
+    cadence is detected: a user rule asserting that an irregular stream recurs
+    (app/recurring_rules.py). A detected cadence always wins, so a rule's
+    annual stream stays annual. The stream records which happened in
+    `cadence_forced`.
+    """
     dates = sorted({t.date for t in txns})  # same-day charges = one occurrence
     cadence = _classify_cadence(dates)
+    forced = cadence is None and fallback_cadence is not None
+    if forced:
+        cadence = fallback_cadence
     if cadence is None:
         return None
     cadence_name, nominal = cadence
@@ -331,6 +341,7 @@ def _build_stream(txns, today):
         'name': _display_name(txns),
         'cadence': cadence_name,
         'cadence_days': nominal,
+        'cadence_forced': forced,
         'amount': median_amount,
         'varies': varies,
         'is_inflow': median_amount < 0,

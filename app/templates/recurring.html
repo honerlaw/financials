@@ -1,5 +1,16 @@
 {% extends 'base.html' %}
 {% macro money(value) %}${{ "{:,.2f}".format(value) }}{% endmacro %}
+{# A stream built by one of the user's rules carries a badge; every other
+   stream gets a Flag link that opens the rule form pre-filled from it. #}
+{% macro name_cell(s) %}
+<td class="medium">
+  {{ s.name }}
+  {% if s.rule_id %}<span class="badge badge-accent">your rule</span>
+  {% else %}<a class="xs muted" href="{{ url_for('main.new_recurring_rule', pattern=s.pattern_hint, label=s.name, direction='inflow' if s.is_inflow else 'outflow') }}">Flag</a>{% endif %}
+</td>
+{% endmacro %}
+{% macro range_text(r) %}{% if r.amount_min is not none and r.amount_max is not none %}{{ money(r.amount_min) }}–{{ money(r.amount_max) }}{% elif r.amount_min is not none %}{{ money(r.amount_min) }} or more{% elif r.amount_max is not none %}up to {{ money(r.amount_max) }}{% else %}any amount{% endif %}{% endmacro %}
+{% macro sources_text(sources) %}{% for src in sources %}{{ src.name }} ({{ src.taken }} of {{ src.total }} rows){% if not loop.last %}, {% endif %}{% endfor %}{% endmacro %}
 {% block content %}
 <div class="row-b wrap gap-3 mb-4">
   <h1 class="amount" style="font-size: var(--fs-lg);">Recurring</h1>
@@ -71,7 +82,7 @@
       <tbody>
       {% for b in counted %}
       <tr>
-        <td class="medium">{{ b.name }}</td>
+        {{ name_cell(b) }}
         <td class="cap muted">{{ b.cadence }}</td>
         <td class="right nowrap amount text-danger">
           -{{ money(b.amount|abs) }}
@@ -102,7 +113,7 @@
 {# Not counted: every other recurring outflow stays listed (knowledge 003),
    collapsed by reason. No paid/unpaid badge here — an uncounted stream is not
    an obligation, and a red "Unpaid" on it would be a false alarm (knowledge 005). #}
-{% if excluded %}
+{% if excluded or marked %}
 <h2 class="eyebrow mb-2">Not counted</h2>
 <div class="card mb-4">
   {% for label, rows in excluded %}
@@ -123,7 +134,7 @@
         <tbody>
         {% for b in rows %}
         <tr {% if b.excluded_reason == 'inactive' %}class="is-lapsed"{% endif %}>
-          <td class="medium">{{ b.name }}</td>
+          {{ name_cell(b) }}
           <td class="cap muted">{{ b.cadence }}</td>
           <td class="right nowrap amount text-danger">
             -{{ money(b.amount|abs) }}
@@ -146,12 +157,37 @@
     </div>
   </details>
   {% endfor %}
+  {# Rows the user's rules marked "not recurring": no stream was built from
+     them, so they have no cadence, amount or status — only where they came
+     from, so nothing leaves the page unseen. #}
+  {% if marked %}
+  <details class="disclosure">
+    <summary><span>Marked not recurring ({{ marked|length }})</span></summary>
+    <div class="table-wrap">
+      <table class="table">
+        <thead>
+          <tr><th>Rule</th><th>Direction</th><th class="right">Rows</th><th>Taken from</th></tr>
+        </thead>
+        <tbody>
+        {% for m in marked %}
+        <tr>
+          <td class="medium">{{ m.label }} <span class="badge badge-accent">your rule</span></td>
+          <td class="muted">{{ 'money in' if m.direction == 'inflow' else 'money out' }}</td>
+          <td class="right">{{ m.rows_won }}</td>
+          <td class="xs muted">{{ sources_text(m.sources) }}</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </details>
+  {% endif %}
 </div>
 {% endif %}
 
 {# Recurring income: counted rows first and sum to the income headline;
    transfers in, refunds and lapsed sources stay listed, dimmed, with why. #}
-<div class="card">
+<div class="card mb-4">
   <div class="card-head">Recurring income</div>
   <div class="table-wrap">
     <table class="table">
@@ -169,7 +205,7 @@
       <tbody>
       {% for s in income %}
       <tr {% if s.excluded_reason %}class="is-lapsed"{% endif %}>
-        <td class="medium">{{ s.name }}</td>
+        {{ name_cell(s) }}
         <td class="cap muted">{{ s.cadence }}</td>
         <td class="right nowrap amount text-success">
           +{{ money(s.amount|abs) }}
@@ -191,6 +227,54 @@
       </tr>
       {% else %}
       <tr><td colspan="7" class="empty">No recurring income detected yet.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{# The user's corrections. Each says what it matched and won, so a rule that
+   claims more (or less) than intended is visible after saving too. #}
+<div class="card" id="rules">
+  <div class="card-head row between">
+    <span>Your rules</span>
+    <a class="btn btn-sm" href="{{ url_for('main.new_recurring_rule') }}">Add a rule</a>
+  </div>
+  <div class="table-wrap">
+    <table class="table">
+      <thead>
+        <tr>
+          <th>Rule</th>
+          <th>Matches</th>
+          <th>Says</th>
+          <th class="right">Rows</th>
+          <th>Last matched</th>
+          <th>Taken from</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for r in rules %}
+      <tr>
+        <td class="medium">{{ r.label }}</td>
+        <td class="xs">
+          "{{ r.pattern }}" · {{ 'money in' if r.direction == 'inflow' else 'money out' }} · {{ range_text(r) }}
+        </td>
+        <td class="xs">
+          {{ 'recurring' if r.action == 'recurring' else 'not recurring' }}
+          <div class="muted">{{ r.status }}</div>
+        </td>
+        <td class="right">{% if r.rows_won %}{{ r.rows_won }}{% else %}0 rows{% endif %}</td>
+        <td class="muted xs nowrap">{% if r.last_matched %}{{ r.last_matched.strftime('%b %d, %Y') }}{% else %}—{% endif %}</td>
+        <td class="xs muted">{{ sources_text(r.sources) }}</td>
+        <td>
+          <form method="post" action="{{ url_for('main.delete_recurring_rule', rule_id=r.id) }}">
+            <button type="submit" class="btn btn-sm btn-ghost">Delete</button>
+          </form>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="7" class="empty">No rules yet. Use Flag on a row, or Add a rule, to say whether something is recurring.</td></tr>
       {% endfor %}
       </tbody>
     </table>

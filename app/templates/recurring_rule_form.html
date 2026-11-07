@@ -1,0 +1,98 @@
+{% extends 'base.html' %}
+{% macro money(value) %}${{ "{:,.2f}".format(value) }}{% endmacro %}
+{% block content %}
+<div class="row-b wrap gap-3 mb-4">
+  <h1 class="amount" style="font-size: var(--fs-lg);">New rule</h1>
+  <a class="small muted" href="{{ url_for('main.recurring') }}#rules">Back to Recurring</a>
+</div>
+
+<p class="small muted mb-4" style="max-width: 60ch;">
+  A rule claims every transaction whose description contains the text below, in
+  one direction, optionally within an amount range. The claimed transactions
+  become one stream of their own, counted or not as you say. Check the preview
+  before saving: it shows exactly which transactions the rule would take.
+</p>
+
+{% if errors %}
+<div class="alert alert-danger mb-4" role="alert">
+  {% for e in errors %}<div>{{ e }}</div>{% endfor %}
+</div>
+{% endif %}
+
+<div class="card mb-4"><div class="card-body">
+  <form method="post" action="{{ url_for('main.create_recurring_rule') }}" class="stack gap-3" style="max-width: 36rem;">
+    <label class="stack gap-1 small">
+      <span class="medium">Name</span>
+      <input class="field" name="label" value="{{ fields.label }}" maxlength="255" required>
+    </label>
+    <label class="stack gap-1 small">
+      <span class="medium">Description contains</span>
+      <input class="field" name="pattern" value="{{ fields.pattern }}" maxlength="255" required>
+      <span class="xs muted">Case-insensitive, matched against the bank's description. For a transfer, include the masked account digits (e.g. "TO ****1234"); for checks, add an amount range.</span>
+    </label>
+    <fieldset class="row wrap gap-3 small" style="border: 0; padding: 0; margin: 0;">
+      <legend class="medium mb-2">Direction</legend>
+      <label class="row gap-1"><input type="radio" name="direction" value="outflow" {% if fields.direction != 'inflow' %}checked{% endif %}> Money out</label>
+      <label class="row gap-1"><input type="radio" name="direction" value="inflow" {% if fields.direction == 'inflow' %}checked{% endif %}> Money in</label>
+    </fieldset>
+    <div class="row wrap gap-3 small">
+      <label class="stack gap-1">
+        <span class="medium">Amount from (optional)</span>
+        <input class="field field-auto" name="amount_min" value="{{ fields.amount_min_text }}" inputmode="decimal" size="10">
+      </label>
+      <label class="stack gap-1">
+        <span class="medium">Amount to (optional)</span>
+        <input class="field field-auto" name="amount_max" value="{{ fields.amount_max_text }}" inputmode="decimal" size="10">
+      </label>
+    </div>
+    <fieldset class="row wrap gap-3 small" style="border: 0; padding: 0; margin: 0;">
+      <legend class="medium mb-2">This is</legend>
+      <label class="row gap-1"><input type="radio" name="action" value="recurring" {% if fields.action != 'not_recurring' %}checked{% endif %}> Recurring (count it)</label>
+      <label class="row gap-1"><input type="radio" name="action" value="not_recurring" {% if fields.action == 'not_recurring' %}checked{% endif %}> Not recurring (don't count it)</label>
+    </fieldset>
+    <div class="row wrap gap-2">
+      <button type="submit" class="btn btn-primary">Save rule</button>
+      <button type="submit" class="btn" name="preview" value="1"
+              formmethod="get" formaction="{{ url_for('main.new_recurring_rule') }}">Preview</button>
+    </div>
+  </form>
+</div></div>
+
+<div class="card" id="preview">
+  <div class="card-head">Preview</div>
+  {% if preview is none %}
+  <div class="card-body small muted">Enter at least 3 characters of description text to see what the rule would claim.</div>
+  {% else %}
+  <div class="card-body small">
+    <p class="mb-2"><span class="strong">This rule would claim {{ preview.won }} {{ 'transaction' if preview.won == 1 else 'transactions' }}.</span></p>
+    {% for label, n in preview.taken %}
+    <p class="mb-2">It would take {{ n }} from your rule "{{ label }}".</p>
+    {% endfor %}
+    {% for label, n in preview.lost %}
+    <p class="mb-2 text-danger">{{ n }} matching {{ 'transaction stays' if n == 1 else 'transactions stay' }} with your rule "{{ label }}", which takes precedence.</p>
+    {% endfor %}
+  </div>
+  {% if preview.sources %}
+  <div class="table-wrap">
+    <table class="table">
+      <thead>
+        <tr><th>Taken from</th><th class="right">Rows</th><th class="right">Amounts</th><th>Descriptions</th></tr>
+      </thead>
+      <tbody>
+      {% for src in preview.sources %}
+      <tr>
+        <td class="medium">{{ src.name }}</td>
+        <td class="right nowrap">{{ src.taken }} of {{ src.total }} rows</td>
+        <td class="right nowrap amount">{{ money(src.amount_low) }}{% if src.amount_high != src.amount_low %}–{{ money(src.amount_high) }}{% endif %}</td>
+        <td class="xs muted">
+          {{ src.descriptions[:5]|join(', ') }}{% if src.descriptions|length > 5 %} and {{ src.descriptions|length - 5 }} more{% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+  {% endif %}
+</div>
+{% endblock %}

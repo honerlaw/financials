@@ -345,11 +345,30 @@ _EXCLUDED_GROUPS = (
 )
 
 
+def _rule_rows():
+    """Saved rules as plain rows, oldest first.
+
+    Plain rows, not ORM instances, for the same reason detection reads plain
+    transaction rows (knowledge 2026-10-26): the page commits after detection,
+    a commit expires loaded instances, and the template would then re-SELECT
+    every rule one at a time.
+    """
+    from sqlalchemy import select
+    from app.models import RecurringRule
+    return db.session.execute(
+        select(
+            RecurringRule.id, RecurringRule.label, RecurringRule.pattern,
+            RecurringRule.direction, RecurringRule.amount_min,
+            RecurringRule.amount_max, RecurringRule.action,
+        ).order_by(RecurringRule.id)
+    ).all()
+
+
 @bp.route('/recurring')
 @login_required
 def recurring():
     from app.bills import (
-        detect_recurring_from_groups, fixed_monthly_total, monthly_income_total,
+        detect_recurring_with_rules, fixed_monthly_total, monthly_income_total,
     )
     from app.merchant_groups import groups_for_detection
 
@@ -357,9 +376,12 @@ def recurring():
     # the persisted index (app/merchant_groups.py). Everything below it is
     # cheap and date-dependent, so it is recomputed per request rather than
     # cached — a stored `active` flag or payment status would be wrong the
-    # moment a stream lapsed or the month rolled over.
+    # moment a stream lapsed or the month rolled over. The user's rules
+    # (app/recurring_rules.py) are applied per request too.
+    rules = _rule_rows()
     groups, _used_index = groups_for_detection()
-    bills, income = detect_recurring_from_groups(groups, date.today())
+    found = detect_recurring_with_rules(groups, date.today(), rules)
+    bills, income = found.bills, found.income
     # Commit only after detection: it persists any index build
     # groups_for_detection() just did, and a commit expires loaded ORM rows.
     # Committing before detection once made it re-SELECT every transaction one
@@ -394,6 +416,8 @@ def recurring():
         'recurring.html',
         counted=counted,
         excluded=[(label, rows) for label, rows in excluded if rows],
+        marked=found.marked,
+        rules=found.rules,
         income=income,
         expense_total=expense_total,
         expense_count=expense_count,
@@ -403,6 +427,78 @@ def recurring():
         upcoming_count=status_count('upcoming'),
         paid_count=status_count('paid'),
     )
+
+
+def _render_rule_form(fields, errors, status=200):
+    """The rule form, with a preview of what the rule would claim once its
+    pattern is long enough to match on."""
+    from types import SimpleNamespace
+    from app.merchant_groups import groups_for_detection
+    from app.recurring_rules import PATTERN_MIN_LENGTH, preview
+
+    result = None
+    can_preview = (
+        len(fields['pattern']) >= PATTERN_MIN_LENGTH
+        and not any('amount' in e.lower() for e in errors)
+        and fields['direction'] in ('outflow', 'inflow')
+    )
+    if can_preview:
+        candidate = SimpleNamespace(
+            id=None, label=fields['label'] or 'This rule',
+            pattern=fields['pattern'], direction=fields['direction'],
+            amount_min=fields['amount_min'], amount_max=fields['amount_max'],
+            action=fields['action'],
+        )
+        saved = _rule_rows()
+        groups, _used_index = groups_for_detection()
+        result = preview(groups, saved, candidate)
+        # Same order as /recurring: commit after reading the groups, which
+        # persists any index build they triggered.
+        db.session.commit()
+    return render_template(
+        'recurring_rule_form.html', fields=fields, errors=errors, preview=result,
+    ), status
+
+
+@bp.route('/recurring/rules/new')
+@login_required
+def new_recurring_rule():
+    """The rule form. Opened from a row's Flag link (pattern, label and
+    direction pre-filled) or from "Add a rule"; its Preview button re-submits
+    here with the edited fields."""
+    from app.recurring_rules import parse_rule_form
+    fields, errors = parse_rule_form(request.args)
+    # Arriving from a link is not a failed submission: only show errors once
+    # the user has pressed Preview.
+    return _render_rule_form(fields, errors if request.args.get('preview') else [])
+
+
+@bp.route('/recurring/rules', methods=['POST'])
+@login_required
+def create_recurring_rule():
+    from app.models import RecurringRule
+    from app.recurring_rules import parse_rule_form
+    fields, errors = parse_rule_form(request.form)
+    if errors:
+        return _render_rule_form(fields, errors, status=400)
+    db.session.add(RecurringRule(
+        label=fields['label'], pattern=fields['pattern'],
+        direction=fields['direction'], action=fields['action'],
+        amount_min=fields['amount_min'], amount_max=fields['amount_max'],
+    ))
+    db.session.commit()
+    return redirect(url_for('main.recurring'))
+
+
+@bp.route('/recurring/rules/<int:rule_id>/delete', methods=['POST'])
+@login_required
+def delete_recurring_rule(rule_id):
+    from app.models import RecurringRule
+    rule = db.session.get(RecurringRule, rule_id)
+    if rule is not None:
+        db.session.delete(rule)
+        db.session.commit()
+    return redirect(url_for('main.recurring'))
 
 
 # /bills and /subscriptions were merged into /recurring. A temporary (302)

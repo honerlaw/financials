@@ -75,3 +75,4 @@ build got 5.8x cheaper.
 - [[032-constraint-plaid-entity-ids-must-never-fuzzy-merge]] — the rule that keeps the indexed and in-memory paths agreeing
 - [[031-pattern-version-stamp-must-invalidate-derived-inputs]] — see also
 - [[033-pattern-sqlite-tests-cannot-catch-postgres-transaction-aborts]] — see also
+- [[2026-11-07-decision-join-suffixed-keys-through-member-keys]] — new keys are now also matched against live member keys' word prefixes

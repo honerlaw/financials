@@ -160,8 +160,11 @@ class MerchantGroup(db.Model):
     """One detected merchant identity — the unit /recurring groups by.
 
     ``canonical_key`` is frozen at creation and is what later keys fuzzy-match
-    against. It is deliberately NOT recomputed from the group's name
-    distribution on each pass: a moving canonical key would make a group's
+    against first; a name key that matches no canonical key may still join
+    through one of the group's live member keys that is a word prefix of it
+    (``app.subscriptions.member_prefix_match``). It is deliberately NOT
+    recomputed from the group's name distribution on each pass: a moving
+    canonical key would make a group's
     matching behaviour depend on the order transactions happened to arrive in,
     which is the instability this index exists to remove.
 

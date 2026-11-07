@@ -199,7 +199,7 @@ def _live_members(name_keys):
 def update_index():
     """Bring the merchant-group index up to date. Returns a summary dict.
 
-    Cheap and safe to call on every sync: with nothing new it runs two indexed
+    Cheap and safe to call on every sync: with nothing new it runs three indexed
     queries and returns. A `GROUPING_ALGO_VERSION` mismatch rebuilds the whole
     index exactly once, so tuning FUZZY_THRESHOLD or normalize_merchant can
     never leave a silently stale grouping behind.

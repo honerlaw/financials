@@ -247,3 +247,19 @@ def test_a_key_whose_rows_were_removed_after_indexing_never_bridges(app):
         member = MerchantGroupKey.query.filter_by(key='in acme widgets').one()
         suffixed = MerchantGroupKey.query.filter_by(key='in acme widgets anytown usa').one()
         assert suffixed.group_id != member.group_id
+
+
+def test_an_indexed_prefix_of_the_representative_is_not_a_member(app):
+    # Incremental, so the guard runs on keys already in merchant_group_keys.
+    with app.app_context():
+        _persist(_hub_corpus()[:-1])
+        update_index()
+        db.session.commit()
+
+        _add(FakeTxn(date(2026, 5, 9), description='AMAZON FRESH DELIVERY'), 1)
+        update_index()
+        db.session.commit()
+
+        bare = MerchantGroupKey.query.filter_by(key='amazon').one()
+        extension = MerchantGroupKey.query.filter_by(key='amazon fresh delivery').one()
+        assert extension.group_id != bare.group_id

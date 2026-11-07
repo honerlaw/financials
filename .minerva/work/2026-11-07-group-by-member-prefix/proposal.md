@@ -1,7 +1,7 @@
 # Proposal: group-by-member-prefix
 
 **Date**: 2026-11-07
-**Status**: Draft
+**Status**: Implemented
 
 ## Goal
 A name key that today's rules match to no group can still join one, when its leading words are a **member key** of that group. A member key is a name key already assigned to the group, at least `MEMBER_PREFIX_MIN_LENGTH` characters long, that is not merely a prefix of the group's representative.
@@ -97,7 +97,7 @@ Every fixture is fictional and asserts its own `_similar` preconditions, so a te
    - **Hub guard.** A name key that is a prefix of its group's representative is not a member. Example: `amazon` in an `amazon prime` entity group, so `amazon fresh delivery` does not join through it.
    - **Entity keys never use the rule** (incremental, because entity keys are handled before name keys in a pass). Build an index whose name group has the member `in acme widgets`, then sync an entity whose representative name is `in acme widgets anytown usa`. It does not join that group.
 2. **Indexed path** (`tests/test_merchant_groups.py`):
-   - **Partition parity.** A cold-built index splits the corpus into the same partition as `_group_transactions`.
+   - **Partition parity.** On the tested fixtures, a cold-built index splits the corpus into the same partition as `_group_transactions`. Three pre-existing differences can still split them on other corpora; they occur with the rule off too (see Known consequences).
      - The comparison is not on detector output. It compares groups as sets of `(date, amount, description)` tuples, or as transaction ids queried through `MerchantGroupKey`; detection rows carry no id.
      - The corpus includes the target case, and a **removed** row whose key would be the member prefix. Neither path joins through that removed key.
    - **Incremental.** After the index is built, a newly synced suffixed key joins the existing group.
@@ -130,6 +130,10 @@ Every fixture is fictional and asserts its own `_similar` preconditions, so a te
   - If a suffixed key syncs before its plain form ever appears, the index keeps them split until the next rebuild, while the in-memory path merges them.
   - If a member's rows are later removed after its extension joined through it, the index keeps the join while the in-memory path splits it.
   - Both are within 029's accepted first-come-wins divergence. The parity tests cover cold builds.
+- **Cold-build parity is not total, and that predates this change.** Three differences, all present with the rule off (found by fuzzing about 4,400 random corpora in code review):
+  - keys found only on removed rows still open groups and fuzzy-match in the index, but not in memory;
+  - two entity groups with the same representative name collide in `canonical` (the last one wins in the index, the first in memory);
+  - `_representative_name` drops empty names, while `_group_key` does not.
 - **A member key that joined by fuzzy ratio also pulls in its word-extensions.** The 5-character minimum, the word boundary and the hub guard bound this. The guard covers only exact prefixes of the representative.
 
 ## Open Questions

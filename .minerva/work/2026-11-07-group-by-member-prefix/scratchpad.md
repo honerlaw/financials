@@ -11,4 +11,6 @@
 - [reviewed — folded] whole-proposal (restart): folded the same-pass member wording, minimum-length fixture, merge_by_descriptor double-count consequence, parity comparison, rebuild cost, replay evidence for the reported case, fictional fixture text, the _group_transactions docs; the entity criterion made non-vacuous (tier: reviewer)
 - [rechecked — residual folded] whole-proposal: fold-audit accepted (9 addressed, rebuild cost partial — not load-bearing, bounded under the 120 s timeout); folded the cost wording, the incremental entity-key test, the ranged-candidate preview, the entity-group example
 
+- [reviewed — Verifier: revise → test gap closed] completion verification: criteria 1–4 met (13 mutants run; all but one killed); the surviving mutant (dropping the live filter on already-indexed member keys) exposed an untested Approach claim, not an unmet criterion — closed with an incremental removed-member test; 534 pass (tier: reviewer floor — no interface change beyond what the proposal approved)
+
 ## Notes

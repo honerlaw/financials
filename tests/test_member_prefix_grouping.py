@@ -227,3 +227,23 @@ def test_version_bump_regroups_an_index_built_without_the_rule(app, monkeypatch)
         after = _partition(grouped_transactions())
         assert _group_of(after, SUFFIXED) == _group_of(after, PLAIN)
         assert len(after) == 1
+
+
+def test_a_key_whose_rows_were_removed_after_indexing_never_bridges(app):
+    # Incremental: the plain row was live when indexed, then Plaid removed it.
+    # Its key stays in merchant_group_keys but must no longer act as a member.
+    with app.app_context():
+        _persist(_target(suffixed=False))
+        update_index()
+        db.session.commit()
+        for t in Transaction.query.filter_by(description=PLAIN, merchant_name=None):
+            t.removed = True
+        db.session.commit()
+
+        _add(FakeTxn(date(2026, 5, 9), description=SUFFIXED), 1)
+        update_index()
+        db.session.commit()
+
+        member = MerchantGroupKey.query.filter_by(key='in acme widgets').one()
+        suffixed = MerchantGroupKey.query.filter_by(key='in acme widgets anytown usa').one()
+        assert suffixed.group_id != member.group_id

@@ -12,6 +12,6 @@
 - Completion verification — [reviewed — Verifier: INCOMPLETE → folded] code matched every Approach claim; two test gaps (criterion 2g: the flag-it-first note was never rendered in a test; 3b: Flag and Not recurring links were indistinguishable) closed with two route tests. 497 pass.
 
 ## Notes
-- Local replay (uncategorized cache, not committed) reproduced the design replay: the expected same-amount monthly plans, and a suggestion list topped by P2P, vet, rental, counseling and pet payees. Card payments and transfers only drop out in production, where categories exist.
+- Local replay (uncategorized cache, not committed) reproduced the design replay: the expected same-amount monthly plans, and a suggestion list topped by appointment-style and P2P payees. Card payments and transfers only drop out in production, where categories exist.
 - Triage (code review) — [solo] point 1 (the note beside a transfer sub-stream invited counting it) fixed by rewording; point 2 (an unranged Not recurring can reach another group) documented in Known consequences, since the rule preview already lists the sources; no issue filed (low).
 - Promote partition — [solo] one decision entry amending 003; no TODOs remain open.

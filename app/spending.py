@@ -32,9 +32,6 @@ from typing import NamedTuple
 
 WEEKLY_BUDGET = Decimal('1000')
 
-# A purchase strictly above this is itemised by the daily digest.
-LARGE_PURCHASE = Decimal('100')
-
 # Plaid personal_finance_category primaries excluded from spend. Prefix-matched
 # so detailed variants (TRANSFER_IN/TRANSFER_OUT) are covered by one entry.
 _EXCLUDED_SPEND_PREFIXES = ('TRANSFER', 'LOAN_PAYMENTS')
@@ -123,19 +120,18 @@ class DaySpend(NamedTuple):
     """One day's purchases, as ``day_spend`` aggregates them.
 
     ``day`` is the date aggregated, carried so a caller printing it cannot
-    disagree with the numbers. ``large`` is ``[(label, amount)]`` for every purchase over
-    ``LARGE_PURCHASE``, largest first. ``by_category`` is ``[(category,
-    total)]``, largest first, where ``category`` is the Plaid primary as stored
-    (upper-cased) or ``None`` when the row has none.
+    disagree with the numbers. ``purchases`` is ``[(label, amount)]`` for
+    EVERY purchase that day, largest first, where ``label`` is the merchant
+    name, else the raw description. Two purchases at one merchant are two
+    entries, never merged.
     """
     day: date
     count: int
     total: Decimal
-    large: list
-    by_category: list
+    purchases: list
 
 
-def day_spend(transactions, day, large_over=LARGE_PURCHASE):
+def day_spend(transactions, day):
     """Aggregate the ``is_spend`` transactions purchased on ``day`` — pure.
 
     The same spend definition the budget line and weekly history use, keyed on
@@ -145,25 +141,17 @@ def day_spend(transactions, day, large_over=LARGE_PURCHASE):
     Every row counted here is still in some week total the digest prints,
     though possibly a different week than ``day`` falls in. Filters the input
     defensively, like every aggregate here, so a caller may pass a wider fetch.
-    Ties sort by label / category name so the output is stable.
+    Only dates are stored, not times of day, so purchases sort largest first;
+    ties sort by label so the output is stable.
     """
-    count = 0
-    total = Decimal('0')
-    large = []
-    categories = {}
-    for txn in transactions:
-        if purchase_date(txn) != day or not is_spend(txn):
-            continue
-        count += 1
-        total += txn.amount
-        if txn.amount > large_over:
-            large.append((txn.merchant_name or txn.description, txn.amount))
-        key = (txn.category or '').upper() or None
-        categories[key] = categories.get(key, Decimal('0')) + txn.amount
-    large.sort(key=lambda item: (-item[1], item[0]))
-    by_category = sorted(categories.items(),
-                         key=lambda item: (-item[1], item[0] or ''))
-    return DaySpend(day, count, total, large, by_category)
+    purchases = [
+        (txn.merchant_name or txn.description, txn.amount)
+        for txn in transactions
+        if purchase_date(txn) == day and is_spend(txn)
+    ]
+    purchases.sort(key=lambda item: (-item[1], item[0]))
+    total = sum((amount for _, amount in purchases), Decimal('0'))
+    return DaySpend(day, len(purchases), total, purchases)
 
 
 def recent_week_spend(transactions, today, weeks=4):

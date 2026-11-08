@@ -1,7 +1,7 @@
 # Proposal: quick-not-recurring
 
 **Date**: 2026-11-08
-**Status**: Draft
+**Status**: Shipped (2026-11-08)
 
 ## Goal
 The user can mark a stream on /recurring as not recurring (including a subscription they cancelled) with one click on that row, without leaving the page. They can undo it with one click too.
@@ -11,40 +11,28 @@ The user said: "make it easier to mark something as 'not recurring or cancelled 
 
 The form's preview exists because a rule's pattern can reach past the row it started from. That happens with a check group, a transfer pattern, or an unranged pattern beside a same-amount plan (knowledge 2026-11-07-decision-user-rules-correct-recurring-detection). For most rows the pattern hint claims exactly the row's own transactions, so the preview is a confirmation step that adds nothing.
 
-## Approach (A: one-click POST that saves when the rule claims exactly the clicked stream, and falls back to the form when it does not)
-- **Route `POST /recurring/rules/quick`** (`login_required`). It takes `label`, `pattern`, `direction`, optional `amount_min`/`amount_max`, and a **stream locator**: one or more `key` (the stream's `stream_keys`), plus `split_amount` (empty unless the stream is a same-amount plan).
-  - It builds a candidate with `parse_rule_form` and `action='not_recurring'`.
-  - It loads groups with `groups_for_detection()` and the saved rules with `_rule_rows()`, the way `/recurring` does. It then runs `detect_recurring_with_rules(groups, today, saved)` to recompute the page's streams, and `preview(groups, saved, candidate)` over the **same `groups` object**. It commits after both, in the same order as `_render_rule_form`.
-  - **Locate the stream.** Find the non-rule bills, income or suggestions whose `stream_keys` equal the posted keys, whose `split_amount` equals the posted one (both parsed as `Decimal`; empty means `None`), and whose side matches `direction`. There must be exactly one.
-  - **Save directly** only when the candidate claims **exactly that stream's rows**:
-    - the set of rows the candidate would win, by object identity, equals the set of that stream's rows on the candidate's side (`amount > 0` for outflow, `< 0` for inflow);
-    - and `taken` is empty.
+## Approach (as built: one-click POST of a stream locator; the server saves only when the rule claims exactly that stream)
+- **Route `POST /recurring/rules/quick`** (`login_required`). The button posts only a **locator**:
+  - `stream_key` (repeated): the stream's `stream_keys`;
+  - `direction`;
+  - `split_amount`, for a same-amount plan only.
 
-    This rules out both overreach (rows of another group, or a sibling plan) and partial coverage (a short or fallback `pattern_hint` that matches only some of the stream's rows).
-    - On a save, the route redirects to `/recurring?marked=<new id>#not-counted`.
-  - **Already marked.** If the stream is not found, but a saved rule with `action='not_recurring'` has the same pattern, direction and range, the route redirects to `/recurring?marked=<that id>#not-counted`. This makes a double click or a stale page idempotent.
-  - **Otherwise** (no or ambiguous stream, rows not equal, rows taken, invalid fields, no keys, over 500 keys) it redirects to `GET /recurring/rules/new` with the same label, pattern, direction and amounts, plus `action=not_recurring&preview=1`. The user then sees the existing preview and saves from there. No 400 page.
-  - Posted keys only *locate* the stream. The row-equality check runs on server data, so a stale or forged locator can at worst land on the form.
-  - **Support code.**
-    - Each stream dict built by `detect_recurring_with_rules`, and each suggestion, gains `rows`: the row objects it was built from. For a suggestion, that is its remaining outflows. These are references, not copies. Every consumer of these dicts (`grep detect_recurring_with_rules`/`detect_bills`/`detect_recurring_from_groups`) is checked so that none serializes or compares whole dicts.
-    - `preview` gains `won_rows`, the candidate's rows.
-    - A pure helper `quick_mark_verdict(found, preview_result, keys, split_amount, direction)` in `app/recurring_rules.py` returns `'save'` or `'form'`, and is unit-tested.
-    - Detection rows already carry `merchant_entity_id`, `merchant_name` and `description` (`_DETECTION_COLUMNS`). `grouping_key` needs nothing new, and nothing reads a new column.
-- **Why the match is safe across merges.** `apply_rules` partitions rows per row, independent of group order. `merge_by_descriptor` keeps the same row objects (`[t for g in side for t in g]`). Streams are built only from leftovers. So a stream merged from two index groups has one `stream_keys` holding both keys, and its rows are exactly the rows the candidate must win.
-- **Stream keys.** Each non-rule stream and suggestion gets `stream_keys`: the sorted distinct non-empty `grouping_key` values of its `rows`.
-  - This is separate from `essential_keys`: income has none of those, and those carry prefixes and amount suffixes.
-  - A stream with no keys gets no quick button, only Flag.
+  The field is `stream_key` because the essential toggle's forms already post `key`. Label and pattern are not posted.
+  - The route loads the saved rules (`_rule_rows()`) and groups (`groups_for_detection()`), and runs `detect_recurring_with_rules(groups, today, rules)`.
+  - `locate_stream(found, keys, split_amount, direction)` (`app/recurring_rules.py`) returns the single non-rule bill, income stream or suggestion whose `stream_keys`, `split_amount` (as `Decimal`) and side match.
+  - The candidate is built from the located stream's `name` and `pattern_hint`, ranged to `split_amount` when there is one, with `action='not_recurring'`. It is validated by `parse_rule_form`, and `preview` runs over the **same `groups` object**. The route commits after both, in the same order as `/recurring`.
+  - `quick_mark_verdict(stream, preview_result, direction)` is true only when the set of rows the candidate would win, by object identity, equals the stream's rows on that side; that set is not empty; and `taken` is empty. Then the rule is saved, and the route redirects to `/recurring?marked=<id>#marked-notice`.
+  - When it is not true, or the hint fails validation (for example, under 3 characters), the route redirects to `GET /recurring/rules/new` with the label, pattern, direction, amounts, `action=not_recurring` and `preview=1`.
+  - **No stream located:** if a saved `not_recurring` rule's claim has the same `stream_keys` and direction and exactly the posted range, the route redirects to that rule's `?marked` (a double click, or a page from before the mark). Otherwise it redirects to /recurring. Malformed input also redirects to /recurring with nothing saved: no key, more than 500 keys, a bad direction, or an unparseable or non-finite amount.
+- **Support code.** `detect_recurring_with_rules` gives each non-rule stream and suggestion `rows` (references to the rows it was built from) and `stream_keys` (sorted distinct grouping keys of those rows). Rule streams get `stream_keys = ()`. Each `_rule_entry` carries its claim's `stream_keys`. `preview` returns `won_rows`.
+- **Why identity holds.** `apply_rules` partitions by reference. `merge_by_descriptor` copies lists, not rows. Sub-streams and suggestions are slices by reference. A merged stream therefore carries both index groups' keys and rows.
 - **UI** (`recurring.html`):
-  - Every row that has a Flag link today (counted, each not-counted group, income, possibly recurring) gets a small inline **Not recurring** button. It is a `<form method="post">` with hidden fields, styled `btn btn-sm btn-ghost`.
-    - Its `title`: "Stop counting this — not a bill, or one you cancelled. Future charges matching it stay hidden too; undo from Not counted → Marked not recurring."
-    - Same-amount sub-streams post their pinned amount as both bounds, as their Flag link does today.
-    - Rule-built rows keep their badge and get no button.
-    - The suggestions' existing "Not recurring" link becomes this button. `has_split` suggestions stay withheld, as today.
-  - The Flag link stays.
-  - **Notice.** `?marked=<id>` is read with `request.args.get('marked', type=int)`, so a non-integer is ignored. When it names a rule that is in `found.rules`, the page shows a notice card above the figures: "Marked **<label>** not recurring: <N> rows matching "<pattern>" from <sources>." It has an **Undo** button (POST delete). An unknown id shows nothing. It costs no query, because the rules are already loaded.
-  - **Undo on the list.** Each "Marked not recurring" row gets an **Undo** button (POST `/recurring/rules/<id>/delete`).
-  - The "Not counted" heading gets `id="not-counted"`. With `?marked`, the Marked-not-recurring `<details>` renders `open`.
-- **Nothing else changes.** The rule model, the migration, precedence, detection results, the form and the delete route are all untouched. A quick mark saves an ordinary `not_recurring` rule, listed on the Your rules card.
+  - A `quick_mark` macro renders an inline **Not recurring** button (`.inline-form`, `btn btn-sm btn-ghost`). Its title reads: "Stop counting this: not a bill, or one you cancelled. Future charges matching it stay hidden too…".
+  - The button appears next to the Flag link on every non-rule row with keys (counted, not counted and income), with same-amount plans posting their amount.
+  - It replaces the suggestions' old "Not recurring" link. `has_split` suggestions stay withheld. Rule rows get no button.
+  - **Notice** (`id="marked-notice"`): `?marked` is read with `type=int` and matched against the already-loaded `found.rules`, `not_recurring` only. It shows the label, row count, the pattern still hidden, the sources and an **Undo** (delete).
+  - Each **Marked not recurring** row gets an **Undo**. That disclosure renders `open` while a notice shows. The Not-counted heading gets `id="not-counted"`.
+- **Unchanged:** the rule model and migration, precedence, detection results, the form and the delete route.
 
 ### Alternatives considered
 - **B: one-click save with no containment guard**, relying on the notice and Undo to show what was claimed. Simpler, but one click on a check stream or a broad transfer hint would silently claim unrelated rows across groups. That is exactly the risk the form's preview exists for.
@@ -52,22 +40,23 @@ The form's preview exists because a rule's pattern can reach past the row it sta
 - **D: an inline expanding preview per row** (details or a fetch) with a confirm button. It keeps the preview but costs one `apply_rules` pass per row on page load, or new JavaScript. It is still two clicks, and A already gives the preview exactly when it matters.
 
 ## Success criteria
-1. **Unit** (`tests/test_recurring_rules.py`, fictional fixtures):
+1. **Unit** (`tests/test_quick_not_recurring.py`, fictional fixtures):
    - `preview` returns the candidate's `won_rows`.
-   - `quick_mark_verdict` returns `'save'` when the hint claims exactly the stream's rows. It returns `'form'` when:
+   - `quick_mark_verdict` is true when the hint claims exactly the stream's rows. It is false when:
      - a row of another group is also won;
      - only some of the stream's rows are won (a hint that falls back to one description);
      - rows are taken from a saved rule;
-     - no stream matches the locator.
+     - `locate_stream` returns None for keys, side or amount that do not match.
 2. **Detection:** each whole-group bill, income stream, same-amount sub-stream and suggestion carries `rows` and `stream_keys` (its rows' distinct grouping keys). A rule stream carries `stream_keys` of `()`.
-3. **Routes** (frozen clock, fictional data):
-   - Quick-marking a counted bill saves one `not_recurring` rule and redirects to `/recurring?marked=<id>#not-counted`. The page then no longer counts the bill, lists it under Marked not recurring, and shows the notice (with the pattern) and Undo.
+3. **Routes** (`tests/test_quick_not_recurring.py`, frozen clock, fictional data):
+   - Quick-marking a counted bill saves one `not_recurring` rule and redirects to `/recurring?marked=<id>#marked-notice`. The page then no longer counts the bill, lists it under Marked not recurring, and shows the notice (with the pattern) and Undo.
    - Quick-marking an income stream saves an inflow rule.
    - Quick-marking a same-amount sub-stream saves a rule ranged to exactly that amount, and the sibling plan stays counted.
    - Quick-marking a stream merged from two index groups (`merge_by_descriptor`) saves and claims both groups' rows.
    - A pattern that would also claim another group's rows saves nothing. A pattern that would claim only part of the stream saves nothing. Both redirect to the form with `action=not_recurring` and `preview=1`, and the form renders the preview.
    - Posting the same quick mark twice saves one rule. The second post redirects to `?marked=<first id>`.
-   - Invalid input (a pattern under 3 characters, no key, or over 500 keys) saves nothing and redirects to the form.
+   - A stream whose own hint is under 3 characters saves nothing and opens the form. Malformed input saves nothing and redirects to /recurring: no key, over 500 keys, a bad direction, an unparseable or non-finite amount, or unknown keys.
+   - Reposting a marked plan (even as `9.0`) confirms its own rule.
    - The route redirects to /login when logged out.
    - Every non-rule row with a Flag link renders a Not recurring button. Rule-built rows and `has_split` suggestions do not.
    - Each Marked-not-recurring row has an Undo button that deletes its rule.
@@ -79,3 +68,4 @@ The form's preview exists because a rule's pattern can reach past the row it sta
 
 ## Open Questions
 - A not-recurring rule from a hint also hides future charges matching the pattern. That is right for a cancelled subscription. If the user re-subscribes, the new charges stay hidden until Undo. The notice and the Marked list keep the rule visible.
+- Quick-marking one same-amount plan turns the sibling plan into the merchant's whole-group stream. Its essential key loses the `@amount` suffix, so a saved essential mark on it stops matching. Undo restores it. This is recorded in the knowledge entry rather than changed.

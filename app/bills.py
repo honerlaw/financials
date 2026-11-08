@@ -328,6 +328,20 @@ def _merchant_keys(rows, suffix=''):
     return keys, f'merchant:{primary}{suffix}'
 
 
+def _stream_keys(rows):
+    """The sorted distinct non-empty grouping keys of `rows`: what a quick
+    "Not recurring" button posts to locate its stream again (routes.py)."""
+    return tuple(sorted({k for k in (grouping_key(t) for t in rows) if k}))
+
+
+def _set_rows(stream, rows):
+    """Attach the row objects a stream was built from — references, not
+    copies — so a quick mark can check that a rule claims exactly them."""
+    stream['rows'] = list(rows)
+    stream['stream_keys'] = _stream_keys(rows)
+    return stream
+
+
 def _set_keys(stream, keys, primary):
     stream['essential_keys'] = keys
     stream['essential_key'] = primary
@@ -418,6 +432,7 @@ def _rule_entry(claim, status, stream=None):
         'rows_won': len(claim.rows),
         'last_matched': claim.rows[-1].date if claim.rows else None,
         'sources': claim.sources,
+        'stream_keys': _stream_keys(claim.rows),
         'status': status,
         'stream': stream,
     }
@@ -495,6 +510,8 @@ def _suggestion(group, remaining, today, has_split):
         'pattern_hint': pattern_hint(out),
         'is_transfer': _is_transfer(group),
         'has_split': has_split,
+        'rows': out,
+        'stream_keys': _stream_keys(out),
     }
 
 
@@ -544,6 +561,7 @@ def detect_recurring_with_rules(groups, today, rules):
                 rows = [group[i] for i in positions]
                 sub['pattern_hint'] = pattern_hint(rows)
                 sub['rule_id'] = None
+                _set_rows(sub, rows)
                 if sub['new'] and len(positions) == outflows:
                     # A new pair that is the whole group is the merchant
                     # itself: its own name and unsuffixed key, so a mark
@@ -569,6 +587,7 @@ def detect_recurring_with_rules(groups, today, rules):
         stream['pattern_hint'] = pattern_hint(group)
         stream['split_amount'] = None
         stream['rule_id'] = None
+        _set_rows(stream, group)
         if stream['is_inflow']:
             # Income is never marked essential: it is not an expense.
             _set_keys(stream, (), None)
@@ -600,6 +619,9 @@ def detect_recurring_with_rules(groups, today, rules):
         stream['pattern_hint'] = rule.pattern
         stream['split_amount'] = None
         stream['rule_id'] = rule.id
+        # A rule stream is changed by deleting its rule, never quick-marked.
+        stream['rows'] = list(claim.rows)
+        stream['stream_keys'] = ()
         key = None if inflow else f'rule:{rule.id}'
         _set_keys(stream, (key,) if key else (), key)
         if inflow:

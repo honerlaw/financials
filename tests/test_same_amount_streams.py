@@ -353,7 +353,7 @@ def test_page_lists_possibly_recurring_even_with_nothing_not_counted(client, app
     assert '$187.50' in html
     assert 'May 13, 2026' in html
     assert 'pattern=RIVERSIDE+THERAPY' in html
-    assert 'action=not_recurring' in html
+    assert '/recurring/rules/quick' in _suggestions(html)
 
 
 @freeze_time(FROZEN)
@@ -367,14 +367,18 @@ def test_page_without_either_renders_as_before(client, app):
     assert 'same amount' not in html and 'Possibly recurring' not in html
 
 
+def _suggestions(html):
+    return html.split('Possibly recurring</h2>', 1)[1].split('Recurring income</div>', 1)[0]
+
+
 @freeze_time(FROZEN)
-def test_suggestion_links_are_a_flag_and_a_not_recurring(client, app):
+def test_suggestion_has_a_flag_link_and_a_not_recurring_button(client, app):
     _seed(app, plans=False)
     _login(client)
-    html = client.get('/recurring').get_data(as_text=True)
-    links = re.findall(r'href="([^"]*pattern=RIVERSIDE\+THERAPY[^"]*)"', html)
-    assert len(links) == 2
-    assert sum('action=not_recurring' in link for link in links) == 1
+    section = _suggestions(client.get('/recurring').get_data(as_text=True))
+    links = re.findall(r'href="([^"]*pattern=RIVERSIDE\+THERAPY[^"]*)"', section)
+    assert len(links) == 1 and 'action=' not in links[0]
+    assert section.count('action="/recurring/rules/quick"') == 1
 
 
 @freeze_time(FROZEN)
@@ -394,7 +398,7 @@ def test_suggestion_beside_a_same_amount_stream_has_only_the_note(client, app):
     html = client.get('/recurring').get_data(as_text=True)
     assert 'Riverside Therapy · $9.00' in html
     assert 'Add a rule for its same-amount stream first' in html
-    assert 'action=not_recurring' not in html
+    assert '/recurring/rules/quick' not in _suggestions(html)
     # Only the sub-stream's own Flag link, with its exact amount, remains.
     links = re.findall(r'href="([^"]*pattern=RIVERSIDE\+THERAPY[^"]*)"', html)
     assert len(links) == 1 and 'amount_min=9.00' in links[0]

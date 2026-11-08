@@ -5,6 +5,21 @@
    stream gets a Flag link that opens the rule form pre-filled from it. A
    same-amount sub-stream's Flag also pins its exact amount, so the rule takes
    over just that plan. A new monthly pair (two charges so far) is badged "new". #}
+{# One click to stop counting a stream (routes.quick_not_recurring_rule). It
+   posts only a locator: the stream's grouping keys, its side and a plan's
+   amount. The server rebuilds the rule from the stream it finds, saving when
+   the rule claims exactly that stream and opening the previewing form
+   otherwise. A stream without any keys gets no button. #}
+{% macro quick_mark(s, direction, amount=none) %}
+{% if s.stream_keys %}
+<form class="inline-form" method="post" action="{{ url_for('main.quick_not_recurring_rule') }}">
+  <input type="hidden" name="direction" value="{{ direction }}">
+  {% if amount is not none %}<input type="hidden" name="split_amount" value="{{ amount }}">{% endif %}
+  {% for k in s.stream_keys %}<input type="hidden" name="stream_key" value="{{ k }}">{% endfor %}
+  <button type="submit" class="btn btn-sm btn-ghost" title="Stop counting this: not a bill, or one you cancelled. Future charges matching it stay hidden too. Undo from Not counted, Marked not recurring.">Not recurring</button>
+</form>
+{% endif %}
+{% endmacro %}
 {% macro name_cell(s) %}
 <td class="medium">
   {{ s.name }}
@@ -12,7 +27,9 @@
   {% if s.rule_id %}<span class="badge badge-accent">your rule</span>
   {% elif s.split_amount is not none %}<span class="badge" title="One of several plans at this merchant, found by its exact amount">same amount</span>
   <a class="xs muted" href="{{ url_for('main.new_recurring_rule', pattern=s.pattern_hint, label=s.name, direction='outflow', amount_min=s.split_amount, amount_max=s.split_amount) }}">Flag</a>
-  {% else %}<a class="xs muted" href="{{ url_for('main.new_recurring_rule', pattern=s.pattern_hint, label=s.name, direction='inflow' if s.is_inflow else 'outflow') }}">Flag</a>{% endif %}
+  {{ quick_mark(s, 'outflow', s.split_amount) }}
+  {% else %}<a class="xs muted" href="{{ url_for('main.new_recurring_rule', pattern=s.pattern_hint, label=s.name, direction='inflow' if s.is_inflow else 'outflow') }}">Flag</a>
+  {{ quick_mark(s, 'inflow' if s.is_inflow else 'outflow') }}{% endif %}
 </td>
 {% endmacro %}
 {% macro range_text(r) %}{% if r.amount_min is not none and r.amount_max is not none %}{{ money(r.amount_min) }}–{{ money(r.amount_max) }}{% elif r.amount_min is not none %}{{ money(r.amount_min) }} or more{% elif r.amount_max is not none %}up to {{ money(r.amount_max) }}{% else %}any amount{% endif %}{% endmacro %}
@@ -28,6 +45,23 @@
     {% if paid_count %}{{ paid_count }} paid this month{% endif %}
   </span>
 </div>
+
+{# Confirms a one-click "Not recurring", with the pattern it will keep hiding
+   and an Undo that deletes the rule again. #}
+{% if notice %}
+<div class="card mb-4" id="marked-notice" role="status">
+  <div class="card-body row between wrap gap-2">
+    <span class="small">
+      Marked <span class="strong">{{ notice.label }}</span> not recurring:
+      {{ notice.rows_won }} {{ 'row' if notice.rows_won == 1 else 'rows' }} matching "{{ notice.pattern }}"{% if notice.sources %} from {{ sources_text(notice.sources) }}{% endif %}.
+      <span class="muted">Future charges matching it stay hidden too.</span>
+    </span>
+    <form method="post" action="{{ url_for('main.delete_recurring_rule', rule_id=notice.id) }}">
+      <button type="submit" class="btn btn-sm">Undo</button>
+    </form>
+  </div>
+</div>
+{% endif %}
 
 {# The three headline figures. Expenses lean high and income leans low, so
    "left after recurring" errs toward less — each card says which. #}
@@ -133,7 +167,7 @@
    collapsed by reason. No paid/unpaid badge here — an uncounted stream is not
    an obligation, and a red "Unpaid" on it would be a false alarm (knowledge 005). #}
 {% if excluded or marked %}
-<h2 class="eyebrow mb-2">Not counted</h2>
+<h2 class="eyebrow mb-2" id="not-counted">Not counted</h2>
 <div class="card mb-4">
   {% for label, rows in excluded %}
   <details class="disclosure">
@@ -180,12 +214,12 @@
      them, so they have no cadence, amount or status — only where they came
      from, so nothing leaves the page unseen. #}
   {% if marked %}
-  <details class="disclosure">
+  <details class="disclosure" {% if notice %}open{% endif %}>
     <summary><span>Marked not recurring ({{ marked|length }})</span></summary>
     <div class="table-wrap">
       <table class="table">
         <thead>
-          <tr><th>Rule</th><th>Direction</th><th class="right">Rows</th><th>Taken from</th></tr>
+          <tr><th>Rule</th><th>Direction</th><th class="right">Rows</th><th>Taken from</th><th></th></tr>
         </thead>
         <tbody>
         {% for m in marked %}
@@ -194,6 +228,11 @@
           <td class="muted">{{ 'money in' if m.direction == 'inflow' else 'money out' }}</td>
           <td class="right">{{ m.rows_won }}</td>
           <td class="xs muted">{{ sources_text(m.sources) }}</td>
+          <td>
+            <form method="post" action="{{ url_for('main.delete_recurring_rule', rule_id=m.id) }}">
+              <button type="submit" class="btn btn-sm btn-ghost" title="Delete this rule and count these rows again">Undo</button>
+            </form>
+          </td>
         </tr>
         {% endfor %}
         </tbody>
@@ -214,7 +253,7 @@
 <div class="card mb-4">
   <details class="disclosure">
     <summary><span>Charged in most recent months, on no regular schedule ({{ suggestions|length }})</span></summary>
-    <div class="card-body small muted">Not counted. Flag one to count it as a monthly bill, or mark it not recurring to clear it from this list.</div>
+    <div class="card-body small muted">Not counted. Flag one to count it as a monthly bill, or press Not recurring to clear it from this list.</div>
     <div class="table-wrap">
       <table class="table">
         <thead>
@@ -241,7 +280,7 @@
             <span class="muted">Add a rule for its same-amount stream first</span>
             {% else %}
             <a href="{{ url_for('main.new_recurring_rule', pattern=g.pattern_hint, label=g.name, direction='outflow') }}">Flag</a>
-            · <a class="muted" href="{{ url_for('main.new_recurring_rule', pattern=g.pattern_hint, label=g.name, direction='outflow', action='not_recurring') }}">Not recurring</a>
+            {{ quick_mark(g, 'outflow') }}
             {% endif %}
           </td>
         </tr>

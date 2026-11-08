@@ -14,6 +14,7 @@ so "left after recurring" errs on the side of less, never more.
 """
 
 import calendar
+import re
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from datetime import date, timedelta
@@ -59,6 +60,12 @@ _TOTAL_CADENCES = {'weekly', 'biweekly', 'monthly', 'quarterly'}
 _TRANSFER_PREFIX = 'TRANSFER'
 _CARD_PAYMENT_DETAILED = 'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT'
 
+# A Zelle payment sends money to another person — rent, a tutor, a therapist —
+# yet Plaid files it under TRANSFER_OUT alongside moves between the user's own
+# accounts, and its detailed category does not tell the two apart. The raw
+# descriptor does, so an outflow row naming Zelle is a payment, not a transfer.
+_P2P_PAYMENT_RE = re.compile(r'\bZELLE\b', re.IGNORECASE)
+
 # Income needs positive evidence: Plaid's INCOME primary category (wages,
 # interest, dividends, ...). See _is_income for why this is stricter than the
 # expense side's transfer rule.
@@ -69,7 +76,11 @@ _CENTS = Decimal('0.01')
 # Same-amount sub-streams: a merchant group not detected as a whole is split by
 # exact amount, and a subset counts only as an active monthly stream. Other
 # cadences proved to be coincidences: many bins per group give each its own
-# chance to pass at MIN_OCCURRENCES (knowledge 003's amendment).
+# chance to pass at MIN_OCCURRENCES (knowledge 003's amendment). The one
+# exception to MIN_OCCURRENCES is a new monthly pair — two charges at one exact
+# amount in consecutive months (subscriptions._is_new_monthly_pair) — accepted
+# so a new bill counts from its second charge; it is badged "new", and it
+# lapses by the ordinary `active` rule if no third charge follows.
 SPLIT_CADENCES = {'monthly'}
 
 # "Possibly recurring": a merchant with no stream, charged in at least
@@ -171,8 +182,17 @@ def _monthly_estimate(txns, cadence, inflow=False, percentile=ESTIMATE_PERCENTIL
     return (typical * MONTHLY_FACTOR[cadence]).quantize(_CENTS, rounding=ROUND_HALF_UP)
 
 
+def _is_p2p_payment(txn):
+    """An outflow row whose raw descriptor names a person-to-person rail."""
+    return txn.amount > 0 and bool(_P2P_PAYMENT_RE.search(txn.description or ''))
+
+
 def _is_transfer(txns):
     """True when most of a stream's categorized rows are card payments or transfers.
+
+    A categorized Zelle outflow (_is_p2p_payment) votes "not a transfer": it
+    pays a person. Each row votes on its own, so a mixed group is judged by
+    its majority.
 
     Rows with no category at all abstain rather than vote "not a transfer": the
     category columns arrived in a later migration, so a long-running autopay
@@ -183,8 +203,9 @@ def _is_transfer(txns):
     categorized = [t for t in txns if t.category or t.category_detailed]
     hits = sum(
         1 for t in categorized
-        if (t.category or '').upper().startswith(_TRANSFER_PREFIX)
-        or (t.category_detailed or '').upper() == _CARD_PAYMENT_DETAILED
+        if not _is_p2p_payment(t)
+        and ((t.category or '').upper().startswith(_TRANSFER_PREFIX)
+             or (t.category_detailed or '').upper() == _CARD_PAYMENT_DETAILED)
     )
     return hits * 2 > len(categorized)
 
@@ -406,9 +427,12 @@ def _split_by_amount(group, today):
     """Same-amount sub-streams of a group that is not a stream as a whole.
 
     Its outflow rows are binned by exact amount, and each bin goes through
-    _build_stream unchanged. A bin is accepted only as an active monthly
-    stream (SPLIT_CADENCES). A bin holding the whole group is skipped: it
-    already failed. Returns [(amount, stream, row positions)] by amount.
+    _build_stream with `pair=True`: two charges at one exact amount about a
+    month apart in consecutive months are a new monthly bill (`new` set), below
+    MIN_OCCURRENCES. A bin is accepted only as an active monthly stream
+    (SPLIT_CADENCES). A bin holding the whole group is skipped — it already
+    failed — unless it is such a pair, which whole-group detection never
+    accepts. Returns [(amount, stream, row positions)] by amount.
     """
     bins = defaultdict(list)
     for i, t in enumerate(group):
@@ -417,9 +441,12 @@ def _split_by_amount(group, today):
     accepted = []
     for amount in sorted(bins):
         positions = bins[amount]
-        if len(positions) == len(group):
+        rows = [group[i] for i in positions]
+        # Card payments and transfers are never a new bill: before pairs they
+        # produced nothing at all, and they would only be listed uncounted.
+        stream = _build_stream(rows, today, pair=not _is_transfer(rows))
+        if len(positions) == len(group) and not (stream and stream['new']):
             continue
-        stream = _build_stream([group[i] for i in positions], today)
         if stream is None or stream['cadence'] not in SPLIT_CADENCES or not stream['active']:
             continue
         accepted.append((amount, stream, positions))
@@ -495,7 +522,9 @@ def detect_recurring_with_rules(groups, today, rules):
     - 'not_recurring' → the rows leave detection and are listed as marked.
 
     A leftover group that is no stream as a whole is split by exact amount
-    (_split_by_amount); each accepted subset is a bill named with its amount.
+    (_split_by_amount); each accepted subset is a bill named with its amount,
+    except a new pair holding all of the group's outflows, which is the
+    merchant itself and keeps its name and unsuffixed key.
     Groups with no stream as a whole may become "Possibly recurring"
     suggestions (_suggestion), which are never counted.
     """
@@ -509,16 +538,26 @@ def detect_recurring_with_rules(groups, today, rules):
         stream = _build_stream(group, today)
         if stream is None:
             splits = _split_by_amount(group, today)
+            outflows = sum(1 for t in group if t.amount > 0)
             taken = set()
             for amount, sub, positions in splits:
                 rows = [group[i] for i in positions]
-                sub['name'] = f'{_display_name(group)} · ${amount:,.2f}'
-                sub['split_amount'] = amount
                 sub['pattern_hint'] = pattern_hint(rows)
                 sub['rule_id'] = None
-                # Suffixed with the plan's amount, and without the parent key,
-                # so marking one plan never marks another at the same merchant.
-                _set_keys(sub, *_merchant_keys(rows, suffix=f'@{amount:.2f}'))
+                if sub['new'] and len(positions) == outflows:
+                    # A new pair that is the whole group is the merchant
+                    # itself: its own name and unsuffixed key, so a mark
+                    # survives the third charge that makes it an ordinary
+                    # whole-group stream.
+                    sub['split_amount'] = None
+                    _set_keys(sub, *_merchant_keys(rows))
+                else:
+                    sub['name'] = f'{_display_name(group)} · ${amount:,.2f}'
+                    sub['split_amount'] = amount
+                    # Suffixed with the plan's amount, and without the parent
+                    # key, so marking one plan never marks another at the
+                    # same merchant.
+                    _set_keys(sub, *_merchant_keys(rows, suffix=f'@{amount:.2f}'))
                 bills.append(_finish_bill(sub, rows, today))
                 taken.update(positions)
             if not _is_card_payment(group):

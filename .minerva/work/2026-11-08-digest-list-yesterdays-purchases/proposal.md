@@ -1,7 +1,7 @@
 # Proposal: 2026-11-08-digest-list-yesterdays-purchases
 
 **Date**: 2026-11-08
-**Status**: Draft
+**Status**: Shipped (2026-11-08)
 
 ## Goal
 
@@ -13,13 +13,14 @@ Target section shape:
 
 ```
 Yesterday — Sun Oct 11
-6 purchases: $287
+7 purchases: $287
 Whole Foods Market: $142.18
 Shell: $48.20
 Chipotle: $31.75
-Starbucks: $28.40
+Amazon: $29.00
 CVS: $22.17
-Amazon Marketplace: $14.30
+Starbucks: $6.85
+Starbucks: $6.85
 ```
 
 Unchanged: everything else in the message, `No purchases.` on an empty day, the spend definition, the purchase-date keying, the single transaction query.
@@ -37,11 +38,12 @@ The user wants to see what was actually bought yesterday, not a threshold-filter
 
 ## Approach
 
-**A — replace `large` + `by_category` with one full `purchases` list, with a fixed length cap (recommended).**
+**A — replace `large` + `by_category` with one full `purchases` list, with a fixed length cap (shipped).**
 
 - `app/spending.py`: `DaySpend` becomes `(day, count, total, purchases)` where `purchases` is `[(label, amount)]` for **every** `is_spend` row whose `purchase_date` is the day, largest first, ties by label (label = `merchant_name or description`, as today). `LARGE_PURCHASE`, the `large_over` parameter and `by_category` are deleted (no other readers — grep-verified).
 - `app/notifications.py`: `yesterday_lines` prints header, `N purchase(s): $X` (whole dollars, as today), then one `label: $X.XX` line per purchase (label truncated to 32 chars, as today). If there are more than `PURCHASE_LIST_MAX` = 15 purchases, the first 15 are shown and a `+N more` line follows (the summary line above still counts and totals all of them). `category_name`, `LARGE_LIST_MAX`, `CATEGORY_LIST_MAX` are deleted.
-- Why a cap at all: Twilio rejects a body over 1600 characters and the day's digest is lost (knowledge 016 / 2026-10-12). Measured: the worst-case non-Yesterday part of the body (8 cards with long names and 5-digit balances) is ~730 chars; a worst-case purchase line is ~44 chars (32-char label + `: $9,999.99` + newline); 15 lines ≈ 660 → ~1,410 total, leaving margin. With the user's realistic 2–3 cards the body without Yesterday is ~480 chars. A realistic household day is well under 15 purchases, so in practice every purchase is listed.
+- Why a cap at all: Twilio rejects a body over 1600 characters and the day's digest is lost (knowledge 016 / 2026-10-12). Measured worst case for the cap: 8 cards (labels about 30 characters, all `(reconnect needed)`), five-digit week totals, 15 lines of 32-character labels at $9,999.99 come to 1,531 characters, pinned by test. With the user's 2–3 cards the body without Yesterday is about 480 characters. A realistic household day has well under 15 purchases, so in practice every purchase is listed.
+- **Length backstop (added at review).** Card lines are uncapped. Review measured that 9 short-named cards already reach 1,600, and 8 realistic long Plaid names reach 1,819, an exposure that predates this unit. So `digest_body` builds the fixed head and tail once and, while the body is over `BODY_MAX` = 1600, lists one fewer purchase (`yesterday_lines(spend, limit)`), so `+N more` grows. The 15 cap stays the primary rule; the backstop only lowers it. The only body still left over-long is one that does not fit even with no purchase lines (about 25+ long-named cards). Pinned by `test_many_long_named_cards_shorten_the_purchase_list_to_fit`. The label fallback is `merchant_name or description or ''`, so the sort never compares against None.
 - Order is largest first, ties by label. Only dates are stored, with no time of day, so a chronological order is not available.
 - Message cost: the body is already UCS-2 (because of `—`/`·`/`••`), so at 67 characters per segment a long day bills more segments, about 21 at the worst-case 1,400 characters. That is pennies, and accepted in the same way as the existing UCS-2 note in knowledge 016.
 - Tests: update `tests/test_spending.py` day_spend tests and `tests/test_notifications.py` Yesterday tests (pure + through both send paths); replace the worst-case length test with one using 30 purchases with 60-char labels at $9,999.99 and 8 worst-case cards.

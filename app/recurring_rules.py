@@ -190,28 +190,24 @@ def locate_stream(found, keys, split_amount, direction):
     return matches_[0] if len(matches_) == 1 else None
 
 
-def quick_mark_verdict(found, preview_result, keys, split_amount, direction):
-    """Whether a one-click "Not recurring" may save without the form.
+def quick_mark_verdict(stream, preview_result, direction):
+    """Whether a one-click "Not recurring" for `stream` (from `locate_stream`)
+    may save without the form.
 
-    'save'    — the candidate would claim exactly the located stream's rows on
-                its side (by identity), at least one, and take none from a saved
-                rule: one click marks what the user clicked and nothing else;
-    'missing' — no single stream matches the locator (already marked, a stale
-                page, or a forged post);
-    'form'    — anything else: the rule would reach past the stream, or cover
-                only part of it, so the user should see the preview first.
+    True only when the candidate would claim exactly the stream's rows on its
+    side (by identity), at least one, and take none from a saved rule — one
+    click marks what the user clicked and nothing else. Otherwise the rule
+    would reach past the stream, or cover only part of it, and the user should
+    see the preview first.
 
-    `preview_result` must come from `preview` over the same group lists that
-    `found` was detected from, so the row objects are shared.
+    `preview_result` must come from `preview` over the same group lists the
+    stream was detected from, so the row objects are shared. (A located
+    stream's rows are leftovers, so taking a saved rule's rows already breaks
+    equality; the `taken` check only states the rule outright.)
     """
-    stream = locate_stream(found, keys, split_amount, direction)
-    if stream is None:
-        return 'missing'
     expected = {id(r) for r in stream['rows'] if _on_side(r, direction)}
     won = {id(r) for r in preview_result['won_rows']}
-    if not won or won != expected or preview_result['taken']:
-        return 'form'
-    return 'save'
+    return bool(won) and won == expected and not preview_result['taken']
 
 
 def pattern_hint(txns):

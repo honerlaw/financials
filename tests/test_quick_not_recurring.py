@@ -14,7 +14,7 @@ from freezegun import freeze_time
 
 from app.bills import detect_recurring_with_rules
 from app.models import Account, EssentialMark, Institution, RecurringRule, Transaction, db
-from app.recurring_rules import preview, quick_mark_verdict
+from app.recurring_rules import locate_stream, preview, quick_mark_verdict
 from tests.test_recurring_rules import Row, monthly, rule
 
 TODAY = date(2026, 6, 13)
@@ -32,7 +32,8 @@ def _verdict(groups, saved=(), pick=lambda found: found.bills[0], direction='out
                      direction=direction, action='not_recurring',
                      amount_min=split, amount_max=split)
     result = preview(groups, saved, candidate)
-    return quick_mark_verdict(found, result, stream['stream_keys'], split, direction), result
+    assert locate_stream(found, stream['stream_keys'], split, direction) is stream
+    return quick_mark_verdict(stream, result, direction), result
 
 
 def test_preview_returns_the_rows_the_candidate_would_win():
@@ -45,7 +46,7 @@ def test_preview_returns_the_rows_the_candidate_would_win():
 def test_a_hint_claiming_exactly_the_stream_saves():
     groups = [monthly('NORTHWIND STREAMING', '15.99', merchant_name='Northwind')]
     verdict, _ = _verdict(groups)
-    assert verdict == 'save'
+    assert verdict is True
 
 
 def test_a_hint_that_also_claims_another_groups_rows_goes_to_the_form():
@@ -56,7 +57,7 @@ def test_a_hint_that_also_claims_another_groups_rows_goes_to_the_form():
     verdict, result = _verdict(groups, pick=lambda f: next(
         b for b in f.bills if b['name'] == 'Northwind'))
     assert result['won'] == 10
-    assert verdict == 'form'
+    assert verdict is False
 
 
 def test_a_hint_covering_only_part_of_the_stream_goes_to_the_form():
@@ -67,7 +68,7 @@ def test_a_hint_covering_only_part_of_the_stream_goes_to_the_form():
              for m, d in zip(range(1, 6), descriptions)]
     verdict, result = _verdict([group])
     assert result['won'] == 3
-    assert verdict == 'form'
+    assert verdict is False
 
 
 def test_taken_rows_alone_refuse_a_save():
@@ -76,17 +77,18 @@ def test_taken_rows_alone_refuse_a_save():
     found = detect_recurring_with_rules(groups, TODAY, [])
     stream = found.bills[0]
     result = {'won_rows': list(stream['rows']), 'taken': [{'label': 'x', 'pattern': 'y', 'rows': 1}]}
-    assert quick_mark_verdict(found, result, stream['stream_keys'], None, 'outflow') == 'form'
+    assert quick_mark_verdict(stream, result, 'outflow') is False
+    assert quick_mark_verdict(stream, {**result, 'taken': []}, 'outflow') is True
 
 
-def test_no_stream_matching_the_locator_is_missing():
+def test_locate_stream_needs_keys_side_and_amount_to_match():
     groups = [monthly('NORTHWIND STREAMING', '15.99', merchant_name='Northwind')]
     found = detect_recurring_with_rules(groups, TODAY, [])
-    result = {'won_rows': [], 'taken': []}
-    assert quick_mark_verdict(found, result, ('no such key',), None, 'outflow') == 'missing'
-    # The right keys on the wrong side are no stream either.
-    assert quick_mark_verdict(found, result, found.bills[0]['stream_keys'], None,
-                              'inflow') == 'missing'
+    [bill] = found.bills
+    assert locate_stream(found, ['northwind'], None, 'outflow') is bill
+    assert locate_stream(found, ['no such key'], None, 'outflow') is None
+    assert locate_stream(found, ['northwind'], None, 'inflow') is None
+    assert locate_stream(found, ['northwind'], Decimal('15.99'), 'outflow') is None
 
 
 # ── detection carries rows and stream keys ──────────────────────────────────
@@ -180,7 +182,7 @@ def test_quick_marking_a_bill_saves_a_rule_and_confirms_it(client, app):
     assert 'Northwind' in _counted(html)
     res = client.post('/recurring/rules/quick', data=_quick_form(html, 'Northwind'))
     assert res.status_code == 302
-    assert res.headers['Location'].endswith('/recurring?marked=1#not-counted')
+    assert res.headers['Location'].endswith('/recurring?marked=1#marked-notice')
     assert _rules(app) == [('Northwind', 'NORTHWIND STREAMING', 'outflow',
                             'not_recurring', None, None)]
     page = client.get('/recurring?marked=1').get_data(as_text=True)
@@ -275,6 +277,38 @@ def test_a_hint_covering_part_of_the_stream_opens_the_form(client, app):
 
 
 @freeze_time(FROZEN)
+def test_a_hint_too_short_to_save_opens_the_form(client, app):
+    _seed(app, _monthly('AB', '25.00', merchant_name='Ab Co'))
+    _login(client)
+    html = client.get('/recurring').get_data(as_text=True)
+    res = client.post('/recurring/rules/quick', data=_quick_form(html, 'Ab Co'))
+    assert _rules(app) == []
+    assert 'preview=1' in res.headers['Location'] and 'pattern=AB' in res.headers['Location']
+
+
+@freeze_time(FROZEN)
+def test_reposting_a_marked_plan_confirms_its_own_rule(client, app):
+    _seed(app, _monthly('EXAMPLE CO BASIC', '9.00', day=3, merchant_name='Example Co')
+          + _monthly('EXAMPLE CO PLUS', '14.00', day=25, months=range(1, 6),
+                     merchant_name='Example Co'))
+    _login(client)
+    html = client.get('/recurring').get_data(as_text=True)
+    plan = _quick_form(html, 'Example Co · $9.00')
+    first = client.post('/recurring/rules/quick', data=plan)
+    # Reposted from the stale page, with the amount written differently.
+    again = client.post('/recurring/rules/quick', data={**plan, 'split_amount': '9.0'})
+    assert len(_rules(app)) == 1
+    assert again.headers['Location'] == first.headers['Location']
+    # The same keys without an amount now locate the other plan, which became
+    # the merchant's whole-group stream: a rule of its own, not the plan's.
+    rest = client.post('/recurring/rules/quick',
+                       data={'stream_key': plan['stream_key'], 'direction': 'outflow'})
+    assert 'marked=2' in rest.headers['Location']
+    assert [(r[1], r[4]) for r in _rules(app)] == [('EXAMPLE CO BASIC', Decimal('9.00')),
+                                                   ('EXAMPLE CO PLUS', None)]
+
+
+@freeze_time(FROZEN)
 def test_posting_the_same_quick_mark_twice_saves_one_rule(client, app):
     _seed(app, _base())
     _login(client)
@@ -292,6 +326,9 @@ def test_posting_the_same_quick_mark_twice_saves_one_rule(client, app):
     {'direction': 'sideways', 'stream_key': ['northwind']},
     {'direction': 'outflow', 'stream_key': [f'k{i}' for i in range(501)]},
     {'direction': 'outflow', 'stream_key': ['no such merchant']},
+    {'direction': 'outflow', 'stream_key': ['northwind'], 'split_amount': 'abc'},
+    {'direction': 'outflow', 'stream_key': ['northwind'], 'split_amount': 'NaN'},
+    {'direction': 'outflow', 'stream_key': ['northwind'], 'split_amount': 'Infinity'},
 ])
 def test_malformed_or_unknown_posts_save_nothing(client, app, data):
     _seed(app, _base())

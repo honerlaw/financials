@@ -559,11 +559,10 @@ def quick_not_recurring_rule():
         same = [r for r in found.rules
                 if r['action'] == 'not_recurring' and r['direction'] == direction
                 and r['stream_keys'] == wanted
-                and (split_amount is None
-                     or r['amount_min'] == r['amount_max'] == split_amount)]
+                and r['amount_min'] == split_amount and r['amount_max'] == split_amount]
         if same:
             return redirect(url_for('main.recurring', marked=same[-1]['id'],
-                                    _anchor='not-counted'))
+                                    _anchor='marked-notice'))
         return redirect(url_for('main.recurring'))
 
     amount = '' if split_amount is None else str(split_amount)
@@ -572,18 +571,17 @@ def quick_not_recurring_rule():
         'direction': direction, 'action': 'not_recurring',
         'amount_min': amount, 'amount_max': amount,
     })
-    verdict = 'form'
+    save = False
     if not errors:
         candidate = SimpleNamespace(
             id=None, label=fields['label'], pattern=fields['pattern'],
             direction=direction, amount_min=fields['amount_min'],
             amount_max=fields['amount_max'], action='not_recurring',
         )
-        verdict = quick_mark_verdict(
-            found, preview(groups, rules, candidate), keys, split_amount, direction)
+        save = quick_mark_verdict(stream, preview(groups, rules, candidate), direction)
     # Same order as /recurring: commit after reading the groups.
     db.session.commit()
-    if verdict != 'save':
+    if not save:
         return redirect(url_for(
             'main.new_recurring_rule', label=fields['label'],
             pattern=fields['pattern'], direction=direction,
@@ -596,7 +594,7 @@ def quick_not_recurring_rule():
     )
     db.session.add(rule)
     db.session.commit()
-    return redirect(url_for('main.recurring', marked=rule.id, _anchor='not-counted'))
+    return redirect(url_for('main.recurring', marked=rule.id, _anchor='marked-notice'))
 
 
 @bp.route('/recurring/rules/<int:rule_id>/delete', methods=['POST'])

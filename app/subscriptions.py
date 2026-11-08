@@ -25,7 +25,9 @@ from collections import Counter, defaultdict
 from datetime import timedelta
 from difflib import SequenceMatcher
 
-# (name, nominal gap in days, tolerance) — buckets are disjoint by design.
+# (name, nominal gap in days, tolerance) — buckets are disjoint by design: the
+# median gap picks at most one. (Weekly's skipped-session gaps, used only for
+# its regularity test, overlap the biweekly band.)
 CADENCES = [
     ('weekly', 7, 2),
     ('biweekly', 14, 3),
@@ -42,7 +44,30 @@ CADENCES = [
 _MONTHLY_NOMINAL = 30
 MONTHLY_CALENDAR_SLACK = 15
 
-MIN_OCCURRENCES = 3          # charges needed to call a stream recurring
+# A weekly appointment skips a session now and then (holidays, sick weeks), so
+# its gaps include two and three weeks. Inside the weekly bucket only, a gap
+# within the bucket's tolerance of one of these multiples of 7 also counts as
+# regular, and a weekly stream stays active until it is overdue past the
+# largest such gap. Bucket selection by median gap is unchanged, so a stream
+# whose median gap is 14 days is still biweekly.
+#
+# Those bands (5-9, 12-16, 19-23 days) cover most gaps a frequent merchant
+# shows, so on their own they let about a quarter of cafes and fuel stations
+# with gaps of 3-14 days pass as weekly. An appointment keeps its weekday; a
+# habit does not. So the skip allowance is used only when the plain 7 ± 2 test
+# fails and at least WEEKLY_SKIP_MIN_WEEKDAY_SHARE of the stream's charge days
+# fall on its most common weekday (Plaid's posting date can slip a day, hence
+# well under 1). In simulation, this brings random 3-14-day merchants with a
+# dozen gaps back to about 4%, close to the old 2%.
+_WEEKLY_NOMINAL = 7
+WEEKLY_SKIP_MULTIPLES = (2, 3)
+WEEKLY_SKIP_MIN_WEEKDAY_SHARE = 0.4
+
+_WEEKLY_BUCKET = CADENCES[0]
+_MONTHLY_BUCKET = CADENCES[2]
+assert _WEEKLY_BUCKET[0] == 'weekly' and _MONTHLY_BUCKET[0] == 'monthly'
+
+MIN_OCCURRENCES = 3          # charges needed to call a stream recurring (except a new pair, _is_new_monthly_pair)
 MIN_OCCURRENCES_ANNUAL = 2   # annual streams rarely have 3 years of history
 GAP_REGULARITY = 0.7         # fraction of gaps that must be regular (_gap_is_regular)
 INACTIVE_MULTIPLIER = 1.5    # overdue by > 1.5x cadence -> inactive
@@ -319,19 +344,24 @@ def _month_index(d):
     return d.year * 12 + d.month
 
 
-def _gap_is_regular(earlier, later, nominal, tol):
+def _gap_is_regular(earlier, later, nominal, tol, skips=False):
     """Whether the gap between two consecutive occurrences fits the bucket.
 
-    Within the bucket's tolerance always fits. A monthly gap also fits when the
-    two dates fall in consecutive calendar months (December → January included)
-    and are within MONTHLY_CALENDAR_SLACK days of 30: a bill paid once a month
-    on a drifting day. A gap inside one month, one that skips a month, or one
+    Within the bucket's tolerance always fits. With `skips`, a weekly gap also
+    fits within the tolerance of one or two skipped sessions
+    (WEEKLY_SKIP_MULTIPLES: 14 or 21 ± 2 days); _classify_cadence decides when
+    to allow that. A monthly gap also fits when the two dates fall in
+    consecutive calendar months (December → January included) and are within
+    MONTHLY_CALENDAR_SLACK days of 30: a bill paid once a month on a drifting
+    day. A gap inside one month, one that skips a month, or one
     outside 15–45 days still does not. Months are those of `date`, Plaid's
     posting date.
     """
     gap = (later - earlier).days
     if abs(gap - nominal) <= tol:
         return True
+    if nominal == _WEEKLY_NOMINAL:
+        return skips and any(abs(gap - k * nominal) <= tol for k in WEEKLY_SKIP_MULTIPLES)
     return (
         nominal == _MONTHLY_NOMINAL
         and _month_index(later) - _month_index(earlier) == 1
@@ -339,10 +369,18 @@ def _gap_is_regular(earlier, later, nominal, tol):
     )
 
 
+def _weekday_share(dates):
+    """Fraction of `dates` that fall on their most common weekday."""
+    return Counter(d.weekday() for d in dates).most_common(1)[0][1] / len(dates)
+
+
 def _classify_cadence(dates):
     """Map the median gap between sorted, distinct occurrence dates to a cadence
     bucket, requiring most gaps to be regular (`_gap_is_regular`). Returns
     (name, nominal_days) or None.
+
+    A weekly stream that fails may retry with skipped sessions allowed, if it
+    keeps its weekday (WEEKLY_SKIP_MIN_WEEKDAY_SHARE).
     """
     pairs = list(zip(dates, dates[1:]))
     if not pairs:
@@ -355,13 +393,42 @@ def _classify_cadence(dates):
         if len(dates) < required:
             return None
         within = sum(1 for a, b in pairs if _gap_is_regular(a, b, nominal, tol))
+        if (within / len(pairs) < GAP_REGULARITY and nominal == _WEEKLY_NOMINAL
+                and _weekday_share(dates) >= WEEKLY_SKIP_MIN_WEEKDAY_SHARE):
+            within = sum(1 for a, b in pairs
+                         if _gap_is_regular(a, b, nominal, tol, skips=True))
         if within / len(pairs) >= GAP_REGULARITY:
             return name, nominal
         return None  # median fit the bucket but the gaps are irregular
     return None
 
 
-def _build_stream(txns, today, fallback_cadence=None):
+def _is_new_monthly_pair(dates):
+    """Whether two distinct dates look like the first two charges of a new
+    monthly bill: consecutive calendar months, a gap within the strict monthly
+    tolerance (no MONTHLY_CALENDAR_SLACK). Recency is the caller's `active`.
+    """
+    if len(dates) != 2:
+        return False
+    earlier, later = dates
+    _name, nominal, tol = _MONTHLY_BUCKET
+    return (_month_index(later) - _month_index(earlier) == 1
+            and abs((later - earlier).days - nominal) <= tol)
+
+
+def _inactive_after_days(nominal):
+    """Days past the last charge after which a stream is inactive.
+
+    1.5 × cadence, except weekly: a weekly stream may skip sessions
+    (WEEKLY_SKIP_MULTIPLES), so it stays active through the largest gap the
+    bucket calls regular — 3 × 7 + 2 = 23 days.
+    """
+    if nominal == _WEEKLY_NOMINAL:
+        return max(WEEKLY_SKIP_MULTIPLES) * nominal + _WEEKLY_BUCKET[2]
+    return INACTIVE_MULTIPLIER * nominal
+
+
+def _build_stream(txns, today, fallback_cadence=None, pair=False):
     """Build a stream dict from one merchant group, or None if the group
     isn't recurring.
 
@@ -370,9 +437,17 @@ def _build_stream(txns, today, fallback_cadence=None):
     (app/recurring_rules.py). A detected cadence always wins, so a rule's
     annual stream stays annual. The stream records which happened in
     `cadence_forced`.
+
+    `pair` — accept exactly two charges as a new monthly stream when
+    `_is_new_monthly_pair` holds, below MIN_OCCURRENCES. Only the exact-amount
+    split passes it (app/bills.py::_split_by_amount), where the two charges
+    share one exact amount. Such a stream has `new` set.
     """
     dates = sorted({t.date for t in txns})  # same-day charges = one occurrence
     cadence = _classify_cadence(dates)
+    new = cadence is None and pair and _is_new_monthly_pair(dates)
+    if new:
+        cadence = _MONTHLY_BUCKET[:2]
     forced = cadence is None and fallback_cadence is not None
     if forced:
         cadence = fallback_cadence
@@ -391,13 +466,14 @@ def _build_stream(txns, today, fallback_cadence=None):
         'cadence': cadence_name,
         'cadence_days': nominal,
         'cadence_forced': forced,
+        'new': new,
         'amount': median_amount,
         'varies': varies,
         'is_inflow': median_amount < 0,
         'last_date': last_date,
         'next_date': last_date + timedelta(days=nominal),
         'count': len(txns),
-        'active': (today - last_date).days <= INACTIVE_MULTIPLIER * nominal,
+        'active': (today - last_date).days <= _inactive_after_days(nominal),
         'account_keys': sorted({(t.institution_id, t.account_id) for t in txns}),
     }
 

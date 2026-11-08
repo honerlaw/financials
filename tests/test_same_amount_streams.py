@@ -175,8 +175,10 @@ def test_inflows_are_never_split():
 
 
 def test_a_subset_with_fewer_than_three_charges_yields_nothing():
+    # Two charges in months that are not consecutive: no new monthly pair
+    # (test_detection_recall.py covers the pair that is accepted).
     group = (series(3, '9.00', 'EXAMPLE CO BASIC', range(1, 7), merchant_name='Example Co')
-             + series(25, '14.00', 'EXAMPLE CO PLUS', (4, 5), merchant_name='Example Co'))
+             + series(25, '14.00', 'EXAMPLE CO PLUS', (3, 5), merchant_name='Example Co'))
     assert _build_stream(group, TODAY) is None
     assert names(detect([group]).bills) == ['Example Co · $9.00']
 

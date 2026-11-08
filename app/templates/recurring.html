@@ -4,10 +4,11 @@
 {# A stream built by one of the user's rules carries a badge; every other
    stream gets a Flag link that opens the rule form pre-filled from it. A
    same-amount sub-stream's Flag also pins its exact amount, so the rule takes
-   over just that plan. #}
+   over just that plan. A new monthly pair (two charges so far) is badged "new". #}
 {% macro name_cell(s) %}
 <td class="medium">
   {{ s.name }}
+  {% if s.new %}<span class="badge badge-warn" title="Charged the same amount two months running: treated as a new monthly bill. A third charge confirms it; without one it lapses like any monthly bill.">new · 2 months</span>{% endif %}
   {% if s.rule_id %}<span class="badge badge-accent">your rule</span>
   {% elif s.split_amount is not none %}<span class="badge" title="One of several plans at this merchant, found by its exact amount">same amount</span>
   <a class="xs muted" href="{{ url_for('main.new_recurring_rule', pattern=s.pattern_hint, label=s.name, direction='outflow', amount_min=s.split_amount, amount_max=s.split_amount) }}">Flag</a>

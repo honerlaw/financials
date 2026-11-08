@@ -264,6 +264,9 @@ a:hover { text-decoration: underline; }
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .btn-sm { padding: 0.25rem var(--sp-2); font-size: var(--fs-xs); }
 .btn-block { width: 100%; }
+/* A one-button form inside running text or a table cell (e.g. /recurring's
+   "Not recurring"), so it sits on the line instead of breaking it. */
+.inline-form { display: inline; }
 
 .btn-primary {
   color: #fff;

@@ -424,6 +424,12 @@ def recurring():
     def status_count(status):
         return sum(1 for b in counted if b['payment_status'] == status)
 
+    # After a quick "Not recurring", the rule it saved (already loaded with the
+    # others, so no query) is confirmed above the figures with an Undo.
+    marked_id = request.args.get('marked', type=int)
+    notice = next((r for r in found.rules
+                   if r['id'] == marked_id and r['action'] == 'not_recurring'), None)
+
     return render_template(
         'recurring.html',
         counted=counted,
@@ -441,6 +447,7 @@ def recurring():
         unpaid_count=status_count('unpaid'),
         upcoming_count=status_count('upcoming'),
         paid_count=status_count('paid'),
+        notice=notice,
     )
 
 
@@ -503,6 +510,91 @@ def create_recurring_rule():
     ))
     db.session.commit()
     return redirect(url_for('main.recurring'))
+
+
+@bp.route('/recurring/rules/quick', methods=['POST'])
+@login_required
+def quick_not_recurring_rule():
+    """One click from a /recurring row: save a "not recurring" rule for it.
+
+    The button posts only a locator — the stream's grouping keys, its side and,
+    for a same-amount plan, its amount. The streams are recomputed here from
+    the same groups the page uses, and the rule is built from the located
+    stream's own name and pattern hint (ranged to the plan's amount). It saves
+    only when that rule would claim exactly the stream's rows. Anything else — a
+    hint that reaches into other groups, or covers only part of the stream —
+    opens the rule form with its preview, where the user decides. A repeat post
+    for a stream already marked lands on that rule's confirmation.
+    """
+    from decimal import Decimal, InvalidOperation
+    from types import SimpleNamespace
+    from app.bills import detect_recurring_with_rules
+    from app.merchant_groups import groups_for_detection
+    from app.models import RecurringRule
+    from app.recurring_rules import (
+        DIRECTIONS, QUICK_KEYS_MAX, locate_stream, parse_rule_form, preview,
+        quick_mark_verdict,
+    )
+
+    keys = request.form.getlist('stream_key')
+    direction = request.form.get('direction')
+    try:
+        text = request.form.get('split_amount', '').strip()
+        split_amount = Decimal(text) if text else None
+    except InvalidOperation:
+        split_amount = Decimal(-1)    # matches no stream
+    if (not keys or len(keys) > QUICK_KEYS_MAX or direction not in DIRECTIONS
+            or (split_amount is not None and not split_amount.is_finite())):
+        return redirect(url_for('main.recurring'))
+
+    rules = _rule_rows()
+    groups, _used_index = groups_for_detection()
+    found = detect_recurring_with_rules(groups, date.today(), rules)
+    stream = locate_stream(found, keys, split_amount, direction)
+    if stream is None:
+        # Already marked (a double click, or a page from before the mark): the
+        # newest not-recurring rule whose rows are this stream's.
+        db.session.commit()
+        wanted = tuple(sorted(set(keys)))
+        same = [r for r in found.rules
+                if r['action'] == 'not_recurring' and r['direction'] == direction
+                and r['stream_keys'] == wanted
+                and r['amount_min'] == split_amount and r['amount_max'] == split_amount]
+        if same:
+            return redirect(url_for('main.recurring', marked=same[-1]['id'],
+                                    _anchor='marked-notice'))
+        return redirect(url_for('main.recurring'))
+
+    amount = '' if split_amount is None else str(split_amount)
+    fields, errors = parse_rule_form({
+        'label': stream['name'], 'pattern': stream['pattern_hint'],
+        'direction': direction, 'action': 'not_recurring',
+        'amount_min': amount, 'amount_max': amount,
+    })
+    save = False
+    if not errors:
+        candidate = SimpleNamespace(
+            id=None, label=fields['label'], pattern=fields['pattern'],
+            direction=direction, amount_min=fields['amount_min'],
+            amount_max=fields['amount_max'], action='not_recurring',
+        )
+        save = quick_mark_verdict(stream, preview(groups, rules, candidate), direction)
+    # Same order as /recurring: commit after reading the groups.
+    db.session.commit()
+    if not save:
+        return redirect(url_for(
+            'main.new_recurring_rule', label=fields['label'],
+            pattern=fields['pattern'], direction=direction,
+            amount_min=amount, amount_max=amount, action='not_recurring', preview=1,
+        ))
+    rule = RecurringRule(
+        label=fields['label'], pattern=fields['pattern'], direction=direction,
+        action='not_recurring',
+        amount_min=fields['amount_min'], amount_max=fields['amount_max'],
+    )
+    db.session.add(rule)
+    db.session.commit()
+    return redirect(url_for('main.recurring', marked=rule.id, _anchor='marked-notice'))
 
 
 @bp.route('/recurring/rules/<int:rule_id>/delete', methods=['POST'])

@@ -126,7 +126,8 @@ def preview(groups, saved_rules, candidate):
     """What saving `candidate` alongside `saved_rules` would do.
 
     Returns a dict:
-      won      — rows the candidate would claim,
+      won      — how many rows the candidate would claim,
+      won_rows — those rows (the same objects as in `groups`),
       sources  — per source group, "taken of total" for those rows,
       taken    — per saved rule (label, pattern, rows) it would take rows from,
       lost     — per saved rule that keeps rows the candidate matches.
@@ -154,10 +155,59 @@ def preview(groups, saved_rules, candidate):
     ]
     return {
         'won': len(mine.rows),
+        'won_rows': list(mine.rows),
         'sources': mine.sources,
         'taken': tally(taken),
         'lost': tally(lost),
     }
+
+
+QUICK_KEYS_MAX = 500
+
+
+def _on_side(row, direction):
+    return row.amount > 0 if direction == 'outflow' else row.amount < 0
+
+
+def locate_stream(found, keys, split_amount, direction):
+    """The one non-rule stream or suggestion of `found` (a bills.Recurring) that
+    a quick "Not recurring" button was rendered for, or None.
+
+    A stream is located by its `stream_keys`, its `split_amount` (None unless a
+    same-amount plan) and its side. Income is money in; bills and "Possibly
+    recurring" suggestions are money out. None when no stream, or more than
+    one, matches.
+    """
+    keys = tuple(sorted(set(keys)))
+    side = (found.income if direction == 'inflow'
+            else found.bills + found.suggestions)
+    matches_ = [
+        s for s in side
+        if s.get('rule_id') is None
+        and s.get('stream_keys') == keys
+        and s.get('split_amount') == split_amount
+    ]
+    return matches_[0] if len(matches_) == 1 else None
+
+
+def quick_mark_verdict(stream, preview_result, direction):
+    """Whether a one-click "Not recurring" for `stream` (from `locate_stream`)
+    may save without the form.
+
+    True only when the candidate would claim exactly the stream's rows on its
+    side (by identity), at least one, and take none from a saved rule — one
+    click marks what the user clicked and nothing else. Otherwise the rule
+    would reach past the stream, or cover only part of it, and the user should
+    see the preview first.
+
+    `preview_result` must come from `preview` over the same group lists the
+    stream was detected from, so the row objects are shared. (A located
+    stream's rows are leftovers, so taking a saved rule's rows already breaks
+    equality; the `taken` check only states the rule outright.)
+    """
+    expected = {id(r) for r in stream['rows'] if _on_side(r, direction)}
+    won = {id(r) for r in preview_result['won_rows']}
+    return bool(won) and won == expected and not preview_result['taken']
 
 
 def pattern_hint(txns):

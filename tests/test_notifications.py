@@ -294,6 +294,24 @@ def test_a_worst_case_digest_stays_under_twilios_length_limit():
     assert len(body) < 1600, len(body)
 
 
+def test_many_long_named_cards_shorten_the_purchase_list_to_fit():
+    """Card lines are uncapped, so on a busy day with many cards the list gives
+    up lines rather than losing the whole digest to Twilio's length limit."""
+    cards = [(f'Chase Bank USA, N.A. Card Svcs {i}',
+              'Sapphire Preferred Visa Signature', f'{1000 + i}',
+              Decimal('12345.67'), True) for i in range(10)]
+    purchases = [(f'Merchant {i:02d}' + 'M' * 40, Decimal('9999.99'))
+                 for i in range(30)]
+    body = _body(cards=cards, card_total=Decimal('123456.70'),
+                 yesterday=_spend(purchases), spent=Decimal('99999'))
+    assert len(body) <= 1600, len(body)
+    listed = body.count(': $9,999.99')
+    assert 0 < listed < PURCHASE_LIST_MAX
+    assert f'+{30 - listed} more' in body
+    assert '30 purchases: $300,000' in body
+    assert body.endswith('\nReply STOP to unsubscribe.')
+
+
 # ── send_daily_digest (orchestration) ─────────────────────────────────────────
 
 class FakeSender:

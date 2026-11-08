@@ -141,11 +141,12 @@ def day_spend(transactions, day):
     Every row counted here is still in some week total the digest prints,
     though possibly a different week than ``day`` falls in. Filters the input
     defensively, like every aggregate here, so a caller may pass a wider fetch.
-    Only dates are stored, not times of day, so purchases sort largest first;
-    ties sort by label so the output is stable.
+    Purchases sort largest first, because only dates are stored, not times of
+    day, so there is no order within the day to list them in. Ties sort by
+    label so the output is stable.
     """
     purchases = [
-        (txn.merchant_name or txn.description, txn.amount)
+        (txn.merchant_name or txn.description or '', txn.amount)
         for txn in transactions
         if purchase_date(txn) == day and is_spend(txn)
     ]

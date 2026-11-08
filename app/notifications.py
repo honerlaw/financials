@@ -1,11 +1,11 @@
-"""Daily digest SMS — budget status, recent weeks, card debt, yesterday's spend.
+"""Daily digest SMS — budget status, recent weeks, card debt, yesterday's purchases.
 
 Once a day, right after the 7am sync (``app.sync.run_daily_sync``), every
 configured recipient is texted one message: where the current Sun–Sat week's
 household spend stands against ``WEEKLY_BUDGET``, what each of the four
 completed weeks behind it totalled, the current balance of every linked credit
 card and the debt they add up to, and what was bought yesterday — a count and
-total, every purchase over $100, and spend by category. The message building
+total, then every purchase listed with its amount. The message building
 is pure and unit-tested (``digest_body`` and friends); the Twilio send and the
 ``DailyDigest`` writes are the impure shell.
 
@@ -52,8 +52,8 @@ from sqlalchemy.exc import IntegrityError
 
 from app.models import Account, DailyDigest, Institution, Transaction
 from app.spending import (
-    LARGE_PURCHASE, WEEKLY_BUDGET, day_spend, recent_week_spend, week_label,
-    week_spend, week_start,
+    WEEKLY_BUDGET, day_spend, recent_week_spend, week_label, week_spend,
+    week_start,
 )
 
 # The registered A2P 10DLC brand, carried as the first line of every message.
@@ -77,12 +77,18 @@ HISTORY_WEEKS = 4
 # `current_balance` as the amount owed, a positive number.
 CARD_TYPE = 'credit'
 
-# Caps that keep the Yesterday section — the only part of the message whose
-# length depends on the day's activity — bounded well inside Twilio's
-# 1600-character body limit, where an over-long message is rejected outright
-# and the day's digest is lost.
-LARGE_LIST_MAX = 10
-CATEGORY_LIST_MAX = 6
+# Twilio rejects a body over this many characters outright, and the day's
+# digest is lost.
+BODY_MAX = 1600
+
+# How many of yesterday's purchases are listed before a `+N more` line. The
+# Yesterday section is the only part of the message whose length depends on
+# the day's activity. With up to 8 cards (labels ~30 characters, all flagged
+# `(reconnect needed)`), five-digit week totals and 15 lines of 32-character
+# labels at $9,999.99, the body is ~1,530 characters, pinned by test. Card lines
+# are uncapped, so `digest_body` also lists fewer purchases when more cards or
+# longer names would otherwise push the body past BODY_MAX.
+PURCHASE_LIST_MAX = 15
 LABEL_MAX = 32
 
 
@@ -192,26 +198,20 @@ def digest_cards(rows):
     return display, total
 
 
-def category_name(category):
-    """``FOOD_AND_DRINK`` → ``Food and drink``; ``None`` → ``Uncategorized``."""
-    if not category:
-        return 'Uncategorized'
-    return category.replace('_', ' ').lower().capitalize()
-
-
 def _truncate(label, limit=LABEL_MAX):
     return label if len(label) <= limit else label[:limit - 1] + '…'
 
 
-def yesterday_lines(spend):
+def yesterday_lines(spend, limit=PURCHASE_LIST_MAX):
     """The ``Yesterday`` section, from the ``spending.DaySpend`` for that day.
 
-    Individual purchases print dollars and cents — each is a specific amount,
-    like a balance. The day's total and the category totals print whole
-    dollars, like the budget and history lines, because they are magnitudes to
-    compare. Both lists are capped (``LARGE_LIST_MAX``, ``CATEGORY_LIST_MAX``)
+    A summary line, then every purchase on its own line, largest first. Each
+    purchase prints dollars and cents — a specific amount, like a balance; the
+    day's total prints whole dollars, like the budget and history lines,
+    because it is a magnitude to compare. At most ``limit`` purchases are
+    listed (``PURCHASE_LIST_MAX`` unless ``digest_body`` needs fewer to fit),
     so a busy day cannot push the message past Twilio's length limit; what the
-    cap hides is still counted, as ``+N more`` or an ``Other`` line.
+    cap hides is still counted in the summary line and named as ``+N more``.
     """
     lines = [f"Yesterday — {spend.day.strftime('%a %b %-d')}"]
     if not spend.count:
@@ -219,28 +219,10 @@ def yesterday_lines(spend):
         return lines
     noun = 'purchase' if spend.count == 1 else 'purchases'
     lines.append(f'{spend.count} {noun}: ${spend.total:,.0f}')
-
-    if spend.large:
-        lines.append(f'Over ${LARGE_PURCHASE:,.0f}')
-        shown = spend.large[:LARGE_LIST_MAX]
-        lines.extend(f'{_truncate(label)}: ${amount:,.2f}'
-                     for label, amount in shown)
-        if len(spend.large) > len(shown):
-            lines.append(f'+{len(spend.large) - len(shown)} more')
-    else:
-        lines.append(f'Over ${LARGE_PURCHASE:,.0f}: none')
-
-    lines.append('By category')
-    categories = spend.by_category
-    if len(categories) > CATEGORY_LIST_MAX:
-        rest = sum((total for _, total in categories[CATEGORY_LIST_MAX - 1:]),
-                   Decimal('0'))
-        shown = [(category_name(c), t)
-                 for c, t in categories[:CATEGORY_LIST_MAX - 1]]
-        shown.append(('Other', rest))
-    else:
-        shown = [(category_name(c), t) for c, t in categories]
-    lines.extend(f'{name}: ${total:,.0f}' for name, total in shown)
+    shown = spend.purchases[:limit]
+    lines.extend(f'{_truncate(label)}: ${amount:,.2f}' for label, amount in shown)
+    if len(spend.purchases) > len(shown):
+        lines.append(f'+{len(spend.purchases) - len(shown)} more')
     return lines
 
 
@@ -266,8 +248,14 @@ def digest_body(today, spent, history, cards, card_total, yesterday,
     registration requires both in the body; they are part of the message
     contract, not decoration. Both are plain GSM-7; the body itself is UCS-2
     because of ``—``/``·``/``••``.
+
+    Kept within ``BODY_MAX``: if the full message would be too long, which
+    takes many cards or long account names on a busy day, the Yesterday list
+    shows fewer purchases and its ``+N more`` grows. Only the case where even
+    an empty list would not fit is left over-long, because every other line is
+    a fixed part of the message.
     """
-    lines = [
+    head = [
         BRAND,
         f"Good morning — {today.strftime('%a %b %-d')}",
         '',
@@ -276,16 +264,21 @@ def digest_body(today, spent, history, cards, card_total, yesterday,
         '',
         f'Last {len(history)} weeks',
     ]
-    lines.extend(history_line(ws, total) for ws, total in history)
-    lines.extend(['', 'Credit cards'])
+    head.extend(history_line(ws, total) for ws, total in history)
+    head.extend(['', 'Credit cards'])
     card_lines = [account_line(*c) for c in cards]
-    lines.extend(card_lines or ['No linked credit cards.'])
+    head.extend(card_lines or ['No linked credit cards.'])
     if card_lines:
-        lines.append(card_total_line(card_total))
-    lines.append('')
-    lines.extend(yesterday_lines(yesterday))
-    lines.extend(['', OPT_OUT_LINE])
-    return '\n'.join(lines)
+        head.append(card_total_line(card_total))
+    head.append('')
+    tail = ['', OPT_OUT_LINE]
+
+    limit = PURCHASE_LIST_MAX
+    while True:
+        body = '\n'.join(head + yesterday_lines(yesterday, limit) + tail)
+        if len(body) <= BODY_MAX or limit == 0:
+            return body
+        limit -= 1
 
 
 class TwilioSender:

@@ -207,7 +207,7 @@ The near-misses in that dropdown, and why each loses:
 ## Campaign description
 
 ```
-Onerlaw LLC operates Onerlaw, a web-based personal finance dashboard. Users link their bank and credit card accounts to the platform through Plaid, and the platform tracks their spending against a weekly budget they set. This campaign sends operational account notifications to registered users of that platform who have opted in to receive them. Each morning the platform sends one message reporting the user's spending so far that week against their budget, the total they spent in each of the four previous weeks, the current balance of each linked credit card and the total owed across those cards, and a summary of the previous day's purchases: how many and their total, each purchase over $100, and spending by category. A user can also trigger that same summary for themselves from inside the dashboard. Volume is about seven messages per user per week. The messages are transactional only, contain no marketing or promotional content, identify Onerlaw LLC as the sender, and carry STOP opt-out instructions.
+Onerlaw LLC operates Onerlaw, a web-based personal finance dashboard. Users link their bank and credit card accounts to the platform through Plaid, and the platform tracks their spending against a weekly budget they set. This campaign sends operational account notifications to registered users of that platform who have opted in to receive them. Each morning the platform sends one message reporting the user's spending so far that week against their budget, the total they spent in each of the four previous weeks, the current balance of each linked credit card and the total owed across those cards, and a summary of the previous day's purchases: how many and their total, followed by each purchase and its amount. A user can also trigger that same summary for themselves from inside the dashboard. Volume is about seven messages per user per week. The messages are transactional only, contain no marketing or promotional content, identify Onerlaw LLC as the sender, and carry STOP opt-out instructions.
 ```
 
 Describes the software, who it serves, and what the messages contain — the three things
@@ -239,12 +239,14 @@ Citi · Double Cash ••1234: $612.40 (reconnect needed)
 Total card debt: $1,816.73
 
 Yesterday — Sun Oct 11
-6 purchases: $287
-Over $100
+7 purchases: $287
 Whole Foods Market: $142.18
-By category
-Food and drink: $201
-General merchandise: $86
+Shell: $48.20
+Chipotle: $31.75
+Amazon: $29.00
+CVS: $22.17
+Starbucks: $6.85
+Starbucks: $6.85
 
 Reply STOP to unsubscribe.
 ```
@@ -270,10 +272,8 @@ Citi · Double Cash ••1234: $612.40
 Total card debt: $1,860.01
 
 Yesterday — Mon Oct 12
-2 purchases: $43
-Over $100: none
-By category
-Food and drink: $43
+1 purchase: $43
+Trader Joe's: $43.28
 
 Reply STOP to unsubscribe.
 ```
@@ -309,15 +309,17 @@ them whenever the message shape changes — a new section, a reworded line, a di
 after approval. The `Last 4 weeks` block is work unit 020; the `Credit cards` block and
 the `Yesterday` section are work unit 2026-10-12-digest-card-balances-and-yesterday, which
 also retired the earlier net-worth line and its `(not counted)` / `(unvested excluded)`
-notes.
+notes. Work unit 2026-11-08-digest-list-yesterdays-purchases replaced that section's
+`Over $100` list and `By category` breakdown with a plain list of every purchase.
 
 Between them the three samples show every shape the variable parts of the digest can
 take — a card flagged `(reconnect needed)` for a bank that stopped syncing (the only
-parenthetical a line can now carry), a day with purchases over $100, a day with purchases
-but none over $100 (`Over $100: none`), and a day with no purchases at all — so a reviewer
-never sees a shape in live traffic that no filed sample contains. (`No linked credit
-cards.`, `+N more` on a long purchase list and an `Other` category line are the remaining
-rare variants; all three are plain text.)
+parenthetical a line can now carry), a day with several purchases (including two
+identical ones at one merchant, listed as two lines), a day with a single purchase, and a
+day with no purchases at all — so a reviewer never sees a shape in live traffic that no
+filed sample contains. (`No linked credit cards.` and a `+N more` line after the
+fifteenth purchase on a very busy day are the remaining rare variants; both are plain
+text.)
 
 ## Content flags
 

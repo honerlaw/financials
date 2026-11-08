@@ -8,7 +8,7 @@ from sqlalchemy.exc import OperationalError
 
 from app.models import db, Account, Institution, Transaction, DailyDigest
 from app.notifications import (
-    AccountRow, account_line, budget_line, card_total_line, category_name,
+    PURCHASE_LIST_MAX, AccountRow, account_line, budget_line, card_total_line,
     digest_body, digest_cards, history_line, send_daily_digest,
     send_digest_now, yesterday_lines,
 )
@@ -27,7 +27,7 @@ HISTORY = [
     (date(2026, 7, 19), Decimal('0')),
     (date(2026, 7, 26), Decimal('1204')),
 ]
-NO_SPEND = DaySpend(YESTERDAY, 0, Decimal('0'), [], [])
+NO_SPEND = DaySpend(YESTERDAY, 0, Decimal('0'), [])
 CARDS = [
     ('Amex', 'Gold Card', '1008', Decimal('1204.33')),
     ('Citi', 'Double Cash', '1234', Decimal('612.40')),
@@ -216,46 +216,36 @@ def test_digest_body_without_cards_says_so_and_prints_no_total():
 
 # ── yesterday (pure) ──────────────────────────────────────────────────────────
 
-def _spend(count=3, total=Decimal('287.40'), large=(), by_category=()):
-    return DaySpend(YESTERDAY, count, total, list(large), list(by_category))
+def _spend(purchases):
+    purchases = list(purchases)
+    return DaySpend(YESTERDAY, len(purchases),
+                    sum((a for _, a in purchases), Decimal('0')), purchases)
 
 
-def test_category_name_humanizes_the_plaid_primary():
-    assert category_name('FOOD_AND_DRINK') == 'Food and drink'
-    assert category_name('GENERAL_MERCHANDISE') == 'General merchandise'
-    assert category_name(None) == 'Uncategorized'
-
-
-def test_yesterday_section_with_purchases():
-    lines = yesterday_lines(_spend(
-        count=6, total=Decimal('287.40'),
-        large=[('Whole Foods Market', Decimal('142.18'))],
-        by_category=[('FOOD_AND_DRINK', Decimal('201.30')),
-                     ('GENERAL_MERCHANDISE', Decimal('86.10'))],
-    ))
+def test_yesterday_section_lists_every_purchase():
+    lines = yesterday_lines(_spend([
+        ('Grocery Mart', Decimal('142.18')),
+        ('Gas Stop', Decimal('48.20')),
+        ('Corner Cafe', Decimal('4.50')),
+    ]))
     assert lines == [
         'Yesterday — Fri Aug 7',
-        '6 purchases: $287',
-        'Over $100',
-        'Whole Foods Market: $142.18',
-        'By category',
-        'Food and drink: $201',
-        'General merchandise: $86',
+        '3 purchases: $195',
+        'Grocery Mart: $142.18',
+        'Gas Stop: $48.20',
+        'Corner Cafe: $4.50',
     ]
 
 
+def test_yesterday_section_no_longer_filters_or_groups():
+    lines = yesterday_lines(_spend([('Corner Cafe', Decimal('4.50'))] * 2))
+    assert lines[2:] == ['Corner Cafe: $4.50', 'Corner Cafe: $4.50']
+    assert not any(l.startswith(('Over $', 'By category')) for l in lines)
+
+
 def test_yesterday_section_with_one_purchase_uses_the_singular():
-    lines = yesterday_lines(_spend(
-        count=1, total=Decimal('40'), by_category=[(None, Decimal('40'))]))
-    assert lines[1] == '1 purchase: $40'
-    assert lines[-1] == 'Uncategorized: $40'
-
-
-def test_yesterday_section_with_nothing_over_100():
-    lines = yesterday_lines(_spend(
-        by_category=[('FOOD_AND_DRINK', Decimal('287.40'))]))
-    assert 'Over $100: none' in lines
-    assert 'Over $100' not in lines
+    lines = yesterday_lines(_spend([('Book Nook', Decimal('40'))]))
+    assert lines[1:] == ['1 purchase: $40', 'Book Nook: $40.00']
 
 
 def test_yesterday_section_with_no_purchases():
@@ -264,53 +254,62 @@ def test_yesterday_section_with_no_purchases():
     ]
 
 
-def test_the_large_purchase_list_is_capped_with_a_count_of_the_rest():
-    large = [(f'Shop {i}', Decimal(500 - i)) for i in range(13)]
-    lines = yesterday_lines(_spend(large=large))
-    start = lines.index('Over $100') + 1
-    end = lines.index('By category')
-    shown = lines[start:end]
-    assert len(shown) == 11
+def test_the_purchase_list_is_capped_with_a_count_of_the_rest():
+    purchases = [(f'Shop {i}', Decimal(500 - i)) for i in range(PURCHASE_LIST_MAX + 3)]
+    lines = yesterday_lines(_spend(purchases))
+    assert lines[1] == f'{PURCHASE_LIST_MAX + 3} purchases: $8,847'
+    shown = lines[2:]
+    assert len(shown) == PURCHASE_LIST_MAX + 1
     assert shown[0] == 'Shop 0: $500.00'
+    assert shown[-2] == f'Shop {PURCHASE_LIST_MAX - 1}: ${500 - PURCHASE_LIST_MAX + 1}.00'
     assert shown[-1] == '+3 more'
+
+
+def test_exactly_the_cap_shows_no_more_line():
+    purchases = [(f'Shop {i}', Decimal(10)) for i in range(PURCHASE_LIST_MAX)]
+    lines = yesterday_lines(_spend(purchases))
+    assert len(lines) == 2 + PURCHASE_LIST_MAX
+    assert not lines[-1].startswith('+')
 
 
 def test_a_long_merchant_label_is_truncated():
     label = 'A' * 50
-    lines = yesterday_lines(_spend(large=[(label, Decimal('150'))]))
+    lines = yesterday_lines(_spend([(label, Decimal('150'))]))
     line = next(l for l in lines if l.endswith(': $150.00'))
     name = line[:-len(': $150.00')]
     assert len(name) == 32
     assert name.endswith('…')
 
 
-def test_the_category_list_is_capped_with_an_other_line():
-    cats = [(f'CAT_{i}', Decimal(100 - i)) for i in range(8)]
-    lines = yesterday_lines(_spend(by_category=cats))
-    shown = lines[lines.index('By category') + 1:]
-    assert len(shown) == 6
-    assert shown[:5] == ['Cat 0: $100', 'Cat 1: $99', 'Cat 2: $98',
-                         'Cat 3: $97', 'Cat 4: $96']
-    assert shown[5] == 'Other: $282'   # 95 + 94 + 93
-
-
-def test_six_categories_are_shown_without_an_other_line():
-    cats = [(f'CAT_{i}', Decimal(10)) for i in range(6)]
-    lines = yesterday_lines(_spend(by_category=cats))
-    assert not any(l.startswith('Other') for l in lines)
-
-
 def test_a_worst_case_digest_stays_under_twilios_length_limit():
     """Twilio rejects a body over 1600 characters, losing the day's digest."""
     cards = [(f'Institution {i}', f'Rewards Card {i}', f'{1000 + i}',
-              Decimal('12345.67')) for i in range(8)]
-    large = [('M' * 60, Decimal('9999.99')) for _ in range(15)]
-    cats = [('RENT_AND_UTILITIES_' + str(i), Decimal('99999')) for i in range(12)]
+              Decimal('12345.67'), True) for i in range(8)]
+    history = [(ws, Decimal('99999')) for ws, _ in HISTORY]
+    purchases = [('M' * 60, Decimal('9999.99')) for _ in range(30)]
     body = _body(cards=cards, card_total=Decimal('98765.36'),
-                 yesterday=_spend(count=99, total=Decimal('99999'),
-                                  large=large, by_category=cats),
-                 spent=Decimal('99999'))
+                 yesterday=_spend(purchases), spent=Decimal('99999'),
+                 history=history)
+    assert '+15 more' in body
     assert len(body) < 1600, len(body)
+
+
+def test_many_long_named_cards_shorten_the_purchase_list_to_fit():
+    """Card lines are uncapped, so on a busy day with many cards the list gives
+    up lines rather than losing the whole digest to Twilio's length limit."""
+    cards = [(f'Chase Bank USA, N.A. Card Svcs {i}',
+              'Sapphire Preferred Visa Signature', f'{1000 + i}',
+              Decimal('12345.67'), True) for i in range(10)]
+    purchases = [(f'Merchant {i:02d}' + 'M' * 40, Decimal('9999.99'))
+                 for i in range(30)]
+    body = _body(cards=cards, card_total=Decimal('123456.70'),
+                 yesterday=_spend(purchases), spent=Decimal('99999'))
+    assert len(body) <= 1600, len(body)
+    listed = body.count(': $9,999.99')
+    assert 0 < listed < PURCHASE_LIST_MAX
+    assert f'+{30 - listed} more' in body
+    assert '30 purchases: $300,000' in body
+    assert body.endswith('\nReply STOP to unsubscribe.')
 
 
 # ── send_daily_digest (orchestration) ─────────────────────────────────────────
@@ -867,11 +866,11 @@ def test_scheduled_digest_reports_yesterday_from_real_transactions(app):
         body = sender.sent[0][1]
         assert ('Yesterday — Fri Aug 7\n'
                 '3 purchases: $287\n'
-                'Over $100\n'
                 'Whole Foods Market: $142.18\n'
-                'By category\n'
-                'Food and drink: $201\n'
-                'General merchandise: $86\n') in body
+                'Target: $86.10\n'
+                'Chipotle: $59.12\n'
+                '\n') in body
+        assert 'Card payment' not in body and 'Refund' not in body
         assert 'Delta' not in body and 'Hotel' not in body
 
 

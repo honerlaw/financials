@@ -327,50 +327,44 @@ def test_day_spend_counts_and_totals_only_that_days_purchases():
     assert result.total == Decimal('182.18')
 
 
-def test_day_spend_lists_purchases_over_100_largest_first():
+def test_day_spend_lists_every_purchase_largest_first():
+    """Every purchase, however small — not just the large ones."""
     txns = [
-        FakeTxn(DAY, '100.00', merchant_name='Exactly 100'),   # not OVER 100
-        FakeTxn(DAY, '142.18', merchant_name='Whole Foods'),
-        FakeTxn(DAY, '310.00', merchant_name=None, description='DELTA AIR'),
+        FakeTxn(DAY, '4.50', merchant_name='Corner Cafe'),
+        FakeTxn(DAY, '142.18', merchant_name='Grocery Mart'),
+        FakeTxn(DAY, '310.00', merchant_name=None, description='AIRLINE TKT'),
         FakeTxn(DAY, '500.00', category='LOAN_PAYMENTS'),      # not spend
+        FakeTxn(DAY, '-12.00', merchant_name='Refund'),        # not spend
     ]
-    assert day_spend(txns, DAY).large == [
-        ('DELTA AIR', Decimal('310.00')),
-        ('Whole Foods', Decimal('142.18')),
+    assert day_spend(txns, DAY).purchases == [
+        ('AIRLINE TKT', Decimal('310.00')),
+        ('Grocery Mart', Decimal('142.18')),
+        ('Corner Cafe', Decimal('4.50')),
     ]
 
 
-def test_day_spend_sums_by_category_largest_first():
-    txns = [
-        FakeTxn(DAY, '20.00', category='GENERAL_MERCHANDISE'),
-        FakeTxn(DAY, '30.00', category='FOOD_AND_DRINK'),
-        FakeTxn(DAY, '25.00', category='FOOD_AND_DRINK'),
-        FakeTxn(DAY, '5.00', category=None),
-        FakeTxn(DAY, '5.00', category=''),
-    ]
-    assert day_spend(txns, DAY).by_category == [
-        ('FOOD_AND_DRINK', Decimal('55.00')),
-        ('GENERAL_MERCHANDISE', Decimal('20.00')),
-        (None, Decimal('10.00')),
-    ]
+def test_day_spend_lists_repeat_purchases_at_one_merchant_separately():
+    txns = [FakeTxn(DAY, '4.50', merchant_name='Corner Cafe'),
+            FakeTxn(DAY, '4.50', merchant_name='Corner Cafe')]
+    result = day_spend(txns, DAY)
+    assert result.purchases == [('Corner Cafe', Decimal('4.50'))] * 2
+    assert result.count == 2
 
 
 def test_day_spend_empty_day():
     result = day_spend([FakeTxn(DAY - timedelta(days=1), '50.00')], DAY)
-    assert result == (DAY, 0, Decimal('0'), [], [])
+    assert result == (DAY, 0, Decimal('0'), [])
 
 
-def test_day_spend_breaks_ties_by_label_and_category_name():
-    """Equal amounts sort by name, so the text is stable from run to run;
-    uncategorized ('' as a sort key) sorts ahead of named categories."""
+def test_day_spend_breaks_ties_by_label():
+    """Equal amounts sort by name, so the text is stable from run to run."""
     txns = [
-        FakeTxn(DAY, '150.00', category='TRAVEL', merchant_name='Zipcar'),
-        FakeTxn(DAY, '150.00', category='FOOD_AND_DRINK', merchant_name='Alamo'),
-        FakeTxn(DAY, '150.00', category=None, merchant_name='Hertz'),
+        FakeTxn(DAY, '15.00', merchant_name='Zipcar'),
+        FakeTxn(DAY, '15.00', merchant_name='Alamo'),
+        FakeTxn(DAY, '15.00', merchant_name='Hertz'),
     ]
     result = day_spend(txns, DAY)
-    assert [label for label, _ in result.large] == ['Alamo', 'Hertz', 'Zipcar']
-    assert [c for c, _ in result.by_category] == [None, 'FOOD_AND_DRINK', 'TRAVEL']
+    assert [label for label, _ in result.purchases] == ['Alamo', 'Hertz', 'Zipcar']
 
 
 def test_day_spend_keys_on_the_purchase_date_not_the_posting_date():
@@ -382,7 +376,7 @@ def test_day_spend_keys_on_the_purchase_date_not_the_posting_date():
         FakeTxn(DAY, '20.00', authorized_date=DAY - timedelta(days=2),
                 merchant_name='Bought earlier'),
     ]
-    assert day_spend(txns, DAY).large == [('Posted later', Decimal('150.00'))]
+    assert day_spend(txns, DAY).purchases == [('Posted later', Decimal('150.00'))]
     assert day_spend(txns, DAY).count == 1
 
 

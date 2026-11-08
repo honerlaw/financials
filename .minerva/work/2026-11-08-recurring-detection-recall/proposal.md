@@ -1,7 +1,7 @@
 # Proposal: recurring-detection-recall
 
 **Date**: 2026-11-08
-**Status**: Draft
+**Status**: Shipped (2026-11-08)
 
 ## Goal
 
@@ -25,26 +25,24 @@ Replaying the production history (read over HTTP, not committed) through the cur
 **A — targeted relaxations, each at the failing rule, each replayed against production history.** Three independent changes in `app/subscriptions.py` and `app/bills.py`:
 
 1. **Weekly skipped sessions** (`app/subscriptions.py`).
-   - Inside the weekly bucket only, `_gap_is_regular` also accepts a gap within the bucket's tolerance (±2) of 2 × 7 or 3 × 7. That is 12–16 or 19–23 days: one or two skipped sessions.
+   - `_classify_cadence` runs the plain 7 ± 2 test first. If that fails and at least `WEEKLY_SKIP_MIN_WEEKDAY_SHARE` = 0.4 of the charge days fall on the stream's most common weekday (`_weekday_share`), it retries with `_gap_is_regular(..., skips=True)`. That also accepts 14 ± 2 and 21 ± 2 days (`WEEKLY_SKIP_MULTIPLES = (2, 3)`): one or two skipped sessions.
+   - The weekday guard was added at review. Without it, about 28% of random 3–14-day merchant histories passed as weekly. With it, about 4% pass, against 2% before. `test_random_three_to_fourteen_day_habits_rarely_pass_as_weekly` pins the rate.
    - Bucket selection by median gap is unchanged, so a stream with a 14-day median is still biweekly.
-   - A weekly stream stays `active` while overdue ≤ 3 × 7 + 2 = 23 days, the largest gap the bucket calls regular. Today it is 10.5 days.
-   - New constant `WEEKLY_SKIP_MULTIPLES = (2, 3)`. Other buckets are unchanged.
+   - A weekly stream stays `active` until it is 23 days overdue (`_inactive_after_days`: 3 × 7 + 2, the largest gap the bucket calls regular). Before this change the limit was 10.5 days. Other cadences keep 1.5 × their gap.
 2. **Zelle payments are not transfers** (`app/bills.py`).
-   - In `_is_transfer`, an outflow row whose raw `description` contains `ZELLE` (case-insensitive) is a payment to a person, so it does not vote "transfer". It still counts as categorized, so it votes "not a transfer".
+   - `_is_p2p_payment` matches `\bZELLE\b`, case-insensitive, on an outflow row's raw `description`. A word match means "GAZELLE" does not count. In `_is_transfer`, such a row votes "not a transfer". Each row votes on its own.
    - `description` is already a detection column, so `_DETECTION_COLUMNS` and the index are unchanged.
-   - This also affects the suggestion's transfer badge, which is `_is_transfer` on the whole group.
-   - It does not touch `_is_card_payment` or income.
+   - This also changes the suggestion's transfer badge, which is `_is_transfer` on the whole group.
+   - Income and `_is_card_payment` are untouched.
 3. **New monthly pair** (`app/subscriptions.py` and `app/bills.py`).
-   - In the exact-amount split (`_split_by_amount`), a bin of exactly 2 distinct dates is accepted as a monthly stream when all of these hold:
-     - the dates are in consecutive calendar months;
-     - the gap is within the strict monthly tolerance (30 ± 6), with no calendar-month slack;
-     - the stream is active (last charge ≤ 45 days ago, the existing monthly `active` rule).
-   - Such a bin is accepted even when it holds the whole group. A whole-group pair takes the merchant's own name and unsuffixed essential key, so it keeps its mark when a third charge makes it an ordinary whole-group stream. A pair inside a larger group is named `Name · $X` with the `@X` key suffix, like any split plan.
-   - The stream carries `new: True`, and the page shows a `new` badge ("2 charges so far") beside the existing Flag link. It is counted in the total (the user's decision). If no third charge arrives, it goes inactive after 45 days by the existing rule.
-   - Implemented as a `pair` option on `_build_stream`/`_classify_cadence`, off by default, that applies to the monthly bucket only. It is passed only from `_split_by_amount`, which runs after whole-group detection has already failed. So whole-group detection, `fallback_cadence`/rule streams and `detect_subscriptions*` are unchanged.
-   - `_split_by_amount` still skips a whole-group bin unless that bin is a pair.
+   - `_build_stream(..., pair=True)` accepts exactly 2 distinct dates as a monthly stream with `new` True when `_is_new_monthly_pair` holds: consecutive calendar months, and a gap of 30 ± 6 days with no calendar slack. Recency is the ordinary `active` rule: at most 45 days since the last charge.
+   - `_classify_cadence` is unchanged. Every stream dict carries `new`.
+   - Only `_split_by_amount` passes `pair`, and only when the bin's rows are not mostly card payments or transfers (`pair=not _is_transfer(rows)`). Card payments and transfers stay excluded, as before.
+   - Whole-group detection, rule streams and `detect_subscriptions*` are unchanged.
+   - `_split_by_amount` still skips a bin holding the whole group, unless that bin is a pair.
+   - **Naming.** A pair that holds all of the group's outflows (refund rows aside) is the merchant itself: its own name, `split_amount` None and the unsuffixed key. So its essential mark survives the third charge that makes it an ordinary whole-group stream. Any other pair is a `Name · $X` plan with the `@X` key.
    - The pair's row positions join `taken`, so the "Possibly recurring" suggestion sees only the other rows.
-   - `_is_card_payment` and the transfer exclusion still apply to pairs as to any bill.
+   - The page shows a `new · 2 months` badge beside the Flag link. The pair is counted (the user's decision). Without a third charge it lapses by the ordinary monthly rule.
 
 **Considered and rejected:**
 
@@ -74,7 +72,7 @@ Replaying the production history (read over HTTP, not committed) through the cur
   - A Zelle payment to one's own account at another bank would wrongly count, but that is rare.
   - Plaid's `category_detailed` cannot separate the cases, because Zelle to a person and transfers between one's own accounts commonly share the same `TRANSFER_OUT` detailed category. The descriptor is the available signal.
   - The vote is per row: in a mixed group, Zelle rows vote "not a transfer" and the other categorized rows vote as before.
-- **Zelle grouping coupling.** Different Zelle payees can fuzzy-merge into one group (Open Questions). Once Zelle counts, such a merged group could count as one mislabelled stream. Today only one stray row is affected. The follow-up issue is filed before merge and linked from the PR.
+- **Zelle grouping coupling.** Different Zelle payees can fuzzy-merge into one group (Open Questions). Once Zelle counts, such a merged group could count as one mislabelled stream. Today only one stray row is affected. Filed as #64.
 - **Whole-group pairs.** Two same-amount charges at a merchant with no other history are the loosest case. The replay found none today. They are accepted for the canonical new-subscription shape, and bounded by the 45-day self-expiry, the `new` badge and the one-click Flag.
 - **In-group pairs.** A whole-group pair whose third charge has a different amount becomes an in-group pair (`Name · $X`, `@X` key). An essential mark set on it in its whole-group form is then lost. This is the same key behaviour as the existing split.
 
@@ -107,4 +105,7 @@ All tests use synthetic, seed-relative fixtures (knowledge 004). No real merchan
 
 ## Open Questions
 
-- **Latent, out of scope:** fuzzy grouping collapses different Zelle payees into one group. Their normalized descriptors share long boilerplate ("<name> payment id … zelle payment to"), and `SequenceMatcher` scores them above 0.82. Today only one stray row of another payee joins, but a second regular Zelle payee would be mixed in and could break both. Fixing it changes grouping (`GROUPING_ALGO_VERSION` bump, index rebuild), so it should be its own unit. A follow-up GitHub issue is filed before merge, with no real payee data, and linked from the PR.
+- **Latent, out of scope:** fuzzy grouping collapses different Zelle payees into one group. Their normalized descriptors share long boilerplate ("<name> payment id … zelle payment to"), and `SequenceMatcher` scores them above 0.82. Today only one stray row of another payee joins, but a second regular Zelle payee would be mixed in and could break both. Fixing it changes grouping (`GROUPING_ALGO_VERSION` bump, index rebuild), so it should be its own unit. Filed as #64.
+
+## Deferred work
+- #64 — Fuzzy grouping merges different Zelle payees into one merchant group (priority: high)

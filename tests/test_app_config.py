@@ -37,3 +37,83 @@ def test_create_app_builds_a_psycopg2_engine_for_a_bare_postgres_url(monkeypatch
         'postgresql+psycopg2://u:p@h/d?sslmode=require'
     with app.app_context():
         assert db.engine.dialect.driver == 'psycopg2'
+
+
+def test_create_app_pings_and_recycles_pooled_connections():
+    """The 7am job must not be handed a connection the server already closed.
+
+    On 2026-11-13 and 2026-11-16 the job's first query hit a pooled Postgres
+    connection that had sat idle since the previous day and raised
+    ``SSL SYSCALL error: EOF detected``, so neither the sync nor the digest ran.
+    No connection is made: the engine options are read, not exercised.
+    """
+    app = create_app({
+        'SECRET_KEY': 'x', 'APP_PASSWORD': 'x',
+        'SQLALCHEMY_DATABASE_URI': 'postgresql+psycopg2://u:p@h/d?sslmode=require',
+    })
+
+    assert app.config['SQLALCHEMY_ENGINE_OPTIONS'] == {
+        'pool_pre_ping': True, 'pool_recycle': 1800,
+    }
+
+
+@pytest.mark.parametrize('uri', ['sqlite:///:memory:', 'sqlite://'])
+def test_in_memory_sqlite_is_pinged_but_never_recycled(uri):
+    """Recycling the one connection that *is* the database would empty it."""
+    app = create_app({'SECRET_KEY': 'x', 'APP_PASSWORD': 'x',
+                      'SQLALCHEMY_DATABASE_URI': uri})
+
+    assert app.config['SQLALCHEMY_ENGINE_OPTIONS'] == {'pool_pre_ping': True}
+
+
+def test_in_memory_test_database_survives_a_clock_frozen_far_ahead(app):
+    """A test frozen past the recycle age must still see its tables.
+
+    With ``pool_recycle`` on the in-memory StaticPool, freezegun's clock makes
+    the connection look 30+ minutes old, it is recycled, and the next query
+    fails with ``no such table``.
+    """
+    from datetime import datetime, timedelta
+    from freezegun import freeze_time
+    from sqlalchemy import text
+
+    db.session.remove()
+    with freeze_time(datetime.now() + timedelta(days=400)):
+        assert db.session.execute(
+            text('select count(*) from institutions')).scalar() == 0
+
+
+@pytest.mark.parametrize('pre_ping', [True, False])
+def test_a_pooled_connection_closed_behind_the_pool_is_replaced(tmp_path, pre_ping):
+    """Pre-ping swaps a dead pooled connection for a fresh one at checkout.
+
+    A file-backed database is needed: ``:memory:`` gets a StaticPool whose one
+    connection *is* the database, so there is nothing to reconnect to. Closing
+    the DBAPI connection stands in for the server dropping an idle Postgres
+    connection. The ``pre_ping=False`` case proves the test can fail.
+    """
+    from sqlalchemy import text
+    from sqlalchemy.exc import DBAPIError
+
+    config = {
+        'SECRET_KEY': 'x',
+        'APP_PASSWORD': 'x',
+        'SQLALCHEMY_DATABASE_URI': f'sqlite:///{tmp_path / "pool.db"}',
+    }
+    if not pre_ping:
+        # Only the control case overrides; the passing case runs on the
+        # engine options create_app ships with.
+        config['SQLALCHEMY_ENGINE_OPTIONS'] = {'pool_pre_ping': False}
+    app = create_app(config)
+    with app.app_context():
+        assert db.session.execute(text('select 1')).scalar() == 1
+        raw = db.session.connection().connection.dbapi_connection
+        db.session.remove()  # return the connection to the pool, still "open"
+        raw.close()          # ...but now dead behind the pool's back
+
+        if pre_ping:
+            assert db.session.execute(text('select 1')).scalar() == 1
+        else:
+            with pytest.raises(DBAPIError):
+                db.session.execute(text('select 1'))
+        db.session.remove()

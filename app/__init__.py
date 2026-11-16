@@ -39,6 +39,12 @@ def create_app(config=None):
         SECRET_KEY=os.getenv('SECRET_KEY', ''),
         APP_PASSWORD=os.getenv('APP_PASSWORD', ''),
         SQLALCHEMY_TRACK_MODIFICATIONS=False,
+        # The 7am job checks out a connection that may have sat idle since the
+        # previous day, by which time the server can have closed it (it raised
+        # "SSL SYSCALL error: EOF detected" and skipped the digest). Pre-ping
+        # swaps a dead connection for a fresh one at checkout; recycle retires
+        # old ones. A `config` override replaces this whole dict, not one key.
+        SQLALCHEMY_ENGINE_OPTIONS={'pool_pre_ping': True, 'pool_recycle': 1800},
         # The session cookie is the only credential. Lax keeps it off
         # cross-site POSTs, so another site cannot submit the app's forms
         # (rules, sync, digest, institution removal) as the signed-in user.

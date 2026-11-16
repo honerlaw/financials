@@ -12,3 +12,10 @@
 - [solo] scope check: one unit, one PR (tier: solo predicate. One config block in app/__init__.py plus tests, additive, no new public interface, no knowledge conflict; parallel wave)
 - [reviewed — clean] approach: A, pool_pre_ping + pool_recycle (tier: reviewer. Dominance over B was in doubt; parallel wave). The Skeptic accepted and said A and B are complementary, B deferred rather than wrong; the proposal wording now says so. Noted, not load-bearing: mid-transaction drops are not covered; avoid private pool attributes in tests. Rejected: B (digest despite sync failure; 016 d5 tension, unobserved failure), C (job retry; redundant, 033 rollback care)
 - [reviewed — clean] whole-proposal: Skeptic accepted (tier: reviewer; parallel wave; no restart, since approach and scope were unchanged). Adopted as editorial wording: Goal narrowed to checkout-time staleness with mid-transaction drops out of scope; criterion 1 asserts config not private attributes; criterion 2 uses a tmp_path DB; criterion 4 states the SQLite-stands-in-for-Postgres limit (033/034). The Skeptic verified on 2.0.54 that criterion 2 is achievable: ProgrammingError without pre-ping, success with it
+
+## Work notes
+- Fix: `SQLALCHEMY_ENGINE_OPTIONS={'pool_pre_ping': True, 'pool_recycle': 1800}` in create_app's config.update block.
+- Criterion 2 negative check: temporarily set the shipped default to `pool_pre_ping: False`. `test_create_app_pings_and_recycles_pooled_connections` and `test_a_pooled_connection_closed_behind_the_pool_is_replaced[True]` both FAILED (2 failed, 8 passed), then passed again after the restore. The `[False]` parametrization is a permanent control that pins the failure mode (DBAPIError).
+- The behavioural test's passing case uses create_app's own defaults (no override), so it guards the shipped config, not a test-local one.
+- Full suite: 599 passed.
+- Observation for the reference memory: `doctl apps logs --type run` DOES show APScheduler job tracebacks (it was where this bug was found). The memory saying it is "nearly useless" is wrong for job failures.

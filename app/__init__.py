@@ -29,6 +29,29 @@ def _database_url(raw):
     return raw
 
 
+# A connection older than this is retired at checkout (seconds).
+_POOL_RECYCLE_SECONDS = 1800
+
+
+def _engine_options(db_url):
+    """Default pool options for the final database URL — pure.
+
+    The 7am job checks out a connection that may have sat idle since the
+    previous day, by which time the server can have closed it (it raised
+    "SSL SYSCALL error: EOF detected" and skipped the digest). Pre-ping swaps a
+    dead connection for a fresh one at checkout; recycle retires old ones.
+
+    An in-memory SQLite database lives inside its one pooled connection, so
+    recycling that connection would silently replace the database with an
+    empty one. It gets pre-ping only.
+    """
+    from sqlalchemy.engine import make_url
+    url = make_url(db_url)
+    if url.get_backend_name() == 'sqlite' and url.database in (None, '', ':memory:'):
+        return {'pool_pre_ping': True}
+    return {'pool_pre_ping': True, 'pool_recycle': _POOL_RECYCLE_SECONDS}
+
+
 def create_app(config=None):
     app = Flask(__name__)
 
@@ -39,12 +62,6 @@ def create_app(config=None):
         SECRET_KEY=os.getenv('SECRET_KEY', ''),
         APP_PASSWORD=os.getenv('APP_PASSWORD', ''),
         SQLALCHEMY_TRACK_MODIFICATIONS=False,
-        # The 7am job checks out a connection that may have sat idle since the
-        # previous day, by which time the server can have closed it (it raised
-        # "SSL SYSCALL error: EOF detected" and skipped the digest). Pre-ping
-        # swaps a dead connection for a fresh one at checkout; recycle retires
-        # old ones. A `config` override replaces this whole dict, not one key.
-        SQLALCHEMY_ENGINE_OPTIONS={'pool_pre_ping': True, 'pool_recycle': 1800},
         # The session cookie is the only credential. Lax keeps it off
         # cross-site POSTs, so another site cannot submit the app's forms
         # (rules, sync, digest, institution removal) as the signed-in user.
@@ -78,6 +95,13 @@ def create_app(config=None):
 
     if config:
         app.config.update(config)
+
+    # Chosen after the override so they match the URI actually in use. A
+    # `config` that sets SQLALCHEMY_ENGINE_OPTIONS replaces them wholesale.
+    app.config.setdefault(
+        'SQLALCHEMY_ENGINE_OPTIONS',
+        _engine_options(app.config['SQLALCHEMY_DATABASE_URI']),
+    )
 
     if not app.config['SECRET_KEY']:
         raise RuntimeError(

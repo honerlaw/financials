@@ -35,11 +35,24 @@ so no restart or deploy explains the miss. That rules out the "no catch-up" limi
 
 ## Fix
 
-`create_app` now defaults `SQLALCHEMY_ENGINE_OPTIONS={'pool_pre_ping': True, 'pool_recycle':
-1800}`. Pre-ping pings each connection at checkout and replaces a dead one. Recycle retires
-connections older than 30 minutes. A `config` override replaces the whole dict. A test in
-`tests/test_app_config.py` closes a pooled SQLite connection behind the pool's back and shows
-the next `db.session` query succeeds on the shipped defaults and fails without pre-ping.
+`create_app` now defaults `SQLALCHEMY_ENGINE_OPTIONS` from `_engine_options(uri)`, chosen
+after the `config` override so it matches the URI actually in use. A `config` that sets the key
+replaces it wholesale.
+
+- **Pre-ping** pings each connection at checkout and replaces a dead one.
+- **Recycle** retires connections older than 30 minutes (`pool_recycle=1800`).
+- **In-memory SQLite gets pre-ping only.** Its StaticPool's one connection *is* the database, so
+  recycling it silently swaps in an empty database. Review caught this. The test suite's
+  `sqlite:///:memory:` fixture would have failed with `no such table` in any test frozen
+  (freezegun) more than 30 minutes past the fixture's connect time. All of today's frozen dates
+  are in the past, so it was latent.
+
+Tests in `tests/test_app_config.py`:
+
+- One closes a pooled file-SQLite connection behind the pool's back. It shows the next
+  `db.session` query succeeds on the shipped defaults and fails without pre-ping.
+- One freezes the clock 400 days ahead on the in-memory fixture. It reproduces `no such table`
+  if recycle is ever applied there.
 
 ## Limits
 

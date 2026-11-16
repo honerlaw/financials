@@ -45,12 +45,42 @@ def test_create_app_pings_and_recycles_pooled_connections():
     On 2026-11-13 and 2026-11-16 the job's first query hit a pooled Postgres
     connection that had sat idle since the previous day and raised
     ``SSL SYSCALL error: EOF detected``, so neither the sync nor the digest ran.
+    No connection is made: the engine options are read, not exercised.
     """
-    app = create_app({'SECRET_KEY': 'x', 'APP_PASSWORD': 'x'})
+    app = create_app({
+        'SECRET_KEY': 'x', 'APP_PASSWORD': 'x',
+        'SQLALCHEMY_DATABASE_URI': 'postgresql+psycopg2://u:p@h/d?sslmode=require',
+    })
 
-    options = app.config['SQLALCHEMY_ENGINE_OPTIONS']
-    assert options['pool_pre_ping'] is True
-    assert options['pool_recycle'] == 1800
+    assert app.config['SQLALCHEMY_ENGINE_OPTIONS'] == {
+        'pool_pre_ping': True, 'pool_recycle': 1800,
+    }
+
+
+@pytest.mark.parametrize('uri', ['sqlite:///:memory:', 'sqlite://'])
+def test_in_memory_sqlite_is_pinged_but_never_recycled(uri):
+    """Recycling the one connection that *is* the database would empty it."""
+    app = create_app({'SECRET_KEY': 'x', 'APP_PASSWORD': 'x',
+                      'SQLALCHEMY_DATABASE_URI': uri})
+
+    assert app.config['SQLALCHEMY_ENGINE_OPTIONS'] == {'pool_pre_ping': True}
+
+
+def test_in_memory_test_database_survives_a_clock_frozen_far_ahead(app):
+    """A test frozen past the recycle age must still see its tables.
+
+    With ``pool_recycle`` on the in-memory StaticPool, freezegun's clock makes
+    the connection look 30+ minutes old, it is recycled, and the next query
+    fails with ``no such table``.
+    """
+    from datetime import datetime, timedelta
+    from freezegun import freeze_time
+    from sqlalchemy import text
+
+    db.session.remove()
+    with freeze_time(datetime.now() + timedelta(days=400)):
+        assert db.session.execute(
+            text('select count(*) from institutions')).scalar() == 0
 
 
 @pytest.mark.parametrize('pre_ping', [True, False])

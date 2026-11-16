@@ -1,7 +1,7 @@
 # Proposal: 2026-11-16-reconnect-stale-db-connections
 
 **Date**: 2026-11-16
-**Status**: Draft
+**Status**: Shipped (2026-11-16)
 
 ## Goal
 
@@ -24,10 +24,11 @@ Because the sync raised, `run_daily_sync` (`app/sync.py:31`) never reached `_sen
 
 ## Approach
 
-In `create_app`, add a default `SQLALCHEMY_ENGINE_OPTIONS={'pool_pre_ping': True, 'pool_recycle': 1800}` inside the existing `app.config.update(...)` block. The `config` override argument can still replace it; it replaces the whole dict, not single keys.
+As shipped, `create_app` defaults `SQLALCHEMY_ENGINE_OPTIONS` with `app.config.setdefault(...)` from a new pure helper, `_engine_options(uri)`. The defaults are chosen after the `config` override, so they match the URI actually in use. A `config` that sets the key replaces it wholesale.
 
-- **Pre-ping** pings each connection when it is checked out. On a disconnect error it discards that connection and opens a fresh one.
-- **`pool_recycle`** replaces any connection older than 30 minutes at checkout. This is defence in depth, and the value is not load-bearing.
+- **Pre-ping**, always. Each connection is pinged at checkout. On a disconnect error it is discarded and a fresh one is opened.
+- **`pool_recycle=1800`**, except for in-memory SQLite. It replaces any connection older than 30 minutes at checkout. This is defence in depth, and the value is not load-bearing.
+- **No recycle for in-memory SQLite** (`sqlite:///:memory:`, `sqlite://`). The StaticPool's one connection *is* the database, so recycling it empties the database. Review found the test suite's fixture would fail with `no such table` under any `freeze_time` more than 30 minutes ahead.
 
 Alternatives considered:
 
@@ -36,7 +37,7 @@ Alternatives considered:
 
 ## Success criteria
 
-1. An app built by `create_app` carries `SQLALCHEMY_ENGINE_OPTIONS` with `pool_pre_ping=True` and `pool_recycle=1800`, asserted by a test in `tests/test_app_config.py`.
+1. An app built by `create_app` for a Postgres URL carries `SQLALCHEMY_ENGINE_OPTIONS` with `pool_pre_ping=True` and `pool_recycle=1800`, and an in-memory SQLite app gets pre-ping only. Both are asserted by tests in `tests/test_app_config.py`.
 2. A test in `tests/test_app_config.py` runs on a file-backed SQLite database (`tmp_path`, not `:memory:`). It closes a pooled connection's underlying DBAPI connection behind the pool's back, then runs a query through `db.session`, and the query succeeds. With pre-ping disabled the same test fails. That was checked once during work and recorded in the scratchpad.
 3. `uv run pytest` passes in full.
 4. A knowledge entry records the bug, its cause, the fix, and its limits: a SQLite simulation stands in for the Postgres SSL EOF, and only checkout-time staleness is covered.

@@ -301,10 +301,12 @@ Good morning — Mon Oct 19
 Budget: $0 of $1,000 (0%) — $1,000 left
 Week of Oct 18
 
-October so far: $2,105
-Bills $0 · Other $2,105
+October so far: $5,706
+Bills $3,961 · Other $1,745
 
-Bills: none detected this month
+Bills: 9 of 9 paid
+Still due: none
+Bills this month: ~$3,961
 
 Last 4 weeks
 Sep 20–26: $1,130
@@ -338,11 +340,11 @@ Between them the three samples show every shape the variable parts of the digest
 take — a card flagged `(reconnect needed)` for a bank that stopped syncing (the only
 parenthetical a line can now carry), a day with several purchases (including two
 identical ones at one merchant, listed as two lines), a day with a single purchase, and a
-day with no purchases at all; a month with several bills still due, one with a single
-bill due, and one with no bills detected yet — so a reviewer never sees a shape in live
-traffic that no filed sample contains. (`No linked credit cards.`, a `+N more` line
-after the fifteenth purchase on a very busy day, `Still due: none` once every bill is
-paid, and — if bill detection fails — `<Month> purchases so far: $X` followed by
+day with no purchases at all; one month's bills with several still due, then one, then
+none — so a reviewer never sees a shape in live traffic that no filed sample contains.
+(`No linked credit cards.`, a `+N more` line after the fifteenth purchase on a very
+busy day, `Bills: none detected this month` before any recurring bill is known, and —
+if bill detection fails — `<Month> purchases so far: $X` followed by
 `Bills: unavailable today` are the remaining rare variants; all are plain text.)
 
 ## Content flags

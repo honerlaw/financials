@@ -51,7 +51,7 @@ that single-worker invariant ever changes.
 """
 import threading
 from datetime import timedelta
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from typing import NamedTuple, Optional
 
 from flask import current_app
@@ -177,6 +177,11 @@ def history_line(ws, total):
     return f'{week_label(ws)}: ${total:,.0f}'
 
 
+def _whole(amount):
+    """Round to whole dollars, halves up — the rounding a reader expects."""
+    return Decimal(amount).quantize(Decimal('1'), rounding=ROUND_HALF_UP)
+
+
 def _dollars(amount):
     """``$1,234`` / ``-$12`` — whole dollars, sign before the symbol."""
     sign = '-' if amount < 0 else ''
@@ -206,10 +211,16 @@ def month_lines(today, spend, bills):
     if bills is None:
         return [f'{month} purchases so far: {_dollars(spend)}', '',
                 'Bills: unavailable today']
-    other = spend - bills.paid_spend
+    # Each part is rounded first and the totals are sums of the rounded parts,
+    # so the printed numbers add up by eye. Other is floored at zero: the spend
+    # fetch and bill detection are separate reads, and a sync committing a bill
+    # charge between them could otherwise print a negative.
+    paid = _whole(bills.paid_total)
+    other = max(_whole(spend - bills.paid_spend), Decimal('0'))
+    due = _whole(bills.due_total)
     lines = [
-        f'{month} so far: {_dollars(bills.paid_total + other)}',
-        f'Bills {_dollars(bills.paid_total)} · Other {_dollars(other)}',
+        f'{month} so far: {_dollars(paid + other)}',
+        f'Bills {_dollars(paid)} · Other {_dollars(other)}',
         '',
     ]
     if not bills.count:
@@ -218,12 +229,10 @@ def month_lines(today, spend, bills):
     lines.append(f'Bills: {bills.paid_count} of {bills.count} paid')
     if bills.due_count:
         noun = 'bill' if bills.due_count == 1 else 'bills'
-        lines.append(f'Still due: ~{_dollars(bills.due_total)} '
-                     f'({bills.due_count} {noun})')
+        lines.append(f'Still due: ~{_dollars(due)} ({bills.due_count} {noun})')
     else:
         lines.append('Still due: none')
-    lines.append(
-        f'Bills this month: ~{_dollars(bills.paid_total + bills.due_total)}')
+    lines.append(f'Bills this month: ~{_dollars(paid + due)}')
     return lines
 
 

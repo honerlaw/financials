@@ -180,19 +180,47 @@ def test_a_rule_forced_monthly_stream_behaves_as_monthly():
     # Irregular days, sometimes twice a month: no cadence is detected.
     dates = [date(2026, 6, 2), date(2026, 6, 20), date(2026, 7, 28),
              date(2026, 9, 1), date(2026, 9, 3), date(2026, 10, 17)]
-    rows = [FakeTxn(d, amount='150.00', description='IVY PAYMENT 1234')
+    rows = [FakeTxn(d, amount='175.00', description='ACME TUITION 1234')
             for d in dates]
     found = detect_recurring_with_rules(
-        _group_transactions(rows), today, [rule(pattern='IVY PAYMENT')])
+        _group_transactions(rows), today, [rule(pattern='ACME TUITION')])
     [bill] = found.bills
     assert bill['cadence_forced'] and bill['cadence'] == 'monthly'
     out = month_outlook(found.bills, today)
     assert (out.paid_count, out.due_count) == (0, 1)
-    assert out.due_total == bill['occurrence_amount'] == Decimal('300.00')
+    assert out.due_total == bill['occurrence_amount'] == Decimal('350.00')
 
-    paid = rows + [FakeTxn(date(2026, 11, 4), amount='150.00',
-                           description='IVY PAYMENT 1234')]
+    paid = rows + [FakeTxn(date(2026, 11, 4), amount='175.00',
+                           description='ACME TUITION 1234')]
     found = detect_recurring_with_rules(
-        _group_transactions(paid), today, [rule(pattern='IVY PAYMENT')])
+        _group_transactions(paid), today, [rule(pattern='ACME TUITION')])
     out = month_outlook(found.bills, today)
     assert (out.paid_count, out.due_count) == (1, 0)
+
+
+def test_a_bill_paid_on_the_first_and_fifteenth_is_twice_a_month():
+    """Its 13–17-day gaps make it biweekly, but it never charges a third time
+    in a month: once both have posted, nothing is due."""
+    rows = []
+    for month in range(5, 12):
+        rows += _charges(date(2026, month, 1), date(2026, month, 15), amount='500.00')
+    bill = _bill(rows, 'biweekly', '500.00')
+    for today in (date(2026, 11, 16), date(2026, 11, 28)):
+        out = month_outlook([bill], today)
+        assert (out.paid_count, out.due_count) == (1, 0), today
+        assert out.paid_total == Decimal('1000.00')
+    # Before the 15th, one charge is still to come.
+    early = [t for t in rows if t.date < date(2026, 11, 15)]
+    out = month_outlook([_bill(early, 'biweekly', '500.00')], date(2026, 11, 10))
+    assert out.due_total == Decimal('500.00')
+
+
+def test_a_true_biweekly_bill_can_charge_three_times_in_a_month():
+    """Every other Friday from Jan 2: January and July hold three charges, so
+    it is projected by its 14-day step — Oct 23 is still due on Oct 20."""
+    start = date(2026, 1, 2)
+    rows = _charges(*[start + timedelta(days=14 * k) for k in range(21)
+                      if start + timedelta(days=14 * k) <= date(2026, 10, 16)],
+                    amount='900.00')
+    out = month_outlook([_bill(rows, 'biweekly', '900.00')], date(2026, 10, 20))
+    assert out.due_total == Decimal('900.00')

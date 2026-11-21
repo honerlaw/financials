@@ -332,8 +332,28 @@ def _months_between(earlier, later):
     return (later.year - earlier.year) * 12 + later.month - earlier.month
 
 
-def _remaining_charges(bill, last_charge, charged_this_month, today):
+# A bill paid on two fixed days of the month (the 1st and the 15th) has gaps
+# of 13–17 days and is detected as biweekly, but it never makes a third charge
+# in a month. It is told apart by its history: in each of at least
+# SEMIMONTHLY_MIN_MONTHS of the up to SEMIMONTHLY_WINDOW_MONTHS complete months
+# before this one (none earlier than its first charge), exactly two charges.
+SEMIMONTHLY_WINDOW_MONTHS = 6
+SEMIMONTHLY_MIN_MONTHS = 3
+
+
+def _is_semimonthly(charge_dates, today):
+    first = min(charge_dates)
+    per_month = Counter((d.year, d.month) for d in charge_dates)
+    months = [m for m in _recent_months(today, SEMIMONTHLY_WINDOW_MONTHS)
+              if m >= (first.year, first.month)]
+    return (len(months) >= SEMIMONTHLY_MIN_MONTHS
+            and all(per_month[m] == 2 for m in months))
+
+
+def _remaining_charges(bill, charge_dates, today):
     """How many more charges `bill` is expected to make this calendar month.
+
+    `charge_dates` are the distinct dates of its positive charges.
 
     - monthly (a rule-forced stream too): none once anything posted this month,
       else one — "any charge this month", the rule forced streams already use,
@@ -342,18 +362,25 @@ def _remaining_charges(bill, last_charge, charged_this_month, today):
     - quarterly: calendar months, not cadence_days — 91 nominal days would put
       a bill charged on the 1st a month early (Oct 1 + 91 = Dec 31). One if it
       is due this month or overdue, else none.
+    - biweekly that is really twice a month (_is_semimonthly): two a month,
+      less those already charged.
     - weekly / biweekly: the charges projected from the last one, every
       cadence_days, that fall from today to the month's end. A projected charge
       already in the past is treated as a skipped session; today's is still
       due, because the digest goes out at 7am.
     """
     cadence = bill['cadence']
+    this_month = sum(1 for d in charge_dates
+                     if (d.year, d.month) == (today.year, today.month))
+    last_charge = max(charge_dates)
     if cadence == 'monthly':
-        return 0 if charged_this_month else 1
+        return 0 if this_month else 1
     if cadence == 'quarterly':
-        if charged_this_month:
+        if this_month:
             return 0
         return 1 if _months_between(last_charge, today) >= 3 else 0
+    if cadence == 'biweekly' and _is_semimonthly(charge_dates, today):
+        return max(0, 2 - this_month)
     step = timedelta(days=bill['cadence_days'])
     end = _month_end(today)
     count = 0
@@ -388,8 +415,7 @@ def month_outlook(bills, today):
         paid_total += sum((t.amount for t in this_month), Decimal('0.00'))
         paid_spend += sum((t.amount for t in this_month if is_spend(t)),
                           Decimal('0.00'))
-        last_charge = max(t.date for t in charges)
-        remaining = _remaining_charges(bill, last_charge, bool(this_month), today)
+        remaining = _remaining_charges(bill, {t.date for t in charges}, today)
         if remaining:
             due_count += 1
             due_total += remaining * bill['occurrence_amount']
@@ -580,9 +606,14 @@ def _split_by_amount(group, today):
 
 def _window_months(today):
     """The SUGGEST_WINDOW_MONTHS complete calendar months before today's, oldest first."""
+    return _recent_months(today, SUGGEST_WINDOW_MONTHS)
+
+
+def _recent_months(today, n):
+    """The `n` complete calendar months before today's, oldest first."""
     months = []
     year, month = today.year, today.month
-    for _ in range(SUGGEST_WINDOW_MONTHS):
+    for _ in range(n):
         month -= 1
         if month == 0:
             year, month = year - 1, 12

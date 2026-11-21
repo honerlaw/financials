@@ -997,8 +997,25 @@ def test_month_lines_split_spending_into_bills_and_other():
         '',
         'Bills: 7 of 11 paid',
         'Still due: ~$1,180 (4 bills)',
-        'Bills this month: ~$4,701',
+        'Bills this month: ~$4,700',
     ]
+
+
+def test_month_lines_add_up_by_eye_after_rounding():
+    """Parts are rounded first and totals summed from them: $100.50 of bills
+    and $100.50 of other print as $101 + $101 = $202, never $100 + $100 = $201."""
+    bills = MonthBills(1, 1, Decimal('100.50'), Decimal('0'), Decimal('49.50'))
+    lines = month_lines(TODAY, Decimal('100.50'), bills)
+    assert lines[:2] == ['August so far: $202', 'Bills $101 · Other $101']
+    assert lines[-1] == 'Bills this month: ~$151'
+
+
+def test_month_lines_never_print_negative_other():
+    """A bill charge synced between the spend fetch and bill detection can be
+    in the bills but not yet in the purchases."""
+    bills = MonthBills(1, 0, Decimal('40'), Decimal('40'), Decimal('0'))
+    assert month_lines(TODAY, Decimal('0'), bills)[:2] == [
+        'August so far: $40', 'Bills $40 · Other $0']
 
 
 def test_month_lines_with_no_bills_this_month():
@@ -1080,6 +1097,12 @@ def test_a_bill_detection_failure_never_costs_the_digest(app, monkeypatch, error
     monkeypatch.setattr('app.notifications.groups_for_detection', explode)
     with app.app_context():
         _seed_month(_seed_inst())
+        # SQLite never aborts a transaction (knowledge 033), so prove the
+        # rollback that protects Postgres's DailyDigest write actually runs.
+        rollbacks = []
+        real_rollback = db.session.rollback
+        monkeypatch.setattr(db.session, 'rollback',
+                            lambda: (rollbacks.append(1), real_rollback()))
         sender = FakeSender()
         send_daily_digest(db.session, TODAY, {'BUDGET_ALERT_RECIPIENTS': '+1111'},
                           sender=sender)
@@ -1087,6 +1110,7 @@ def test_a_bill_detection_failure_never_costs_the_digest(app, monkeypatch, error
         assert 'August purchases so far: $170\n\nBills: unavailable today' in body
         assert 'Credit cards' in body and 'Yesterday — Fri Aug 7' in body
         # The rollback left the session usable for the DailyDigest write.
+        assert rollbacks
         assert DailyDigest.query.count() == 1
 
 

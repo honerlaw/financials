@@ -9,9 +9,10 @@ from sqlalchemy.exc import OperationalError
 from app.models import db, Account, Institution, Transaction, DailyDigest
 from app.notifications import (
     PURCHASE_LIST_MAX, AccountRow, account_line, budget_line, card_total_line,
-    digest_body, digest_cards, history_line, send_daily_digest,
+    digest_body, digest_cards, history_line, month_lines, send_daily_digest,
     send_digest_now, yesterday_lines,
 )
+from app.bills import MonthBills
 from app.spending import DaySpend
 
 
@@ -34,9 +35,17 @@ CARDS = [
 ]
 
 
+# August so far: $1,472.55 of purchases, $980 of them bill charges paid by
+# card; $2,540.18 of bills paid in all (rent by Zelle is not a purchase).
+MONTH = Decimal('1472.55')
+BILLS = MonthBills(paid_count=7, due_count=4, paid_total=Decimal('3520.18'),
+                   paid_spend=Decimal('980.00'), due_total=Decimal('1180.40'))
+
+
 def _body(cards=CARDS, card_total=Decimal('1816.73'), yesterday=NO_SPEND,
-          spent=Decimal('750'), history=HISTORY):
-    return digest_body(TODAY, spent, history, cards, card_total, yesterday)
+          spent=Decimal('750'), history=HISTORY, month=MONTH, bills=BILLS):
+    return digest_body(TODAY, spent, month, bills, history, cards, card_total,
+                       yesterday)
 
 
 # ── message building (pure) ───────────────────────────────────────────────────
@@ -281,17 +290,45 @@ def test_a_long_merchant_label_is_truncated():
     assert name.endswith('…')
 
 
-def test_a_worst_case_digest_stays_under_twilios_length_limit():
-    """Twilio rejects a body over 1600 characters, losing the day's digest."""
-    cards = [(f'Institution {i}', f'Rewards Card {i}', f'{1000 + i}',
-              Decimal('12345.67'), True) for i in range(8)]
+# The longest the bills block gets: five-digit amounts, two-digit counts.
+WORST_BILLS = MonthBills(paid_count=49, due_count=50, paid_total=Decimal('99999'),
+                         paid_spend=Decimal('0'), due_total=Decimal('99999'))
+
+
+def _worst_cards(n):
+    return [(f'Institution {i}', f'Rewards Card {i}', f'{1000 + i}',
+             Decimal('12345.67'), True) for i in range(n)]
+
+
+def test_a_realistic_worst_case_lists_every_capped_purchase():
+    """With three cards, the fixed cap alone keeps a busy day under Twilio's
+    1600-character limit even with the longest bills block: all 15 purchases
+    are listed, nothing is given up to the backstop."""
     history = [(ws, Decimal('99999')) for ws, _ in HISTORY]
     purchases = [('M' * 60, Decimal('9999.99')) for _ in range(30)]
-    body = _body(cards=cards, card_total=Decimal('98765.36'),
+    body = _body(cards=_worst_cards(3), card_total=Decimal('98765.36'),
                  yesterday=_spend(purchases), spent=Decimal('99999'),
-                 history=history)
+                 history=history, month=Decimal('99999'), bills=WORST_BILLS)
     assert '+15 more' in body
+    assert body.count(': $9,999.99') == PURCHASE_LIST_MAX
     assert len(body) < 1600, len(body)
+
+
+def test_a_worst_case_digest_stays_under_twilios_length_limit():
+    """Twilio rejects a body over 1600 characters, losing the day's digest.
+    Eight long-named stale cards plus the longest bills block no longer fit
+    beside 15 purchases, so the backstop lists fewer (knowledge 2026-11-21
+    amends 2026-11-08's "the cap alone fits the worst case")."""
+    history = [(ws, Decimal('99999')) for ws, _ in HISTORY]
+    purchases = [('M' * 60, Decimal('9999.99')) for _ in range(30)]
+    body = _body(cards=_worst_cards(8), card_total=Decimal('98765.36'),
+                 yesterday=_spend(purchases), spent=Decimal('99999'),
+                 history=history, month=Decimal('99999'), bills=WORST_BILLS)
+    assert len(body) <= 1600, len(body)
+    listed = body.count(': $9,999.99')
+    assert 0 < listed < PURCHASE_LIST_MAX
+    assert f'+{30 - listed} more' in body
+    assert 'Bills this month: ~$199,998' in body
 
 
 def test_many_long_named_cards_shorten_the_purchase_list_to_fit():
@@ -625,9 +662,13 @@ def test_digest_history_is_built_from_real_transactions(app):
         assert 'Budget: $750 of $1,000' in body   # current week still its own line
 
 
-def test_digest_history_still_costs_one_transaction_query(app):
-    """Budget line and history come out of a single fetch, not one per week."""
+def test_digest_spend_totals_still_cost_one_transaction_query(app):
+    """Budget line, month total, history and Yesterday come out of a single
+    fetch, not one per aggregate. (The bill outlook reads transactions too —
+    the same read /recurring makes — which is why this calls _spend_totals
+    itself rather than counting the whole send.)"""
     from sqlalchemy import event
+    from app.notifications import _spend_totals
 
     with app.app_context():
         _seed_inst('750.00')
@@ -640,9 +681,7 @@ def test_digest_history_still_costs_one_transaction_query(app):
         engine = db.session.get_bind()
         event.listen(engine, 'before_cursor_execute', record)
         try:
-            send_daily_digest(db.session, TODAY,
-                              {'BUDGET_ALERT_RECIPIENTS': '+1111'},
-                              sender=FakeSender())
+            _spend_totals(db.session, TODAY)
         finally:
             event.remove(engine, 'before_cursor_execute', record)
 
@@ -947,3 +986,123 @@ def test_a_purchase_is_reported_once_across_its_pending_and_posted_rows(app):
         assert 'Pending Shop' not in body
         assert 'No Auth Cafe: $120.00' in body
 
+
+
+# ── month-to-date bills block ─────────────────────────────────────────────────
+
+def test_month_lines_split_spending_into_bills_and_other():
+    assert month_lines(TODAY, MONTH, BILLS) == [
+        'August so far: $4,013',
+        'Bills $3,520 · Other $493',
+        '',
+        'Bills: 7 of 11 paid',
+        'Still due: ~$1,180 (4 bills)',
+        'Bills this month: ~$4,701',
+    ]
+
+
+def test_month_lines_with_no_bills_this_month():
+    bills = MonthBills(0, 0, Decimal('0'), Decimal('0'), Decimal('0'))
+    assert month_lines(TODAY, Decimal('412'), bills) == [
+        'August so far: $412',
+        'Bills $0 · Other $412',
+        '',
+        'Bills: none detected this month',
+    ]
+
+
+def test_month_lines_with_every_bill_paid_and_one_due():
+    paid = MonthBills(5, 0, Decimal('3000'), Decimal('0'), Decimal('0'))
+    assert month_lines(TODAY, MONTH, paid)[-2:] == [
+        'Still due: none', 'Bills this month: ~$3,000']
+    one = MonthBills(4, 1, Decimal('3000'), Decimal('0'), Decimal('60'))
+    assert month_lines(TODAY, MONTH, one)[-2] == 'Still due: ~$60 (1 bill)'
+
+
+def test_month_lines_without_bill_figures_label_the_purchases_total():
+    """The fallback total leaves out bills that are not purchases, so it must
+    not sit under the bills-inclusive label."""
+    assert month_lines(TODAY, MONTH, None) == [
+        'August purchases so far: $1,473', '', 'Bills: unavailable today']
+
+
+def test_digest_body_puts_the_month_block_after_the_week_and_before_history():
+    body = _body()
+    assert body.index('Week of Aug 2') < body.index('August so far') \
+        < body.index('Bills this month') < body.index('Last 4 weeks')
+
+
+def _add_txn(inst_id, day, amount, description, category=None, merchant=None,
+             n=[0]):
+    n[0] += 1
+    db.session.add(Transaction(
+        plaid_transaction_id=f'm-{n[0]}', institution_id=inst_id,
+        account_id='a1', date=day, description=description,
+        merchant_name=merchant, amount=Decimal(amount), category=category,
+    ))
+
+
+def _seed_month(inst_id):
+    """Six months of a card-paid utility and of Zelle rent, both charged this
+    month (August 2026), plus one grocery run this month."""
+    for month in range(3, 9):
+        _add_txn(inst_id, date(2026, month, 3), '120.00', 'DUKE ENERGY',
+                 category='RENT_AND_UTILITIES', merchant='Duke Energy')
+        _add_txn(inst_id, date(2026, month, 1), '2000.00',
+                 'ZELLE PAYMENT TO JANE LANDLORD', category='TRANSFER_OUT')
+    _add_txn(inst_id, date(2026, 8, 5), '50.00', 'KROGER #123',
+             category='FOOD_AND_DRINK', merchant='Kroger')
+    db.session.commit()
+
+
+def test_the_digest_splits_this_months_spending_into_bills_and_other(app):
+    """Rent by Zelle is a bill but not a purchase; the utility is both; the
+    grocery run is neither a bill nor anything but Other."""
+    with app.app_context():
+        _seed_month(_seed_inst())
+        sender = FakeSender()
+        send_daily_digest(db.session, TODAY, {'BUDGET_ALERT_RECIPIENTS': '+1111'},
+                          sender=sender)
+        body = sender.sent[0][1]
+        assert 'August so far: $2,170\nBills $2,120 · Other $50' in body
+        assert 'Bills: 2 of 2 paid\nStill due: none\nBills this month: ~$2,120' \
+            in body
+        assert DailyDigest.query.count() == 1
+
+
+@pytest.mark.parametrize('error', [
+    RuntimeError('boom'),
+    OperationalError('SELECT 1', {}, Exception('server closed the connection')),
+])
+def test_a_bill_detection_failure_never_costs_the_digest(app, monkeypatch, error):
+    def explode():
+        raise error
+    monkeypatch.setattr('app.notifications.groups_for_detection', explode)
+    with app.app_context():
+        _seed_month(_seed_inst())
+        sender = FakeSender()
+        send_daily_digest(db.session, TODAY, {'BUDGET_ALERT_RECIPIENTS': '+1111'},
+                          sender=sender)
+        body = sender.sent[0][1]
+        assert 'August purchases so far: $170\n\nBills: unavailable today' in body
+        assert 'Credit cards' in body and 'Yesterday — Fri Aug 7' in body
+        # The rollback left the session usable for the DailyDigest write.
+        assert DailyDigest.query.count() == 1
+
+
+def test_the_month_total_reaches_back_past_the_history_window(app):
+    """On Sunday Aug 30 the four completed weeks start Aug 2, but the month
+    started Aug 1: a purchase that day is in the month total and in no
+    history week."""
+    from app.notifications import _spend_totals
+    sunday = date(2026, 8, 30)
+    with app.app_context():
+        inst = _seed_inst()
+        _add_txn(inst, date(2026, 8, 1), '75.00', 'KROGER', category='FOOD_AND_DRINK')
+        _add_txn(inst, date(2026, 7, 31), '999.00', 'LAST MONTH',
+                 category='FOOD_AND_DRINK')
+        db.session.commit()
+        spent, month, history, _yesterday = _spend_totals(db.session, sunday)
+        assert month == Decimal('75.00')
+        assert [ws for ws, _ in history][0] == date(2026, 8, 2)
+        assert sum(total for _, total in history) == 0

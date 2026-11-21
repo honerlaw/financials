@@ -21,6 +21,7 @@ from datetime import date, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 
 from app.recurring_rules import apply_rules, pattern_hint
+from app.spending import is_spend
 from app.subscriptions import (
     _MONTHLY_NOMINAL,
     _build_stream,
@@ -143,9 +144,9 @@ def _percentile(values, q):
     return ordered[lower] + (ordered[lower + 1] - ordered[lower]) * (pos - lower)
 
 
-def _monthly_estimate(txns, cadence, inflow=False, percentile=ESTIMATE_PERCENTILE,
-                      by_month=False):
-    """Monthly-equivalent amount of a stream, at the given percentile.
+def _occurrence_estimate(txns, inflow=False, percentile=ESTIMATE_PERCENTILE,
+                         by_month=False):
+    """The typical single charge of a stream, at the given percentile — unrounded.
 
     One occurrence per date (the unit _build_stream counts cadence in), its
     amount the sum of that date's charges — or, for an inflow, the absolute sum
@@ -179,6 +180,14 @@ def _monthly_estimate(txns, cadence, inflow=False, percentile=ESTIMATE_PERCENTIL
             if d > cutoff:
                 months[(d.year, d.month)] += amount
         typical = max(typical, _percentile(list(months.values()), percentile))
+    return typical
+
+
+def _monthly_estimate(txns, cadence, inflow=False, percentile=ESTIMATE_PERCENTILE,
+                      by_month=False):
+    """Monthly-equivalent amount of a stream: its typical charge
+    (_occurrence_estimate) × the cadence's charges per month, rounded to cents."""
+    typical = _occurrence_estimate(txns, inflow, percentile, by_month)
     return (typical * MONTHLY_FACTOR[cadence]).quantize(_CENTS, rounding=ROUND_HALF_UP)
 
 
@@ -291,6 +300,102 @@ def essential_monthly_total(bills):
     uncounted bill adds nothing: it is not in the total either.
     """
     return fixed_monthly_total([b for b in bills if b.get('essential')])
+
+
+@dataclass
+class MonthBills:
+    """This calendar month's counted bills, as the daily digest reports them.
+
+    `paid_total` is every charge the counted bills have made this month so far;
+    `paid_spend` is the part of it `spending.is_spend` also counts (a bill paid
+    by card or autopay — not rent by Zelle or a loan payment), so the digest can
+    take bills out of the month's purchases without counting anything twice.
+    `due_total` estimates the charges still expected before the month ends.
+    """
+    paid_count: int
+    due_count: int
+    paid_total: Decimal
+    paid_spend: Decimal
+    due_total: Decimal
+
+    @property
+    def count(self):
+        return self.paid_count + self.due_count
+
+
+def _month_end(today):
+    return _safe_date(today.year, today.month, 31)
+
+
+def _months_between(earlier, later):
+    """Whole calendar months from `earlier`'s month to `later`'s month."""
+    return (later.year - earlier.year) * 12 + later.month - earlier.month
+
+
+def _remaining_charges(bill, last_charge, charged_this_month, today):
+    """How many more charges `bill` is expected to make this calendar month.
+
+    - monthly (a rule-forced stream too): none once anything posted this month,
+      else one — "any charge this month", the rule forced streams already use,
+      not _payment_status's ±PAYMENT_WINDOW, so a bill paid on a drifting day
+      is not called due.
+    - quarterly: calendar months, not cadence_days — 91 nominal days would put
+      a bill charged on the 1st a month early (Oct 1 + 91 = Dec 31). One if it
+      is due this month or overdue, else none.
+    - weekly / biweekly: the charges projected from the last one, every
+      cadence_days, that fall from today to the month's end. A projected charge
+      already in the past is treated as a skipped session; today's is still
+      due, because the digest goes out at 7am.
+    """
+    cadence = bill['cadence']
+    if cadence == 'monthly':
+        return 0 if charged_this_month else 1
+    if cadence == 'quarterly':
+        if charged_this_month:
+            return 0
+        return 1 if _months_between(last_charge, today) >= 3 else 0
+    step = timedelta(days=bill['cadence_days'])
+    end = _month_end(today)
+    count = 0
+    nxt = last_charge + step
+    while nxt <= end:
+        if nxt >= today:
+            count += 1
+        nxt += step
+    return count
+
+
+def month_outlook(bills, today):
+    """Paid and still-due figures for this calendar month's counted bills — pure.
+
+    Counted = the bills /recurring sums into its fixed monthly total
+    (`excluded_reason is None`). A bill's charges this month are its rows with
+    a positive amount and a `date` in today's month. A bill belongs to the month
+    if it was charged this month or is expected to be (_remaining_charges); it
+    is paid once nothing more is expected. Still due is each remaining charge at
+    the bill's typical amount (`occurrence_amount`).
+    """
+    paid_count = due_count = 0
+    paid_total = paid_spend = due_total = Decimal('0.00')
+    for bill in bills:
+        if bill['excluded_reason'] is not None:
+            continue
+        charges = [t for t in bill['rows'] if t.amount > 0]
+        if not charges:
+            continue
+        this_month = [t for t in charges
+                      if (t.date.year, t.date.month) == (today.year, today.month)]
+        paid_total += sum((t.amount for t in this_month), Decimal('0.00'))
+        paid_spend += sum((t.amount for t in this_month if is_spend(t)),
+                          Decimal('0.00'))
+        last_charge = max(t.date for t in charges)
+        remaining = _remaining_charges(bill, last_charge, bool(this_month), today)
+        if remaining:
+            due_count += 1
+            due_total += remaining * bill['occurrence_amount']
+        elif this_month:
+            paid_count += 1
+    return MonthBills(paid_count, due_count, paid_total, paid_spend, due_total)
 
 
 def mark_essential(streams, saved_keys):
@@ -414,6 +519,11 @@ def _finish_bill(stream, txns, today, override=False):
     stream['monthly_amount'] = _monthly_estimate(
         txns, stream['cadence'], by_month=stream['cadence_forced'],
     )
+    # The typical single charge, for the digest's month outlook (month_outlook):
+    # the figure monthly_amount is built from, before the cadence factor.
+    stream['occurrence_amount'] = _occurrence_estimate(
+        txns, by_month=stream['cadence_forced'],
+    ).quantize(_CENTS, rounding=ROUND_HALF_UP)
     stream['excluded_reason'] = _excluded_reason(stream, txns, override)
     return stream
 

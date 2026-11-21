@@ -345,25 +345,6 @@ _EXCLUDED_GROUPS = (
 )
 
 
-def _rule_rows():
-    """Saved rules as plain rows, oldest first.
-
-    Plain rows, not ORM instances, for the same reason detection reads plain
-    transaction rows (knowledge 2026-10-26): the page commits after detection,
-    a commit expires loaded instances, and the template would then re-SELECT
-    every rule one at a time.
-    """
-    from sqlalchemy import select
-    from app.models import RecurringRule
-    return db.session.execute(
-        select(
-            RecurringRule.id, RecurringRule.label, RecurringRule.pattern,
-            RecurringRule.direction, RecurringRule.amount_min,
-            RecurringRule.amount_max, RecurringRule.action,
-        ).order_by(RecurringRule.id)
-    ).all()
-
-
 def _essential_keys():
     """The saved essential-mark keys. A plain column read, so the commit after
     detection has nothing to expire."""
@@ -380,6 +361,7 @@ def recurring():
         mark_essential, monthly_income_total,
     )
     from app.merchant_groups import groups_for_detection
+    from app.recurring_rules import load_rules
 
     # Merchant grouping is the expensive half of detection and is served from
     # the persisted index (app/merchant_groups.py). Everything below it is
@@ -387,7 +369,7 @@ def recurring():
     # cached — a stored `active` flag or payment status would be wrong the
     # moment a stream lapsed or the month rolled over. The user's rules
     # (app/recurring_rules.py) are applied per request too.
-    rules = _rule_rows()
+    rules = load_rules(db.session)
     essential_keys = _essential_keys()
     groups, _used_index = groups_for_detection()
     found = detect_recurring_with_rules(groups, date.today(), rules)
@@ -456,7 +438,7 @@ def _render_rule_form(fields, errors, status=200):
     pattern is long enough to match on."""
     from types import SimpleNamespace
     from app.merchant_groups import groups_for_detection
-    from app.recurring_rules import PATTERN_MIN_LENGTH, preview
+    from app.recurring_rules import PATTERN_MIN_LENGTH, load_rules, preview
 
     result = None
     can_preview = (
@@ -471,7 +453,7 @@ def _render_rule_form(fields, errors, status=200):
             amount_min=fields['amount_min'], amount_max=fields['amount_max'],
             action=fields['action'],
         )
-        saved = _rule_rows()
+        saved = load_rules(db.session)
         groups, _used_index = groups_for_detection()
         result = preview(groups, saved, candidate)
         # Same order as /recurring: commit after reading the groups, which
@@ -532,8 +514,8 @@ def quick_not_recurring_rule():
     from app.merchant_groups import groups_for_detection
     from app.models import RecurringRule
     from app.recurring_rules import (
-        DIRECTIONS, QUICK_KEYS_MAX, locate_stream, parse_rule_form, preview,
-        quick_mark_verdict,
+        DIRECTIONS, QUICK_KEYS_MAX, load_rules, locate_stream, parse_rule_form,
+        preview, quick_mark_verdict,
     )
 
     keys = request.form.getlist('stream_key')
@@ -547,7 +529,7 @@ def quick_not_recurring_rule():
             or (split_amount is not None and not split_amount.is_finite())):
         return redirect(url_for('main.recurring'))
 
-    rules = _rule_rows()
+    rules = load_rules(db.session)
     groups, _used_index = groups_for_detection()
     found = detect_recurring_with_rules(groups, date.today(), rules)
     stream = locate_stream(found, keys, split_amount, direction)

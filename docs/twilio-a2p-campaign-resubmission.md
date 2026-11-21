@@ -207,7 +207,7 @@ The near-misses in that dropdown, and why each loses:
 ## Campaign description
 
 ```
-Onerlaw LLC operates Onerlaw, a web-based personal finance dashboard. Users link their bank and credit card accounts to the platform through Plaid, and the platform tracks their spending against a weekly budget they set. This campaign sends operational account notifications to registered users of that platform who have opted in to receive them. Each morning the platform sends one message reporting the user's spending so far that week against their budget, the total they spent in each of the four previous weeks, the current balance of each linked credit card and the total owed across those cards, and a summary of the previous day's purchases: how many and their total, followed by each purchase and its amount. A user can also trigger that same summary for themselves from inside the dashboard. Volume is about seven messages per user per week. The messages are transactional only, contain no marketing or promotional content, identify Onerlaw LLC as the sender, and carry STOP opt-out instructions.
+Onerlaw LLC operates Onerlaw, a web-based personal finance dashboard. Users link their bank and credit card accounts to the platform through Plaid, and the platform tracks their spending against a weekly budget they set. This campaign sends operational account notifications to registered users of that platform who have opted in to receive them. Each morning the platform sends one message reporting the user's spending so far that week against their budget, their spending so far that month split into recurring bills and everything else, how many of the month's recurring bills are paid and how much is estimated to be still due, the total they spent in each of the four previous weeks, the current balance of each linked credit card and the total owed across those cards, and a summary of the previous day's purchases: how many and their total, followed by each purchase and its amount. A user can also trigger that same summary for themselves from inside the dashboard. Volume is about seven messages per user per week. The messages are transactional only, contain no marketing or promotional content, identify Onerlaw LLC as the sender, and carry STOP opt-out instructions.
 ```
 
 Describes the software, who it serves, and what the messages contain — the three things
@@ -226,6 +226,13 @@ Good morning — Mon Oct 12
 
 Budget: $412 of $1,000 (41%) — $588 left
 Week of Oct 11
+
+October so far: $3,535
+Bills $2,361 · Other $1,174
+
+Bills: 4 of 9 paid
+Still due: ~$1,730 (5 bills)
+Bills this month: ~$4,091
 
 Last 4 weeks
 Sep 13–19: $842
@@ -260,6 +267,13 @@ Good morning — Tue Oct 13
 Budget: $455 of $1,000 (45%) — $545 left
 Week of Oct 11
 
+October so far: $5,118
+Bills $3,901 · Other $1,217
+
+Bills: 8 of 9 paid
+Still due: ~$60 (1 bill)
+Bills this month: ~$3,961
+
 Last 4 weeks
 Sep 13–19: $842
 Sep 20–26: $1,130
@@ -287,6 +301,13 @@ Good morning — Mon Oct 19
 Budget: $0 of $1,000 (0%) — $1,000 left
 Week of Oct 18
 
+October so far: $5,706
+Bills $3,961 · Other $1,745
+
+Bills: 9 of 9 paid
+Still due: none
+Bills this month: ~$3,961
+
 Last 4 weeks
 Sep 20–26: $1,130
 Sep 27 – Oct 3: $655
@@ -311,15 +332,20 @@ the `Yesterday` section are work unit 2026-10-12-digest-card-balances-and-yester
 also retired the earlier net-worth line and its `(not counted)` / `(unvested excluded)`
 notes. Work unit 2026-11-08-digest-list-yesterdays-purchases replaced that section's
 `Over $100` list and `By category` breakdown with a plain list of every purchase.
+Work unit 2026-11-21-digest-bills-outlook added the month-to-date block (this
+month's spending split into bills and other, then how many bills are paid, what is
+still due and the month's projected bill total).
 
 Between them the three samples show every shape the variable parts of the digest can
 take — a card flagged `(reconnect needed)` for a bank that stopped syncing (the only
 parenthetical a line can now carry), a day with several purchases (including two
 identical ones at one merchant, listed as two lines), a day with a single purchase, and a
-day with no purchases at all — so a reviewer never sees a shape in live traffic that no
-filed sample contains. (`No linked credit cards.` and a `+N more` line after the
-fifteenth purchase on a very busy day are the remaining rare variants; both are plain
-text.)
+day with no purchases at all; one month's bills with several still due, then one, then
+none — so a reviewer never sees a shape in live traffic that no filed sample contains.
+(`No linked credit cards.`, a `+N more` line after the fifteenth purchase on a very
+busy day, `Bills: none detected this month` before any recurring bill is known, and —
+if bill detection fails — `<Month> purchases so far: $X` followed by
+`Bills: unavailable today` are the remaining rare variants; all are plain text.)
 
 ## Content flags
 

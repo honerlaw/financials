@@ -28,6 +28,26 @@ _CENTS = Decimal('0.01')
 _HINT_TRIM = '0123456789#*- '
 
 
+def load_rules(session):
+    """Saved rules as plain rows, oldest first — what `apply_rules` takes.
+
+    Plain rows, not ORM instances, for the same reason detection reads plain
+    transaction rows (knowledge 2026-10-26): /recurring commits after
+    detection, a commit expires loaded instances, and the template would then
+    re-SELECT every rule one at a time. Shared by the /recurring routes and the
+    daily digest's bill outlook (app/notifications.py).
+    """
+    from sqlalchemy import select
+    from app.models import RecurringRule
+    return session.execute(
+        select(
+            RecurringRule.id, RecurringRule.label, RecurringRule.pattern,
+            RecurringRule.direction, RecurringRule.amount_min,
+            RecurringRule.amount_max, RecurringRule.action,
+        ).order_by(RecurringRule.id)
+    ).all()
+
+
 @dataclass
 class Claim:
     """What one rule won: its rows and, per source group, how many it took."""

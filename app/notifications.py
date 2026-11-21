@@ -1,13 +1,19 @@
-"""Daily digest SMS — budget status, recent weeks, card debt, yesterday's purchases.
+"""Daily digest SMS — budget, the month's bills, recent weeks, card debt, yesterday.
 
 Once a day, right after the 7am sync (``app.sync.run_daily_sync``), every
 configured recipient is texted one message: where the current Sun–Sat week's
-household spend stands against ``WEEKLY_BUDGET``, what each of the four
-completed weeks behind it totalled, the current balance of every linked credit
-card and the debt they add up to, and what was bought yesterday — a count and
+household spend stands against ``WEEKLY_BUDGET``; this calendar month's
+spending split into bills and everything else, how many of the month's bills
+are paid and what is still due (``month_lines``); what each of the four
+completed weeks behind it totalled; the current balance of every linked credit
+card and the debt they add up to; and what was bought yesterday — a count and
 total, then every purchase listed with its amount. The message building
 is pure and unit-tested (``digest_body`` and friends); the Twilio send and the
 ``DailyDigest`` writes are the impure shell.
+
+The bills are the ones /recurring counts in its fixed monthly total, found by
+the same detection (``_bill_outlook``) — so "bills" means detected recurring
+charges, which a regular grocery run can be until it is marked not recurring.
 
 Cadence: exactly one text per recipient per calendar day, deduped on
 ``(sent_date, recipient)``. Nothing here is threshold-driven — a quiet week
@@ -22,8 +28,9 @@ interacts with the scheduled digest in either direction.
 
 Only ``credit``-type accounts are listed (see ``_is_card``); checking, savings,
 investment and loan accounts are deliberately left out, and there is no
-net-worth figure. Every count and total comes from the one spend definition
-(``spending.is_spend``) over one transaction fetch.
+net-worth figure. Every spend count and total comes from the one spend
+definition (``spending.is_spend``) over one transaction fetch; the bill outlook
+is a separate read, the one /recurring makes.
 
 Feature gating (soft-disable): the notifier is a clean no-op unless all four of
 ``TWILIO_ACCOUNT_SID`` / ``TWILIO_AUTH_TOKEN`` / ``TWILIO_FROM_NUMBER`` /
@@ -44,16 +51,19 @@ that single-worker invariant ever changes.
 """
 import threading
 from datetime import timedelta
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from typing import NamedTuple, Optional
 
 from flask import current_app
 from sqlalchemy.exc import IntegrityError
 
+from app.bills import detect_recurring_with_rules, month_outlook
+from app.merchant_groups import groups_for_detection
 from app.models import Account, DailyDigest, Institution, Transaction
+from app.recurring_rules import load_rules
 from app.spending import (
-    WEEKLY_BUDGET, day_spend, recent_week_spend, week_label, week_spend,
-    week_start,
+    WEEKLY_BUDGET, day_spend, month_spend, month_start, recent_week_spend,
+    week_label, week_spend, week_start,
 )
 
 # The registered A2P 10DLC brand, carried as the first line of every message.
@@ -167,6 +177,65 @@ def history_line(ws, total):
     return f'{week_label(ws)}: ${total:,.0f}'
 
 
+def _whole(amount):
+    """Round to whole dollars, halves up — the rounding a reader expects."""
+    return Decimal(amount).quantize(Decimal('1'), rounding=ROUND_HALF_UP)
+
+
+def _dollars(amount):
+    """``$1,234`` / ``-$12`` — whole dollars, sign before the symbol."""
+    sign = '-' if amount < 0 else ''
+    return f'{sign}${abs(amount):,.0f}'
+
+
+def month_lines(today, spend, bills):
+    """The month-to-date block: where this month's money went, and the bills.
+
+    ``spend`` is the month's ``is_spend`` total; ``bills`` is the
+    ``bills.MonthBills`` for the month, or None when bill detection failed.
+
+    The spending line is Bills + Other: every charge of a counted bill (a rent
+    payment by Zelle or a loan payment included, though neither is a
+    purchase), plus every purchase that is not a bill payment. Other is the
+    month's purchases less the bill charges that are purchases, so the two
+    always add up to the total. Without bill figures the line falls back to
+    purchases alone and is labelled so, rather than printing a smaller number
+    under the bills-inclusive label.
+
+    Then how many of the month's bills are paid, what is still expected (``~``:
+    an estimate at each bill's typical charge) and the month's projected bill
+    total. Other spending is deliberately not projected. Whole dollars, like
+    the budget and history lines.
+    """
+    month = today.strftime('%B')
+    if bills is None:
+        return [f'{month} purchases so far: {_dollars(spend)}', '',
+                'Bills: unavailable today']
+    # Each part is rounded first and the totals are sums of the rounded parts,
+    # so the printed numbers add up by eye. Other is floored at zero: the spend
+    # fetch and bill detection are separate reads, and a sync committing a bill
+    # charge between them could otherwise print a negative.
+    paid = _whole(bills.paid_total)
+    other = max(_whole(spend - bills.paid_spend), Decimal('0'))
+    due = _whole(bills.due_total)
+    lines = [
+        f'{month} so far: {_dollars(paid + other)}',
+        f'Bills {_dollars(paid)} · Other {_dollars(other)}',
+        '',
+    ]
+    if not bills.count:
+        lines.append('Bills: none detected this month')
+        return lines
+    lines.append(f'Bills: {bills.paid_count} of {bills.count} paid')
+    if bills.due_count:
+        noun = 'bill' if bills.due_count == 1 else 'bills'
+        lines.append(f'Still due: ~{_dollars(due)} ({bills.due_count} {noun})')
+    else:
+        lines.append('Still due: none')
+    lines.append(f'Bills this month: ~{_dollars(paid + due)}')
+    return lines
+
+
 def _is_card(row):
     """Is this account a credit card? The digest lists nothing else.
 
@@ -226,8 +295,8 @@ def yesterday_lines(spend, limit=PURCHASE_LIST_MAX):
     return lines
 
 
-def digest_body(today, spent, history, cards, card_total, yesterday,
-                budget=WEEKLY_BUDGET):
+def digest_body(today, spent, month, bills, history, cards, card_total,
+                yesterday, budget=WEEKLY_BUDGET):
     """The full SMS text.
 
     ``history`` is ``[(week_start, total)]`` for the completed weeks behind
@@ -235,6 +304,9 @@ def digest_body(today, spent, history, cards, card_total, yesterday,
     an iterable of ``(institution_name, account_name, mask, balance[, stale])``
     tuples and ``card_total`` the debt they add up to (see ``digest_cards``).
     ``yesterday`` is the ``spending.DaySpend`` for the day before ``today``.
+    ``month`` is the month's ``is_spend`` total and ``bills`` the month's
+    ``bills.MonthBills`` (None when bill detection failed); see
+    ``month_lines``.
 
     Every content argument is required rather than defaulted: a default would
     turn a caller that forgot one into a silently short — or silently wrong —
@@ -262,8 +334,9 @@ def digest_body(today, spent, history, cards, card_total, yesterday,
         budget_line(spent, budget),
         f"Week of {week_start(today).strftime('%b %-d')}",
         '',
-        f'Last {len(history)} weeks',
     ]
+    head.extend(month_lines(today, month, bills))
+    head.extend(['', f'Last {len(history)} weeks'])
     head.extend(history_line(ws, total) for ws, total in history)
     head.extend(['', 'Credit cards'])
     card_lines = [account_line(*c) for c in cards]
@@ -336,7 +409,8 @@ def _sender_from_config(config):
 
 
 def _spend_totals(session, today, weeks=HISTORY_WEEKS):
-    """``(this week's spend, [(week_start, total)], yesterday's DaySpend)``.
+    """``(this week's spend, this month's spend, [(week_start, total)],
+    yesterday's DaySpend)``.
 
     One query spanning the whole window, not one per aggregate: every
     aggregate re-filters what it is handed, so a single wide fetch cannot
@@ -345,10 +419,11 @@ def _spend_totals(session, today, weeks=HISTORY_WEEKS):
     ``date`` of yesterday or today, and yesterday is at earliest the Saturday
     before this week's Sunday, with the window reaching back ``weeks`` whole
     weeks before that. No institution filter — same household math as the
-    dashboard.
+    dashboard. The window also reaches back to the first of the month, which
+    on the 30th or 31st can be earlier than the history's first week.
     """
     current = week_start(today)
-    first = current - timedelta(days=7 * weeks)
+    first = min(current - timedelta(days=7 * weeks), month_start(today))
     txns = (
         session.query(Transaction)
         .filter(Transaction.removed.is_(False))
@@ -356,7 +431,8 @@ def _spend_totals(session, today, weeks=HISTORY_WEEKS):
                 Transaction.date < current + timedelta(days=7))
         .all()
     )
-    return (week_spend(txns, today), recent_week_spend(txns, today, weeks),
+    return (week_spend(txns, today), month_spend(txns, today),
+            recent_week_spend(txns, today, weeks),
             day_spend(txns, today - timedelta(days=1)))
 
 
@@ -382,15 +458,51 @@ def _account_rows(session):
     return [AccountRow(*row) for row in rows]
 
 
+def _bill_outlook(session, today):
+    """This month's ``bills.MonthBills``, or None if bill detection failed.
+
+    The same detection /recurring runs — the user's rules, the persisted
+    merchant-group index, ``detect_recurring_with_rules`` — so the digest counts
+    exactly the bills the page counts. It reads every live transaction, as a
+    /recurring page load does; it is a separate read from the digest's one
+    spend fetch.
+
+    A failure here must never cost the day's digest, so on ANY exception it
+    logs, rolls the session back and returns None, and the message says the
+    bills are unavailable. A full rollback, not a savepoint: a dropped
+    connection leaves the session unusable until it is rolled back, and the
+    ``DailyDigest`` write after the send needs it. Called last in
+    ``_digest_parts``, after everything else has been read into plain values.
+
+    On success it commits: ``groups_for_detection`` may warm the merchant index
+    and leaves the commit to its caller. Nothing else is pending at that point,
+    and nothing read so far is an ORM instance a commit could expire.
+    """
+    try:
+        rules = load_rules(session)
+        groups, _used_index = groups_for_detection()
+        found = detect_recurring_with_rules(groups, today, rules)
+        outlook = month_outlook(found.bills, today)
+        session.commit()
+        return outlook
+    except Exception:
+        current_app.logger.exception('daily digest bill outlook failed')
+        session.rollback()
+        return None
+
+
 def _digest_parts(session, today):
     """Everything ``digest_body`` needs, as its positional arguments.
 
     The impure seam between the two send paths and the pure builders — both
     call it, so neither can drift from the other in what the message contains.
+    The bill outlook goes last: it is the one part that may roll the session
+    back (see ``_bill_outlook``).
     """
-    spent, history, yesterday = _spend_totals(session, today)
+    spent, month, history, yesterday = _spend_totals(session, today)
     cards, card_total = digest_cards(_account_rows(session))
-    return today, spent, history, cards, card_total, yesterday
+    bills = _bill_outlook(session, today)
+    return today, spent, month, bills, history, cards, card_total, yesterday
 
 
 def send_daily_digest(session, today, config, sender=None):
@@ -456,7 +568,8 @@ def send_digest_now(session, today, config, sender=None):
     The on-demand counterpart to ``send_daily_digest``: same recipients, same
     message, but a press always sends. It reads no ``DailyDigest`` row (so it
     works after today's scheduled digest already went out) and writes none (so
-    it never suppresses tomorrow's). The lock is shared with the scheduled path
+    it never suppresses tomorrow's; the bill outlook may still commit a merchant
+    index warm-up, see ``_bill_outlook``). The lock is shared with the scheduled path
     so a press cannot interleave with a concurrent 7am dispatch.
 
     Unlike the scheduled path — a fire-and-forget side-effect that only logs —

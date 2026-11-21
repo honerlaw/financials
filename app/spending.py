@@ -155,6 +155,26 @@ def day_spend(transactions, day):
     return DaySpend(day, len(purchases), total, purchases)
 
 
+def month_start(d):
+    """The first day of ``d``'s calendar month."""
+    return d.replace(day=1)
+
+
+def month_spend(transactions, today):
+    """Total ``is_spend`` amount dated in ``today``'s calendar month.
+
+    Keyed on ``date`` like the week totals and the bill outlook it is split
+    against (``bills.month_outlook``), so a bill charge and the purchase it is
+    always land in the same month. Filters the input defensively, so a caller
+    may pass a wider fetch.
+    """
+    total = Decimal('0')
+    for txn in transactions:
+        if is_spend(txn) and (txn.date.year, txn.date.month) == (today.year, today.month):
+            total += txn.amount
+    return total
+
+
 def recent_week_spend(transactions, today, weeks=4):
     """``[(week_start, total)]`` for the ``weeks`` COMPLETE weeks before ``today``'s.
 

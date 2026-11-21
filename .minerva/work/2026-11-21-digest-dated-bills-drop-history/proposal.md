@@ -1,7 +1,7 @@
 # Proposal: digest-dated-bills-drop-history
 
 **Date**: 2026-11-21
-**Status**: Draft
+**Status**: Implemented
 
 ## Goal
 

@@ -905,7 +905,7 @@ def test_manual_send_carries_the_same_cards_and_yesterday(app):
 
 def test_yesterday_on_a_sunday_reaches_back_into_last_week(app):
     """Sunday's yesterday is the Saturday before this week starts — still inside
-    the one fetch, which reaches back four whole weeks."""
+    the one fetch, whose floor includes yesterday."""
     with app.app_context():
         inst_id = _seed_inst(None)
         _seed_txn(inst_id, TODAY, '123.45')       # Sat Aug 8

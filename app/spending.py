@@ -2,8 +2,8 @@
 
 Pure functions computing (a) a daily spend series for the dashboard chart,
 (b) a per-week running total against a fixed weekly budget, and (c) the
-daily digest's aggregates — the running week, the completed weeks behind it,
-and one day's purchases (``day_spend``). Like bills.py and
+daily digest's aggregates — the running week, the month so far
+(``month_spend``) and one day's purchases (``day_spend``). Like bills.py and
 subscriptions.py these take the reference date as a parameter rather than
 calling date.today() internally, so tests stay deterministic
 (see .minerva/knowledge: seed-relative-dates-in-time-sensitive-tests).
@@ -26,6 +26,7 @@ spend-like aggregation for the LLM tool path; this definition is intentionally
 independent.)
 """
 
+import calendar
 from datetime import date, timedelta
 from decimal import Decimal
 from typing import NamedTuple
@@ -134,12 +135,11 @@ class DaySpend(NamedTuple):
 def day_spend(transactions, day):
     """Aggregate the ``is_spend`` transactions purchased on ``day`` — pure.
 
-    The same spend definition the budget line and weekly history use, keyed on
+    The same spend definition the budget line and month total use, keyed on
     ``purchase_date`` rather than ``date``, so a purchase is reported under the
     day it was made and is not reported again when its pending row is replaced
     by the posted one (provided Plaid gives both the same ``authorized_date``).
-    Every row counted here is still in some week total the digest prints,
-    though possibly a different week than ``day`` falls in. Filters the input
+    Filters the input
     defensively, like every aggregate here, so a caller may pass a wider fetch.
     Purchases sort largest first, because only dates are stored, not times of
     day, so there is no order within the day to list them in. Ties sort by
@@ -160,50 +160,26 @@ def month_start(d):
     return d.replace(day=1)
 
 
-def month_spend(transactions, today):
-    """Total ``is_spend`` amount dated in ``today``'s calendar month.
+def month_end(d):
+    """The last day of ``d``'s calendar month."""
+    return d.replace(day=calendar.monthrange(d.year, d.month)[1])
 
-    Keyed on ``date`` like the week totals and the bill outlook it is split
-    against (``bills.month_outlook``), so a bill charge and the purchase it is
-    always land in the same month. Filters the input defensively, so a caller
-    may pass a wider fetch.
+
+def month_spend(transactions, today):
+    """Total ``is_spend`` amount dated from the first of the month through ``today``.
+
+    Keyed on ``date`` like the week totals and over the same span as the bill
+    outlook it is split against (``bills.month_outlook``), so a bill charge
+    and the purchase it is are always counted together — and the digest's
+    ``Spent Nov 1–21`` covers exactly the days it names. Filters the input
+    defensively, so a caller may pass a wider fetch.
     """
+    first = month_start(today)
     total = Decimal('0')
     for txn in transactions:
-        if is_spend(txn) and (txn.date.year, txn.date.month) == (today.year, today.month):
+        if is_spend(txn) and first <= txn.date <= today:
             total += txn.amount
     return total
-
-
-def recent_week_spend(transactions, today, weeks=4):
-    """``[(week_start, total)]`` for the ``weeks`` COMPLETE weeks before ``today``'s.
-
-    Oldest first. The week containing ``today`` is excluded — it is still
-    running, and the digest reports it separately as the budget line; a partial
-    week sitting in a column of finished ones reads as a drop that is not real.
-
-    A week with no spend is emitted with ``Decimal('0')`` rather than skipped,
-    the same way ``daily_spend`` emits empty days, so the caller always gets
-    exactly ``weeks`` entries and a quiet week is visible as a quiet week.
-    Filters the input defensively, so a caller may pass a wider fetch.
-    """
-    current = week_start(today)
-    first = current - timedelta(days=7 * weeks)
-
-    totals = {}
-    for txn in transactions:
-        if not is_spend(txn):
-            continue
-        if first <= txn.date < current:
-            ws = week_start(txn.date)
-            totals[ws] = totals.get(ws, Decimal('0')) + txn.amount
-
-    series = []
-    ws = first
-    while ws < current:
-        series.append((ws, totals.get(ws, Decimal('0'))))
-        ws += timedelta(days=7)
-    return series
 
 
 def weekly_budget(transactions, month_start, month_end_exclusive, today,

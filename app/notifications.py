@@ -1,11 +1,11 @@
-"""Daily digest SMS — budget, the month's bills, recent weeks, card debt, yesterday.
+"""Daily digest SMS — budget, the month's bills, card debt, yesterday's purchases.
 
 Once a day, right after the 7am sync (``app.sync.run_daily_sync``), every
 configured recipient is texted one message: where the current Sun–Sat week's
 household spend stands against ``WEEKLY_BUDGET``; this calendar month's
 spending split into bills and everything else, how many of the month's bills
-are paid and what is still due (``month_lines``); what each of the four
-completed weeks behind it totalled; the current balance of every linked credit
+are paid and what is still due, each line naming the dates it covers
+(``month_lines``); the current balance of every linked credit
 card and the debt they add up to; and what was bought yesterday — a count and
 total, then every purchase listed with its amount. The message building
 is pure and unit-tested (``digest_body`` and friends); the Twilio send and the
@@ -62,8 +62,8 @@ from app.merchant_groups import groups_for_detection
 from app.models import Account, DailyDigest, Institution, Transaction
 from app.recurring_rules import load_rules
 from app.spending import (
-    WEEKLY_BUDGET, day_spend, month_spend, month_start, recent_week_spend,
-    week_label, week_spend, week_start,
+    WEEKLY_BUDGET, day_spend, month_end, month_spend, month_start, week_spend,
+    week_start,
 )
 
 # The registered A2P 10DLC brand, carried as the first line of every message.
@@ -77,11 +77,6 @@ from app.spending import (
 # campaign title and this constant are deliberately the same string.
 BRAND = 'Onerlaw LLC'
 OPT_OUT_LINE = 'Reply STOP to unsubscribe.'
-
-# How many COMPLETED weeks of spend history ride along behind the budget line.
-# Four is the smallest window that reads as a trend rather than as a comparison
-# against one prior week.
-HISTORY_WEEKS = 4
 
 # The one account type the digest lists. Plaid reports a card's
 # `current_balance` as the amount owed, a positive number.
@@ -166,15 +161,15 @@ def card_total_line(total):
     return f'Total card debt: {sign}${abs(total):,.2f}'
 
 
-def history_line(ws, total):
-    """``Jul 5–11: $842`` — one completed week of the trailing history.
+def _period(start, end):
+    """``Nov 1–21``, or ``Nov 1`` for a single day — a range within one month.
 
-    Whole dollars, like ``budget_line`` and unlike the balance lines: a weekly
-    total is a magnitude to compare at a glance, and cents on four extra rows
-    are noise. ``week_label`` is the dashboard tracker's labeller, so a week is
-    named identically in the text and in the app.
+    The unspaced en dash of the week labels (``Jul 5–11``); the digest never
+    prints a range that crosses a month.
     """
-    return f'{week_label(ws)}: ${total:,.0f}'
+    if start == end:
+        return start.strftime('%b %-d')
+    return f"{start.strftime('%b %-d')}–{end.day}"
 
 
 def _whole(amount):
@@ -191,8 +186,16 @@ def _dollars(amount):
 def month_lines(today, spend, bills):
     """The month-to-date block: where this month's money went, and the bills.
 
-    ``spend`` is the month's ``is_spend`` total; ``bills`` is the
-    ``bills.MonthBills`` for the month, or None when bill detection failed.
+    ``spend`` is the month's ``is_spend`` total from the 1st through today;
+    ``bills`` is the ``bills.MonthBills`` for the month, or None when bill
+    detection failed.
+
+    Every line names the dates it covers: what was spent is from the 1st
+    through today (``Spent Nov 1–21``); the bill counts and the projected total
+    cover the whole month (``Bills Nov 1–30``); what is still due is due by the
+    month's end. That line states only the end date because it is the only
+    bound every cadence honours — an unpaid monthly bill whose usual day has
+    passed is still due, while weekly charges are projected from today.
 
     The spending line is Bills + Other: every charge of a counted bill (a rent
     payment by Zelle or a loan payment included, though neither is a
@@ -205,11 +208,14 @@ def month_lines(today, spend, bills):
     Then how many of the month's bills are paid, what is still expected (``~``:
     an estimate at each bill's typical charge) and the month's projected bill
     total. Other spending is deliberately not projected. Whole dollars, like
-    the budget and history lines.
+    the budget line.
     """
-    month = today.strftime('%B')
+    first = month_start(today)
+    last = month_end(today)
+    so_far = _period(first, today)
+    month = _period(first, last)
     if bills is None:
-        return [f'{month} purchases so far: {_dollars(spend)}', '',
+        return [f'Purchases {so_far}: {_dollars(spend)}', '',
                 'Bills: unavailable today']
     # Each part is rounded first and the totals are sums of the rounded parts,
     # so the printed numbers add up by eye. Other is floored at zero: the spend
@@ -219,20 +225,21 @@ def month_lines(today, spend, bills):
     other = max(_whole(spend - bills.paid_spend), Decimal('0'))
     due = _whole(bills.due_total)
     lines = [
-        f'{month} so far: {_dollars(paid + other)}',
+        f'Spent {so_far}: {_dollars(paid + other)}',
         f'Bills {_dollars(paid)} · Other {_dollars(other)}',
         '',
     ]
     if not bills.count:
-        lines.append('Bills: none detected this month')
+        lines.append(f'Bills {month}: none detected')
         return lines
-    lines.append(f'Bills: {bills.paid_count} of {bills.count} paid')
+    lines.append(f'Bills {month}: {bills.paid_count} of {bills.count} paid')
+    due_by = f"Still due by {last.strftime('%b %-d')}"
     if bills.due_count:
         noun = 'bill' if bills.due_count == 1 else 'bills'
-        lines.append(f'Still due: ~{_dollars(due)} ({bills.due_count} {noun})')
+        lines.append(f'{due_by}: ~{_dollars(due)} ({bills.due_count} {noun})')
     else:
-        lines.append('Still due: none')
-    lines.append(f'Bills this month: ~{_dollars(paid + due)}')
+        lines.append(f'{due_by}: none')
+    lines.append(f'Bills total {month}: ~{_dollars(paid + due)}')
     return lines
 
 
@@ -276,7 +283,7 @@ def yesterday_lines(spend, limit=PURCHASE_LIST_MAX):
 
     A summary line, then every purchase on its own line, largest first. Each
     purchase prints dollars and cents — a specific amount, like a balance; the
-    day's total prints whole dollars, like the budget and history lines,
+    day's total prints whole dollars, like the budget and month lines,
     because it is a magnitude to compare. At most ``limit`` purchases are
     listed (``PURCHASE_LIST_MAX`` unless ``digest_body`` needs fewer to fit),
     so a busy day cannot push the message past Twilio's length limit; what the
@@ -295,16 +302,15 @@ def yesterday_lines(spend, limit=PURCHASE_LIST_MAX):
     return lines
 
 
-def digest_body(today, spent, month, bills, history, cards, card_total,
-                yesterday, budget=WEEKLY_BUDGET):
+def digest_body(today, spent, month, bills, cards, card_total, yesterday,
+                budget=WEEKLY_BUDGET):
     """The full SMS text.
 
-    ``history`` is ``[(week_start, total)]`` for the completed weeks behind
-    this one, oldest first (see ``spending.recent_week_spend``). ``cards`` is
+    ``cards`` is
     an iterable of ``(institution_name, account_name, mask, balance[, stale])``
     tuples and ``card_total`` the debt they add up to (see ``digest_cards``).
     ``yesterday`` is the ``spending.DaySpend`` for the day before ``today``.
-    ``month`` is the month's ``is_spend`` total and ``bills`` the month's
+    ``month`` is the month's ``is_spend`` total so far and ``bills`` the month's
     ``bills.MonthBills`` (None when bill detection failed); see
     ``month_lines``.
 
@@ -336,8 +342,6 @@ def digest_body(today, spent, month, bills, history, cards, card_total,
         '',
     ]
     head.extend(month_lines(today, month, bills))
-    head.extend(['', f'Last {len(history)} weeks'])
-    head.extend(history_line(ws, total) for ws, total in history)
     head.extend(['', 'Credit cards'])
     card_lines = [account_line(*c) for c in cards]
     head.extend(card_lines or ['No linked credit cards.'])
@@ -408,22 +412,22 @@ def _sender_from_config(config):
                         config['TWILIO_FROM_NUMBER'])
 
 
-def _spend_totals(session, today, weeks=HISTORY_WEEKS):
-    """``(this week's spend, this month's spend, [(week_start, total)],
-    yesterday's DaySpend)``.
+def _spend_totals(session, today):
+    """``(this week's spend, this month's spend so far, yesterday's DaySpend)``.
 
     One query spanning the whole window, not one per aggregate: every
     aggregate re-filters what it is handed, so a single wide fetch cannot
-    inflate any of them. Every row purchased yesterday is inside the window:
-    Plaid's ``authorized_date`` does not follow ``date``, so such a row has
-    ``date`` of yesterday or today, and yesterday is at earliest the Saturday
-    before this week's Sunday, with the window reaching back ``weeks`` whole
-    weeks before that. No institution filter — same household math as the
-    dashboard. The window also reaches back to the first of the month, which
-    on the 30th or 31st can be earlier than the history's first week.
+    inflate any of them. The window starts at the earliest of this week's
+    Sunday, the first of the month and yesterday. Yesterday is enough for the
+    Yesterday section's purchase-date-keyed rows: Plaid's ``date`` is the
+    posting date and never precedes ``authorized_date``, so a row purchased
+    yesterday has ``date`` of yesterday or later — and on a Sunday, yesterday
+    is before this week's start. No institution filter — same household math
+    as the dashboard.
     """
     current = week_start(today)
-    first = min(current - timedelta(days=7 * weeks), month_start(today))
+    yesterday = today - timedelta(days=1)
+    first = min(current, month_start(today), yesterday)
     txns = (
         session.query(Transaction)
         .filter(Transaction.removed.is_(False))
@@ -432,8 +436,7 @@ def _spend_totals(session, today, weeks=HISTORY_WEEKS):
         .all()
     )
     return (week_spend(txns, today), month_spend(txns, today),
-            recent_week_spend(txns, today, weeks),
-            day_spend(txns, today - timedelta(days=1)))
+            day_spend(txns, yesterday))
 
 
 def _account_rows(session):
@@ -499,10 +502,10 @@ def _digest_parts(session, today):
     The bill outlook goes last: it is the one part that may roll the session
     back (see ``_bill_outlook``).
     """
-    spent, month, history, yesterday = _spend_totals(session, today)
+    spent, month, yesterday = _spend_totals(session, today)
     cards, card_total = digest_cards(_account_rows(session))
     bills = _bill_outlook(session, today)
-    return today, spent, month, bills, history, cards, card_total, yesterday
+    return today, spent, month, bills, cards, card_total, yesterday
 
 
 def send_daily_digest(session, today, config, sender=None):

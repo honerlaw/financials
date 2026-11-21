@@ -224,3 +224,13 @@ def test_a_true_biweekly_bill_can_charge_three_times_in_a_month():
                     amount='900.00')
     out = month_outlook([_bill(rows, 'biweekly', '900.00')], date(2026, 10, 20))
     assert out.due_total == Decimal('900.00')
+
+
+def test_a_charge_dated_after_today_is_not_counted_yet():
+    """The digest labels the charges "1st through today": a row dated later
+    this month adds nothing to the paid total and does not pay the bill."""
+    rows = _charges(date(2026, 9, 25), date(2026, 10, 25), date(2026, 11, 25))
+    out = month_outlook([_bill(rows, occurrence='100.00')], date(2026, 11, 21))
+    assert out.paid_total == 0
+    assert (out.paid_count, out.due_count) == (0, 1)
+    assert out.due_total == Decimal('100.00')

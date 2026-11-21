@@ -21,7 +21,7 @@ from datetime import date, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 
 from app.recurring_rules import apply_rules, pattern_hint
-from app.spending import is_spend
+from app.spending import is_spend, month_end
 from app.subscriptions import (
     _MONTHLY_NOMINAL,
     _build_stream,
@@ -323,10 +323,6 @@ class MonthBills:
         return self.paid_count + self.due_count
 
 
-def _month_end(today):
-    return _safe_date(today.year, today.month, 31)
-
-
 def _months_between(earlier, later):
     """Whole calendar months from `earlier`'s month to `later`'s month."""
     return (later.year - earlier.year) * 12 + later.month - earlier.month
@@ -382,7 +378,7 @@ def _remaining_charges(bill, charge_dates, today):
     if cadence == 'biweekly' and _is_semimonthly(charge_dates, today):
         return max(0, 2 - this_month)
     step = timedelta(days=bill['cadence_days'])
-    end = _month_end(today)
+    end = month_end(today)
     count = 0
     nxt = last_charge + step
     while nxt <= end:
@@ -397,7 +393,7 @@ def month_outlook(bills, today):
 
     Counted = the bills /recurring sums into its fixed monthly total
     (`excluded_reason is None`). A bill's charges this month are its rows with
-    a positive amount and a `date` in today's month. A bill belongs to the month
+    a positive amount and a `date` from the 1st through today. A bill belongs to the month
     if it was charged this month or is expected to be (_remaining_charges); it
     is paid once nothing more is expected. Still due is each remaining charge at
     the bill's typical amount (`occurrence_amount`).
@@ -407,7 +403,9 @@ def month_outlook(bills, today):
     for bill in bills:
         if bill['excluded_reason'] is not None:
             continue
-        charges = [t for t in bill['rows'] if t.amount > 0]
+        # Charges dated after today are ignored, for the paid total and the
+        # paid/due decision alike: the digest labels them "1st through today".
+        charges = [t for t in bill['rows'] if t.amount > 0 and t.date <= today]
         if not charges:
             continue
         this_month = [t for t in charges

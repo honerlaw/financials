@@ -1,5 +1,5 @@
 import threading
-from datetime import date
+from datetime import date, timedelta
 
 import pytest
 from decimal import Decimal
@@ -9,7 +9,7 @@ from sqlalchemy.exc import OperationalError
 from app.models import db, Account, Institution, Transaction, DailyDigest
 from app.notifications import (
     PURCHASE_LIST_MAX, AccountRow, account_line, budget_line, card_total_line,
-    digest_body, digest_cards, history_line, month_lines, send_daily_digest,
+    digest_body, digest_cards, month_lines, send_daily_digest,
     send_digest_now, yesterday_lines,
 )
 from app.bills import MonthBills
@@ -20,14 +20,6 @@ from app.spending import DaySpend
 TODAY = date(2026, 8, 8)
 WS = date(2026, 8, 2)
 YESTERDAY = date(2026, 8, 7)
-# The four completed weeks behind it, oldest first — what recent_week_spend
-# hands digest_body.
-HISTORY = [
-    (date(2026, 7, 5), Decimal('842')),
-    (date(2026, 7, 12), Decimal('1130')),
-    (date(2026, 7, 19), Decimal('0')),
-    (date(2026, 7, 26), Decimal('1204')),
-]
 NO_SPEND = DaySpend(YESTERDAY, 0, Decimal('0'), [])
 CARDS = [
     ('Amex', 'Gold Card', '1008', Decimal('1204.33')),
@@ -43,9 +35,8 @@ BILLS = MonthBills(paid_count=7, due_count=4, paid_total=Decimal('3520.18'),
 
 
 def _body(cards=CARDS, card_total=Decimal('1816.73'), yesterday=NO_SPEND,
-          spent=Decimal('750'), history=HISTORY, month=MONTH, bills=BILLS):
-    return digest_body(TODAY, spent, month, bills, history, cards, card_total,
-                       yesterday)
+          spent=Decimal('750'), month=MONTH, bills=BILLS):
+    return digest_body(TODAY, spent, month, bills, cards, card_total, yesterday)
 
 
 # ── message building (pure) ───────────────────────────────────────────────────
@@ -116,32 +107,18 @@ def test_digest_body_is_branded_and_carries_opt_out(cards):
     assert body.endswith('\nReply STOP to unsubscribe.')
 
 
-def test_history_line_formats_a_week_in_whole_dollars():
-    assert history_line(date(2026, 7, 5), Decimal('842.47')) == 'Jul 5–11: $842'
-    assert history_line(date(2026, 7, 26), Decimal('1204')) == 'Jul 26 – Aug 1: $1,204'
-
-
-def test_digest_body_lists_the_four_completed_weeks_oldest_first():
+def test_digest_body_has_no_weekly_history():
+    """The four-week history block was removed (2026-11-21)."""
     body = _body()
-    assert 'Last 4 weeks' in body
-    for expected in ('Jul 5–11: $842', 'Jul 12–18: $1,130',
-                     'Jul 19–25: $0', 'Jul 26 – Aug 1: $1,204'):
-        assert expected in body
-    assert body.index('Jul 5–11') < body.index('Jul 12–18') \
-        < body.index('Jul 19–25') < body.index('Jul 26 – Aug 1')
+    assert 'Last 4 weeks' not in body
+    assert 'Jul ' not in body
 
 
-def test_digest_body_orders_budget_history_cards_then_yesterday():
+def test_digest_body_orders_budget_month_cards_then_yesterday():
     body = _body()
-    assert body.index('Week of Aug 2') < body.index('Last 4 weeks') \
+    assert body.index('Week of Aug 2') < body.index('Spent Aug 1–8') \
         < body.index('Credit cards') < body.index('Yesterday — Fri Aug 7') \
         < body.index('Reply STOP')
-
-
-def test_digest_body_history_never_repeats_the_current_week():
-    """The running week is the budget line's job; a partial week in a column of
-    finished ones reads as a drop that is not real."""
-    assert 'Aug 2–8' not in _body()
 
 
 # ── credit cards (pure) ───────────────────────────────────────────────────────
@@ -304,11 +281,10 @@ def test_a_realistic_worst_case_lists_every_capped_purchase():
     """With three cards, the fixed cap alone keeps a busy day under Twilio's
     1600-character limit even with the longest bills block: all 15 purchases
     are listed, nothing is given up to the backstop."""
-    history = [(ws, Decimal('99999')) for ws, _ in HISTORY]
     purchases = [('M' * 60, Decimal('9999.99')) for _ in range(30)]
     body = _body(cards=_worst_cards(3), card_total=Decimal('98765.36'),
                  yesterday=_spend(purchases), spent=Decimal('99999'),
-                 history=history, month=Decimal('99999'), bills=WORST_BILLS)
+                 month=Decimal('99999'), bills=WORST_BILLS)
     assert '+15 more' in body
     assert body.count(': $9,999.99') == PURCHASE_LIST_MAX
     assert len(body) < 1600, len(body)
@@ -316,19 +292,21 @@ def test_a_realistic_worst_case_lists_every_capped_purchase():
 
 def test_a_worst_case_digest_stays_under_twilios_length_limit():
     """Twilio rejects a body over 1600 characters, losing the day's digest.
-    Eight long-named stale cards plus the longest bills block no longer fit
-    beside 15 purchases, so the backstop lists fewer (knowledge 2026-11-21
-    amends 2026-11-08's "the cap alone fits the worst case")."""
-    history = [(ws, Decimal('99999')) for ws, _ in HISTORY]
+    With the four-week history gone, eight long-named stale cards and the
+    longest bills block fit beside all 15 purchases again: the fixed cap alone
+    covers the stated worst case, as knowledge 2026-11-08 had it. Sep 30 makes
+    the longest period labels ("Sep 1–30"); the body lands exactly on the
+    limit, which Twilio accepts."""
+    sep30 = date(2026, 9, 30)
     purchases = [('M' * 60, Decimal('9999.99')) for _ in range(30)]
-    body = _body(cards=_worst_cards(8), card_total=Decimal('98765.36'),
-                 yesterday=_spend(purchases), spent=Decimal('99999'),
-                 history=history, month=Decimal('99999'), bills=WORST_BILLS)
+    yesterday = DaySpend(sep30 - timedelta(days=1), 30,
+                         sum(a for _, a in purchases), purchases)
+    body = digest_body(sep30, Decimal('99999'), Decimal('99999'), WORST_BILLS,
+                       _worst_cards(8), Decimal('98765.36'), yesterday)
     assert len(body) <= 1600, len(body)
-    listed = body.count(': $9,999.99')
-    assert 0 < listed < PURCHASE_LIST_MAX
-    assert f'+{30 - listed} more' in body
-    assert 'Bills this month: ~$199,998' in body
+    assert body.count(': $9,999.99') == PURCHASE_LIST_MAX
+    assert '+15 more' in body
+    assert 'Bills total Sep 1–30: ~$199,998' in body
 
 
 def test_many_long_named_cards_shorten_the_purchase_list_to_fit():
@@ -643,27 +621,23 @@ def _seed_txn(inst_id, txn_date, amount, category='FOOD_AND_DRINK'):
     db.session.commit()
 
 
-def test_digest_history_is_built_from_real_transactions(app):
-    """End to end: prior weeks bucket into the history, the current week does not."""
+def test_the_digest_no_longer_reports_prior_weeks(app):
+    """End to end: a purchase in a completed week is in no line of the text
+    (the history block is gone) — only the current week's budget line."""
     with app.app_context():
         inst_id = _seed_inst('750.00')            # current week (Aug 2–8)
         _seed_txn(inst_id, date(2026, 7, 7), '842.00')    # Jul 5–11
-        _seed_txn(inst_id, date(2026, 7, 30), '1204.00')  # Jul 26 – Aug 1
-        _seed_txn(inst_id, date(2026, 6, 30), '999.00')   # before the window
         sender = FakeSender()
         send_daily_digest(db.session, TODAY,
                           {'BUDGET_ALERT_RECIPIENTS': '+1111'}, sender=sender)
 
         body = sender.sent[0][1]
-        assert 'Jul 5–11: $842' in body
-        assert 'Jul 12–18: $0' in body
-        assert 'Jul 26 – Aug 1: $1,204' in body
-        assert '$999' not in body                 # outside the four-week window
-        assert 'Budget: $750 of $1,000' in body   # current week still its own line
+        assert '$842' not in body
+        assert 'Budget: $750 of $1,000' in body
 
 
 def test_digest_spend_totals_still_cost_one_transaction_query(app):
-    """Budget line, month total, history and Yesterday come out of a single
+    """Budget line, month total and Yesterday come out of a single
     fetch, not one per aggregate. (The bill outlook reads transactions too —
     the same read /recurring makes — which is why this calls _spend_totals
     itself rather than counting the whole send.)"""
@@ -931,7 +905,7 @@ def test_manual_send_carries_the_same_cards_and_yesterday(app):
 
 def test_yesterday_on_a_sunday_reaches_back_into_last_week(app):
     """Sunday's yesterday is the Saturday before this week starts — still inside
-    the one fetch, which reaches back four whole weeks."""
+    the one fetch, whose floor includes yesterday."""
     with app.app_context():
         inst_id = _seed_inst(None)
         _seed_txn(inst_id, TODAY, '123.45')       # Sat Aug 8
@@ -992,12 +966,12 @@ def test_a_purchase_is_reported_once_across_its_pending_and_posted_rows(app):
 
 def test_month_lines_split_spending_into_bills_and_other():
     assert month_lines(TODAY, MONTH, BILLS) == [
-        'August so far: $4,013',
+        'Spent Aug 1–8: $4,013',
         'Bills $3,520 · Other $493',
         '',
-        'Bills: 7 of 11 paid',
-        'Still due: ~$1,180 (4 bills)',
-        'Bills this month: ~$4,700',
+        'Bills Aug 1–31: 7 of 11 paid',
+        'Still due by Aug 31: ~$1,180 (4 bills)',
+        'Bills total Aug 1–31: ~$4,700',
     ]
 
 
@@ -1006,8 +980,8 @@ def test_month_lines_add_up_by_eye_after_rounding():
     and $100.50 of other print as $101 + $101 = $202, never $100 + $100 = $201."""
     bills = MonthBills(1, 1, Decimal('100.50'), Decimal('0'), Decimal('49.50'))
     lines = month_lines(TODAY, Decimal('100.50'), bills)
-    assert lines[:2] == ['August so far: $202', 'Bills $101 · Other $101']
-    assert lines[-1] == 'Bills this month: ~$151'
+    assert lines[:2] == ['Spent Aug 1–8: $202', 'Bills $101 · Other $101']
+    assert lines[-1] == 'Bills total Aug 1–31: ~$151'
 
 
 def test_month_lines_never_print_negative_other():
@@ -1015,38 +989,55 @@ def test_month_lines_never_print_negative_other():
     in the bills but not yet in the purchases."""
     bills = MonthBills(1, 0, Decimal('40'), Decimal('40'), Decimal('0'))
     assert month_lines(TODAY, Decimal('0'), bills)[:2] == [
-        'August so far: $40', 'Bills $40 · Other $0']
+        'Spent Aug 1–8: $40', 'Bills $40 · Other $0']
 
 
 def test_month_lines_with_no_bills_this_month():
     bills = MonthBills(0, 0, Decimal('0'), Decimal('0'), Decimal('0'))
     assert month_lines(TODAY, Decimal('412'), bills) == [
-        'August so far: $412',
+        'Spent Aug 1–8: $412',
         'Bills $0 · Other $412',
         '',
-        'Bills: none detected this month',
+        'Bills Aug 1–31: none detected',
     ]
 
 
 def test_month_lines_with_every_bill_paid_and_one_due():
     paid = MonthBills(5, 0, Decimal('3000'), Decimal('0'), Decimal('0'))
     assert month_lines(TODAY, MONTH, paid)[-2:] == [
-        'Still due: none', 'Bills this month: ~$3,000']
+        'Still due by Aug 31: none', 'Bills total Aug 1–31: ~$3,000']
     one = MonthBills(4, 1, Decimal('3000'), Decimal('0'), Decimal('60'))
-    assert month_lines(TODAY, MONTH, one)[-2] == 'Still due: ~$60 (1 bill)'
+    assert month_lines(TODAY, MONTH, one)[-2] == 'Still due by Aug 31: ~$60 (1 bill)'
 
 
 def test_month_lines_without_bill_figures_label_the_purchases_total():
     """The fallback total leaves out bills that are not purchases, so it must
     not sit under the bills-inclusive label."""
     assert month_lines(TODAY, MONTH, None) == [
-        'August purchases so far: $1,473', '', 'Bills: unavailable today']
+        'Purchases Aug 1–8: $1,473', '', 'Bills: unavailable today']
 
 
-def test_digest_body_puts_the_month_block_after_the_week_and_before_history():
+def test_digest_body_puts_the_month_block_after_the_week_and_before_cards():
     body = _body()
-    assert body.index('Week of Aug 2') < body.index('August so far') \
-        < body.index('Bills this month') < body.index('Last 4 weeks')
+    assert body.index('Week of Aug 2') < body.index('Spent Aug 1–8') \
+        < body.index('Bills total Aug 1–31') < body.index('Credit cards')
+
+
+def test_a_one_day_period_prints_a_single_date():
+    """On the 1st the spend so far covers one day."""
+    lines = month_lines(date(2026, 8, 1), Decimal('0'),
+                        MonthBills(0, 3, Decimal('0'), Decimal('0'), Decimal('900')))
+    assert lines[0] == 'Spent Aug 1: $0'
+    assert lines[3:] == ['Bills Aug 1–31: 0 of 3 paid',
+                         'Still due by Aug 31: ~$900 (3 bills)',
+                         'Bills total Aug 1–31: ~$900']
+
+
+def test_periods_follow_the_months_length():
+    lines = month_lines(date(2028, 2, 10), Decimal('5'),
+                        MonthBills(1, 0, Decimal('5'), Decimal('5'), Decimal('0')))
+    assert lines[0] == 'Spent Feb 1–10: $5'
+    assert lines[-2:] == ['Still due by Feb 29: none', 'Bills total Feb 1–29: ~$5']
 
 
 def _add_txn(inst_id, day, amount, description, category=None, merchant=None,
@@ -1081,9 +1072,9 @@ def test_the_digest_splits_this_months_spending_into_bills_and_other(app):
         send_daily_digest(db.session, TODAY, {'BUDGET_ALERT_RECIPIENTS': '+1111'},
                           sender=sender)
         body = sender.sent[0][1]
-        assert 'August so far: $2,170\nBills $2,120 · Other $50' in body
-        assert 'Bills: 2 of 2 paid\nStill due: none\nBills this month: ~$2,120' \
-            in body
+        assert 'Spent Aug 1–8: $2,170\nBills $2,120 · Other $50' in body
+        assert ('Bills Aug 1–31: 2 of 2 paid\nStill due by Aug 31: none\n'
+                'Bills total Aug 1–31: ~$2,120') in body
         assert DailyDigest.query.count() == 1
 
 
@@ -1107,17 +1098,16 @@ def test_a_bill_detection_failure_never_costs_the_digest(app, monkeypatch, error
         send_daily_digest(db.session, TODAY, {'BUDGET_ALERT_RECIPIENTS': '+1111'},
                           sender=sender)
         body = sender.sent[0][1]
-        assert 'August purchases so far: $170\n\nBills: unavailable today' in body
+        assert 'Purchases Aug 1–8: $170\n\nBills: unavailable today' in body
         assert 'Credit cards' in body and 'Yesterday — Fri Aug 7' in body
         # The rollback left the session usable for the DailyDigest write.
         assert rollbacks
         assert DailyDigest.query.count() == 1
 
 
-def test_the_month_total_reaches_back_past_the_history_window(app):
-    """On Sunday Aug 30 the four completed weeks start Aug 2, but the month
-    started Aug 1: a purchase that day is in the month total and in no
-    history week."""
+def test_the_fetch_reaches_back_to_the_first_of_the_month(app):
+    """On Sunday Aug 30 this week starts Aug 30, but the month started Aug 1:
+    a purchase on Aug 1 is in the month total, last month's is not."""
     from app.notifications import _spend_totals
     sunday = date(2026, 8, 30)
     with app.app_context():
@@ -1126,7 +1116,22 @@ def test_the_month_total_reaches_back_past_the_history_window(app):
         _add_txn(inst, date(2026, 7, 31), '999.00', 'LAST MONTH',
                  category='FOOD_AND_DRINK')
         db.session.commit()
-        spent, month, history, _yesterday = _spend_totals(db.session, sunday)
+        spent, month, _yesterday = _spend_totals(db.session, sunday)
         assert month == Decimal('75.00')
-        assert [ws for ws, _ in history][0] == date(2026, 8, 2)
-        assert sum(total for _, total in history) == 0
+        assert spent == 0
+
+
+def test_on_a_sunday_yesterdays_purchases_are_still_fetched(app):
+    """Sunday Nov 1: the week and the month both start today, yet Saturday's
+    purchase — dated Saturday or posted Sunday — is still in Yesterday."""
+    from app.notifications import _spend_totals
+    sunday = date(2026, 11, 1)
+    with app.app_context():
+        inst = _seed_inst()
+        _add_txn(inst, date(2026, 10, 31), '42.00', 'SATURDAY SHOP',
+                 category='FOOD_AND_DRINK', merchant='Saturday Shop')
+        db.session.commit()
+        spent, month, yesterday = _spend_totals(db.session, sunday)
+        assert yesterday.day == date(2026, 10, 31)
+        assert yesterday.purchases == [('Saturday Shop', Decimal('42.00'))]
+        assert (spent, month) == (0, 0)
